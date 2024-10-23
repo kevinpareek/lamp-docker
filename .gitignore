@@ -2,3 +2,13 @@
 /test
 /.vscode
 *.DS_Store
+
+/config/ssl/*
+/config/vhosts/*
+!/config/ssl/cert.pem
+!/config/ssl/cert-key.pem
+!/config/vhosts/default.conf
+
+/data/backup/*
+/data/mysql/*
+/logs/*
