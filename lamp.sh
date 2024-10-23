@@ -10,26 +10,10 @@ if [ -f "$HOME/.zshrc" ] && ! grep -q "lamp()" "$HOME/.zshrc"; then
     echo "
 # docker compose lamp
 lamp() {
-  sh \"$lampFile\" \$1 \$2 \$3
+  bash \"$lampFile\" \$1 \$2 \$3
 }" >>"$HOME/.zshrc"
     echo "Function 'lamp' added to .zshrc"
 fi
-
-############################## functions
-
-generate_ssl_certificates() {
-    domain=$1
-    vhost_file=$2
-
-    # Generate SSL certificates for the domain
-    mkcert -key-file "$lampPath/config/ssl/$domain-key.pem" -cert-file "$lampPath/config/ssl/$domain-cert.pem" $domain "*.$domain"
-
-    # Update the vhost configuration file with the correct SSL certificate paths
-    sed -i "" "s|SSLCertificateFile /etc/apache2/ssl/cert.pem|SSLCertificateFile /etc/apache2/ssl/$domain-cert.pem|" $vhost_file
-    sed -i "" "s|SSLCertificateKeyFile /etc/apache2/ssl/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl/$domain-key.pem|" $vhost_file
-
-    echo "SSL certificates generated for https://$domain"
-}
 
 red_message() {
     local RED='\033[0;31m'
@@ -171,10 +155,19 @@ is_array() {
     fi
 }
 
+generate_ssl_certificates() {
+    domain=$1
+    vhost_file=$2
 
-############################## functions end
+    # Generate SSL certificates for the domain
+    mkcert -key-file "$lampPath/config/ssl/$domain-key.pem" -cert-file "$lampPath/config/ssl/$domain-cert.pem" $domain "*.$domain"
 
+    # Update the vhost configuration file with the correct SSL certificate paths
+    sed -i "" "s|SSLCertificateFile /etc/apache2/ssl/cert.pem|SSLCertificateFile /etc/apache2/ssl/$domain-cert.pem|" $vhost_file
+    sed -i "" "s|SSLCertificateKeyFile /etc/apache2/ssl/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl/$domain-key.pem|" $vhost_file
 
+    echo "SSL certificates generated for https://$domain"
+}
 
 lamp() {
     # Check if Docker is installed
