@@ -5,16 +5,6 @@ lampFile=$(readlink -f "$0")
 lampPath=$(dirname "$lampFile")
 # echo $lampPath;
 
-# Check if 'lamp' function already exists in .zshrc
-if [ -f "$HOME/.zshrc" ] && ! grep -q "lamp()" "$HOME/.zshrc"; then
-    echo "
-# docker compose lamp
-lamp() {
-  bash \"$lampFile\" \$1 \$2 \$3
-}" >>"$HOME/.zshrc"
-    echo "Function 'lamp' added to .zshrc"
-fi
-
 red_message() {
     local RED='\033[0;31m'
     local NC='\033[0m' # No Color
@@ -166,15 +156,206 @@ generate_ssl_certificates() {
     sed -i "" "s|SSLCertificateFile /etc/apache2/ssl/cert.pem|SSLCertificateFile /etc/apache2/ssl/$domain-cert.pem|" $vhost_file
     sed -i "" "s|SSLCertificateKeyFile /etc/apache2/ssl/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl/$domain-key.pem|" $vhost_file
 
-    echo "SSL certificates generated for https://$domain"
+    info_message "SSL certificates generated for https://$domain"
+}
+
+open_browser() {
+    local domain=$1
+    local os_name=$(uname -s)
+
+    # Open the domain in the default web browser
+    info_message "Opening $domain in the default web browser..."
+
+    case "$os_name" in
+        Darwin)
+            open "$domain"
+            ;;
+        Linux)
+            xdg-open "$domain"
+            ;;
+        CYGWIN* | MINGW32* | MSYS* | MINGW*)
+            start "$domain"
+            ;;
+        *)
+            error_message "Unsupported OS: $os_name. Please open $domain manually."
+            ;;
+    esac
+}
+
+lamp_config() {
+    # Set required configuration keys
+    reqConfig=("DOCUMENT_ROOT" "COMPOSE_PROJECT_NAME" "PHPVERSION" "DATABASE")
+
+    # Detect if Apple Silicon
+    isAppleSilicon=false
+    if [[ $(uname -m) == 'arm64' ]]; then
+        isAppleSilicon=true
+    fi
+
+    # Function to dynamically fetch PHP versions and databases from ./bin
+    fetch_dynamic_versions() {
+        local bin_dir="$lampPath/bin"
+        phpVersions=()
+        databaseList=()
+
+        for entry in "$bin_dir"/*; do
+            entry_name=$(basename "$entry")
+            if ([[ -d "$entry" ]] && [[ "$entry_name" == php* ]]); then
+                phpVersions+=("$entry_name")
+            elif [[ -d "$entry" ]]; then
+                databaseList+=("$entry_name")
+            fi
+        done
+    }
+
+    # Function to read environment variables from a file (either .env or sample.env)
+    read_env_file() {
+        local env_file=$1
+        while IFS='=' read -r key value; do
+            if [[ ! -z $key && ! $key =~ ^# ]]; then
+                eval "$key='$value'"
+            fi
+        done <"$env_file"
+    }
+
+    # Function to prompt user to input a valid PHP version
+    choose_php_version() {
+        value_message "Available PHP versions:" "${phpVersions[*]}"
+
+        while true; do
+            read -p "Enter PHP version (Default: $PHPVERSION): " php_choice
+            php_choice=${php_choice:-$PHPVERSION}
+
+            if [[ " ${phpVersions[*]} " == *" $php_choice "* ]]; then
+                PHPVERSION=$php_choice
+                break
+            else
+                error_message "Invalid PHP version. Please enter a valid PHP version from the list."
+            fi
+        done
+    }
+
+    # Function to prompt user to input a valid database
+    choose_database() {
+        if $isAppleSilicon; then
+            yellow_message "Apple Silicon detected. Only MariaDB options are available."
+            databaseOptions=("${databaseList[@]:2}") # Only MariaDB options
+        else
+            # For PHP versions <= 7.4, MySQL 8 is excluded
+            if [[ "$PHPVERSION" =~ php5[4-6] || "$PHPVERSION" == "php71" || "$PHPVERSION" == "php72" || "$PHPVERSION" == "php73" || "$PHPVERSION" == "php74" ]]; then
+                yellow_message "Available databases (MySQL 8 is not supported for PHP versions <= 7.4):"
+                databaseOptions=("${databaseList[@]:0:5}") # MySQL 5.7 and MariaDB options
+            else
+                blue_message "Available databases:"
+                databaseOptions=("${databaseList[@]}")
+            fi
+        fi
+
+        green_message "${databaseOptions[*]}"
+
+        while true; do
+            read -p "Enter Database (Default: $DATABASE): " db_choice
+            db_choice=${db_choice:-$DATABASE}
+
+            if [[ " ${databaseOptions[*]} " == *" $db_choice "* ]]; then
+                DATABASE=$db_choice
+                break
+            else
+                error_message "Invalid Database. Please enter a valid database from the list."
+            fi
+        done
+    }
+
+    # Function to update or create the .env file
+    update_env_file() {
+        info_message "Updating the .env file..."
+
+        for key in "${reqConfig[@]}"; do
+            default_value=$(eval echo \$$key)
+
+            # Handle PHPVERSION and DATABASE separately for prompts
+            if [[ "$key" == "PHPVERSION" ]]; then
+                choose_php_version
+            elif [[ "$key" == "DATABASE" ]]; then
+                choose_database
+            else
+                read -p "$key (Default: $default_value): " new_value
+                if [[ ! -z $new_value ]]; then
+                    eval "$key=$new_value"
+                fi
+            fi
+
+            # Update the .env file
+            sed -i "" "s|^$key=.*|$key=${!key}|" .env 2>/dev/null || echo "$key=${!key}" >>.env
+        done
+
+        green_message ".env file updated!"
+    }
+
+    # Main logic
+    if [ -f .env ]; then
+        info_message "Reading config from .env..."
+        read_env_file ".env"
+    elif [ -f sample.env ]; then
+        yellow_message "No .env file found, using sample.env..."
+        cp sample.env .env
+        read_env_file "sample.env"
+    else
+        error_message "No .env or sample.env file found."
+        exit 1
+    fi
+
+    # Fetch dynamic PHP versions and database list from ./bin directory
+    fetch_dynamic_versions
+
+    # Display current configuration and prompt for updates
+    update_env_file
+}
+
+lamp_start() {
+    # Check if Docker daemon is running
+    if ! docker info >/dev/null 2>&1; then
+        yellow_message "Docker daemon is not running. Starting Docker daemon..."
+
+        # Check the OS and start Docker accordingly
+        case "$(uname -s)" in
+        Darwin)
+            open -a Docker
+            ;;
+        Linux)
+            sudo systemctl start docker
+            ;;
+        CYGWIN* | MINGW32* | MSYS* | MINGW*)
+            start "" "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+            ;;
+        *)
+            error_message "Unsupported OS. Please start Docker manually."
+            exit 1
+            ;;
+        esac
+
+        # Wait for Docker to start
+        while ! docker info >/dev/null 2>&1; do
+            yellow_message "Waiting for Docker to start..."
+            sleep 2
+        done
+        info_message "Docker is running."
+
+    fi
+
+    # Start the containers in detached mode
+    if ! docker-compose up -d; then
+        error_message "Failed to start the LAMP stack."
+        exit 1
+    fi
+
+    # for cutom .env file
+    # docker-compose --env-file <env_file_path> up -d --build
+
+    green_message "LAMP stack is running"
 }
 
 lamp() {
-    # Check if Docker is installed
-    if ! command -v docker &>/dev/null; then
-        error_message "Docker is not installed. Please install Docker Desktop."
-        return 1
-    fi
 
     # go to lamp path
     cd "$lampPath"
@@ -184,31 +365,22 @@ lamp() {
         # Load all variables while excluding comments
         export $(grep -v '^#' .env | xargs)
     elif [[ $1 != "config" ]]; then
-        error_message ".env file not found. RUN '$ lamp config'"
-        return 1
+        # error_message ".env file not found. RUN '$ lamp config'"
+        # return 1
+        info_message ".env file not found. running.'$ lamp config'"
+        lamp_config
+    fi
+
+    # Check LAMP stack status
+    if ! docker-compose ps | grep -q "webserver"; then
+        yellow_message "LAMP stack is not running. Starting LAMP stack..."
+        lamp_start
     fi
 
     # Start the LAMP stack using Docker
     if [[ $1 == "start" ]]; then
-        # Check if Docker Desktop is running
-        if ! pgrep -x "Docker" >/dev/null; then
-            yellow_message "Docker Desktop is not running. Starting Docker Desktop..."
-            open -a Docker
-            # Wait for Docker to start
-            while ! docker info >/dev/null 2>&1; do
-                yellow_message "Waiting for Docker to start..."
-                sleep 2
-            done
-            info_message "Docker Desktop is running."
-        fi
-
-        # Start the containers in detached mode
-        docker-compose up -d
-
-        # for cutom .env file
-        # docker-compose --env-file <env_file_path> up -d --build
-
-        green_message "LAMP stack is running"
+        # Open the domain in the default web browser
+        open_browser "http://localhost"
 
     # Stop the LAMP stack
     elif [[ $1 == "stop" ]]; then
@@ -216,7 +388,21 @@ lamp() {
         green_message "LAMP stack is stopped"
 
         # Optional: Close Docker Desktop on stop (uncomment if needed)
-        # osascript -e 'quit app "Docker"'
+        # case "$(uname -s)" in
+        # Darwin)
+        #     osascript -e 'quit app "Docker"'
+        #     ;;
+        # Linux)
+        #     sudo systemctl stop docker
+        #     ;;
+        # CYGWIN* | MINGW32* | MSYS* | MINGW*)
+        #     taskkill //IM "Docker Desktop.exe" //F
+        #     ;;
+        # *)
+        #     yellow_message "Unsupported OS. Please close Docker manually."
+        #     ;;
+        # esac
+        # green_message "Docker is stopped"
 
     # Open a bash shell inside the webserver container
     elif [[ $1 == "cmd" ]]; then
@@ -325,7 +511,12 @@ EOL
 
         # Create an index.php file in the app's document root
         index_file="${app_root}/index.php"
-        green_message "<?php echo 'domain $domain is ready to use'; ?>" >$index_file
+        indexHtml="$lampPath/data/pages/site-created.html"
+        sed -e "s|exmple.com|$domain|g" \
+            -e "s|index.html|index.php|g" \
+            -e "s|/var/www/html|$app_root|g" \
+            -e "s|lamp code|lamp code $app_name|g" \
+            $indexHtml > $index_file
         info_message "index.php created at $index_file"
 
         # Enable the new virtual host and reload Apache
@@ -334,12 +525,11 @@ EOL
             # docker-compose exec webserver bash -c "cd /etc/apache2/sites-enabled && a2ensite $domain.conf && service apache2 reload"
             docker-compose exec webserver bash -c "service apache2 reload"
 
-            echo "Virtual host $domain activated and Apache reloaded."
+            green_message "Virtual host $domain activated and Apache reloaded."
         fi
 
         # Open the domain in the default web browser
-        info_message "Opening $domainUrl in the default web browser..."
-        open "$domainUrl"
+        open_browser "$domainUrl"
 
         green_message "App setup complete: $app_name with domain $domain"
 
@@ -383,133 +573,7 @@ EOL
         fi
     elif [[ $1 == "config" ]]; then
 
-        # Set required configuration keys
-        reqConfig=("DOCUMENT_ROOT" "COMPOSE_PROJECT_NAME" "PHPVERSION" "DATABASE")
-
-        # Detect if Apple Silicon
-        isAppleSilicon=false
-        if [[ $(uname -m) == 'arm64' ]]; then
-            isAppleSilicon=true
-        fi
-
-        # Function to dynamically fetch PHP versions and databases from ./bin
-        fetch_dynamic_versions() {
-            local bin_dir="./bin"
-            phpVersions=()
-            databaseList=()
-
-            for entry in "$bin_dir"/*; do
-                entry_name=$(basename "$entry")
-                if ([[ -d "$entry" ]] && [[ "$entry_name" == php* ]]); then
-                    phpVersions+=("$entry_name")
-                elif [[ -d "$entry" ]]; then
-                    databaseList+=("$entry_name")
-                fi
-            done
-        }
-
-        # Function to read environment variables from a file (either .env or sample.env)
-        read_env_file() {
-            local env_file=$1
-            while IFS='=' read -r key value; do
-                if [[ ! -z $key && ! $key =~ ^# ]]; then
-                    eval "$key='$value'"
-                fi
-            done <"$env_file"
-        }
-
-        # Function to prompt user to input a valid PHP version
-        choose_php_version() {
-            value_message "Available PHP versions:" "${phpVersions[*]}"
-
-            while true; do
-                read -p "Enter PHP version (Default: $PHPVERSION): " php_choice
-                php_choice=${php_choice:-$PHPVERSION}
-
-                if [[ " ${phpVersions[*]} " == *" $php_choice "* ]]; then
-                    PHPVERSION=$php_choice
-                    break
-                else
-                    error_message "Invalid PHP version. Please enter a valid PHP version from the list."
-                fi
-            done
-        }
-
-        # Function to prompt user to input a valid database
-        choose_database() {
-            if $isAppleSilicon; then
-                yellow_message "Apple Silicon detected. Only MariaDB options are available."
-                databaseOptions=("${databaseList[@]:2}") # Only MariaDB options
-            else
-                # For PHP versions <= 7.4, MySQL 8 is excluded
-                if [[ "$PHPVERSION" =~ php5[4-6] || "$PHPVERSION" == "php71" || "$PHPVERSION" == "php72" || "$PHPVERSION" == "php73" || "$PHPVERSION" == "php74" ]]; then
-                    yellow_message "Available databases (MySQL 8 is not supported for PHP versions <= 7.4):"
-                    databaseOptions=("${databaseList[@]:0:5}") # MySQL 5.7 and MariaDB options
-                else
-                    blue_message "Available databases:"
-                    databaseOptions=("${databaseList[@]}")
-                fi
-            fi
-
-            green_message "${databaseOptions[*]}"
-
-            while true; do
-                read -p "Enter Database (Default: $DATABASE): " db_choice
-                db_choice=${db_choice:-$DATABASE}
-
-                if [[ " ${databaseOptions[*]} " == *" $db_choice "* ]]; then
-                    DATABASE=$db_choice
-                    break
-                else
-                    error_message "Invalid Database. Please enter a valid database from the list."
-                fi
-            done
-        }
-
-        # Function to update or create the .env file
-        update_env_file() {
-            info_message "Updating the .env file..."
-
-            for key in "${reqConfig[@]}"; do
-                default_value=$(eval echo \$$key)
-
-                # Handle PHPVERSION and DATABASE separately for prompts
-                if [[ "$key" == "PHPVERSION" ]]; then
-                    choose_php_version
-                elif [[ "$key" == "DATABASE" ]]; then
-                    choose_database
-                else
-                    read -p "$key (Default: $default_value): " new_value
-                    if [[ ! -z $new_value ]]; then
-                        eval "$key=$new_value"
-                    fi
-                fi
-
-                # Update the .env file
-                sed -i "" "s|^$key=.*|$key=${!key}|" .env 2>/dev/null || echo "$key=${!key}" >>.env
-            done
-
-            green_message ".env file updated!"
-        }
-
-        # Main logic
-        if [ -f .env ]; then
-            info_message "Reading config from .env..."
-            read_env_file ".env"
-        elif [ -f sample.env ]; then
-            yellow_message "No .env file found, using sample.env..."
-            cp sample.env .env
-            read_env_file "sample.env"
-        else
-            error_message "No .env or sample.env file found."
-            exit 1
-        fi
-
-        # Fetch dynamic PHP versions and database list from ./bin directory
-        fetch_dynamic_versions
-
-        # Display current configuration and prompt for updates
-        update_env_file
+        lamp_config
 
     # Backup the LAMP stack
     elif [[ $1 == "backup" ]]; then
@@ -585,8 +649,27 @@ EOL
         generate_ssl_certificates $domain $vhost_file
 
     else
-        echo "Usage: lamp {start|stop|restart|cmd|addapp|code|config|backup|restore|ssl}"
+        error_message "Usage: lamp {start|stop|restart|cmd|addapp|code|config|backup|restore|ssl}"
     fi
 }
+
+# Check if required commands are available
+required_commands=("docker" "docker-compose" "sed" "curl" "awk" "dd" "tee" "unzip")
+for cmd in "${required_commands[@]}"; do
+    if ! command_exists "$cmd"; then
+        error_message "Required command '$cmd' is not installed."
+        exit 1
+    fi
+done
+
+# Check if 'lamp' function already exists in .zshrc
+if [ -f "$HOME/.zshrc" ] && ! grep -q "lamp()" "$HOME/.zshrc"; then
+    echo "
+# docker compose lamp
+lamp() {
+  bash \"$lampFile\" \$1 \$2 \$3
+}" >>"$HOME/.zshrc"
+    info_message "Function 'lamp' added to .zshrc"
+fi
 
 lamp "$1" "$2" "$3"
