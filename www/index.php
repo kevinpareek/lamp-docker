@@ -79,6 +79,10 @@ function getSubDir($currDir = null)
                                 mysqli_close($link);
                                 ?>
                             </li>
+                            <li><a href="/phpinfo.php">PHP Info</a></li>
+                            <li><a href="/phpinfo-modules.php">PHP Module</a></li>
+                            <li><a href="/php-i.php">PHP extentions</a></li>
+                            <li><a href="/server.php">Server Param</a></li>
                         </ul>
                     </div>
                 </div>
@@ -88,10 +92,12 @@ function getSubDir($currDir = null)
                     <div class="content">
                         <ul>
                             <li><a target="_blank" href="http://localhost:<? print $_ENV['PMA_PORT']; ?>">phpMyAdmin</a></li>
-                            <li><a href="/phpinfo.php">phpinfo()</a></li>
+                            
                             <li><a href="/test_db.php">Test DB Connection with mysqli</a></li>
                             <li><a href="/test_db_pdo.php">Test DB Connection with PDO</a></li>
-                            <li><a href="/server.php">Check Server Param</a></li>
+                            
+                            <li><a href="#">Check 404 Error</a></li>
+                            <li><a href="#">Check Error</a></li>
                         </ul>
                     </div>
                 </div>

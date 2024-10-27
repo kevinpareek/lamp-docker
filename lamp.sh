@@ -372,7 +372,7 @@ lamp() {
     fi
 
     # Check LAMP stack status
-    if ! docker-compose ps | grep -q "webserver"; then
+    if [[ $1 != "stop" && ! $(docker-compose ps -q webserver) ]]; then
         yellow_message "LAMP stack is not running. Starting LAMP stack..."
         lamp_start
     fi
@@ -412,6 +412,13 @@ lamp() {
     elif [[ $1 == "restart" ]]; then
         docker-compose down && docker-compose up -d
         green_message "LAMP stack restarted."
+
+    # Rebuild & Start
+    elif [[ $1 == "build" ]]; then
+        docker-compose down
+        # docker-compose build
+        docker-compose up -d --build
+        green_message "LAMP stack rebuilt and running."
 
     # Add a new application and create a corresponding virtual host
     elif [[ $1 == "addapp" ]]; then
@@ -649,7 +656,7 @@ EOL
         generate_ssl_certificates $domain $vhost_file
 
     else
-        error_message "Usage: lamp {start|stop|restart|cmd|addapp|code|config|backup|restore|ssl}"
+        error_message "Usage: lamp {start|stop|restart|build|cmd|addapp|code|config|backup|restore|ssl}"
     fi
 }
 
