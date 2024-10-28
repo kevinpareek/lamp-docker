@@ -1,34 +1,59 @@
 <?php
 
+$LOCAL_DOCUMENT_ROOT = '';
+$vhost_dir = '/etc/apache2/sites-enabled';
+$domainData = [];
+
+function extractDomainData($file)
+{
+    $content = file_get_contents($file);
+    $domain = extractPattern($content, '/ServerName\s+(\S+)/');
+    $path = extractPattern($content, '/DocumentRoot\s+(\S+)/');
+
+    return $domain && $path ? ['domain' => $domain, 'path' => $path] : null;
+}
+
+function extractPattern($content, $pattern)
+{
+    return preg_match($pattern, $content, $matches) ? $matches[1] : '';
+}
+
+function getDomainData($vhost_dir)
+{
+    $domainData = [];
+    if (is_dir($vhost_dir)) {
+        $confFiles = glob($vhost_dir . '/*.conf');
+        foreach ($confFiles as $file) {
+            if ($file != '/etc/apache2/sites-enabled/default.conf') {
+                $data = extractDomainData($file);
+                if ($data) {
+                    $domainData[] = $data;
+                }
+            }
+        }
+    }
+    return $domainData;
+}
+
+$domainData = getDomainData($vhost_dir);
+
+define('DOMAIN_APP_DIR', !empty($domainData[0]) ? explode("/", $domainData[0]['path'])[4] : 'applications');
 
 function getSubDir($currDir = null)
 {
-    $dir = $currDir === null ? __DIR__ : $currDir;
-    $fname = [];
+    $dir = $currDir ?? __DIR__;
+    $exclude_dir = DOMAIN_APP_DIR;
+
     if (is_dir($dir)) {
         $filesAndDirs = scandir($dir);
-        // Filter to get only subdirectories
-        $subDirs = array_filter($filesAndDirs, function ($item) use ($dir) {
-            return is_dir($dir . DIRECTORY_SEPARATOR . $item) && $item != '.' && $item != '..';
-        });
+        $subDirs = array_filter($filesAndDirs, fn($item) => is_dir($dir . DIRECTORY_SEPARATOR . $item) && $item != '.' && $item != '..');
 
-        // Print subdirectories
-        $sDir = [];
-        foreach ($subDirs as $subDir) {
-            if ($subDir != "assets") {
-                $sDir[] = $subDir;
-            }
-        }
-
-        return $sDir;
+        return array_filter($subDirs, fn($subDir) => $subDir != "assets" && $subDir != $exclude_dir);
     }
+    return [];
 }
 
 ?>
-
-
-
-
 
 <!DOCTYPE html>
 <html lang="en">
@@ -68,20 +93,17 @@ function getSubDir($currDir = null)
                                 <?php
                                 $link = mysqli_connect("database", "root", $_ENV['MYSQL_ROOT_PASSWORD'], null);
 
-                                /* check connection */
                                 if (mysqli_connect_errno()) {
-                                    printf("MySQL connecttion failed: %s", mysqli_connect_error());
+                                    printf("MySQL connection failed: %s", mysqli_connect_error());
                                 } else {
-                                    /* print server version */
                                     printf("MySQL Server %s", mysqli_get_server_info($link));
                                 }
-                                /* close connection */
                                 mysqli_close($link);
                                 ?>
                             </li>
                             <li><a href="/phpinfo.php">PHP Info</a></li>
                             <li><a href="/phpinfo-modules.php">PHP Module</a></li>
-                            <li><a href="/php-i.php">PHP extentions</a></li>
+                            <li><a href="/php-ext.php">PHP extensions</a></li>
                             <li><a href="/server.php">Server Param</a></li>
                         </ul>
                     </div>
@@ -91,11 +113,9 @@ function getSubDir($currDir = null)
                     <hr>
                     <div class="content">
                         <ul>
-                            <li><a target="_blank" href="http://localhost:<? print $_ENV['PMA_PORT']; ?>">phpMyAdmin</a></li>
-                            
+                            <li><a target="_blank" href="http://localhost:<?= $_ENV['PMA_PORT']; ?>">phpMyAdmin</a></li>
                             <li><a href="/test_db.php">Test DB Connection with mysqli</a></li>
                             <li><a href="/test_db_pdo.php">Test DB Connection with PDO</a></li>
-                            
                             <li><a href="#">Check 404 Error</a></li>
                             <li><a href="#">Check Error</a></li>
                         </ul>
@@ -105,20 +125,33 @@ function getSubDir($currDir = null)
         </div>
     </section>
 
-
-
-
-
-
-
     <section class="section">
         <div class="container">
             <div class="columns">
                 <?php
+                if (!empty($domainData)) {
+                    echo '<div class="column">
+    <h3 class="title is-3 has-text-centered">' . ucfirst(DOMAIN_APP_DIR) . '</h3>
+    <hr>
+    <div class="content">
+        <ul>';
+
+                    foreach ($domainData as $dd) {
+                        echo '
+                        <li>
+                            <a target="_blank" href="https://' . $dd['domain'] . '">' . str_replace($_ENV['APACHE_DOCUMENT_ROOT'] . '/' . DOMAIN_APP_DIR . '/', '', $dd['path']) . '</a>
+                            <br> -<code>' . $dd['path'] . '</code>
+                            <br> -<code>' . str_replace($_ENV['APACHE_DOCUMENT_ROOT'], $LOCAL_DOCUMENT_ROOT, $dd['path']) . '</code>
+                         </li>';
+                    }
+                    echo    '</ul>
+    </div>
+</div>';
+                }
+
                 $sDirList = getSubDir();
                 if (!empty($sDirList)) {
                     foreach ($sDirList as $sDirName) {
-
                         echo '<div class="column">
                     <h3 class="title is-3 has-text-centered">' . ucfirst($sDirName) . '</h3>
                     <hr>
@@ -128,7 +161,7 @@ function getSubDir($currDir = null)
                         $ssDirList = getSubDir(__DIR__ . '/' . $sDirName);
                         if (!empty($ssDirList)) {
                             foreach ($ssDirList as $ssDirName) {
-                                echo '<li><a target="_blank" href="http://localhost/'.$sDirName.'/' . $ssDirName . '/">' . $ssDirName . '</a></li>';
+                                echo '<li><a target="_blank" href="http://localhost/' . $sDirName . '/' . $ssDirName . '/">' . $ssDirName . '</a></li>';
                             }
                         }
 
@@ -137,17 +170,10 @@ function getSubDir($currDir = null)
                 </div>';
                     }
                 }
-
                 ?>
-
-
             </div>
         </div>
     </section>
-
-
-
-
 </body>
 
 </html>

@@ -292,6 +292,18 @@ lamp_config() {
         green_message ".env file updated!"
     }
 
+    update_local_document_indexFile() {
+        local indexFilePath=$(readlink -f "$lampPath/$DOCUMENT_ROOT/index.php")
+        local newLocalDocumentRoot=$(dirname "$indexFilePath")
+
+        if [ -f "$indexFilePath" ]; then
+            sed -i '' "s|\$LOCAL_DOCUMENT_ROOT = '.*';|\$LOCAL_DOCUMENT_ROOT = '$newLocalDocumentRoot';|" "$indexFilePath"
+            green_message "String \$LOCAL_DOCUMENT_ROOT value updated in $indexFilePath"
+        else
+            error_message "index.php file not found at $indexFilePath"
+        fi
+    }
+
     # Main logic
     if [ -f .env ]; then
         info_message "Reading config from .env..."
@@ -310,6 +322,8 @@ lamp_config() {
 
     # Display current configuration and prompt for updates
     update_env_file
+
+    update_local_document_indexFile
 }
 
 lamp_start() {
