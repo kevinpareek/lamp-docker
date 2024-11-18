@@ -4,14 +4,8 @@
 // print_r($_ENV);
 // exit;
 
-$MYSQL_HOST="database";
-$MYSQL_DATABASE="docker";
-$MYSQL_USER="docker";
-$MYSQL_PASSWORD="docker";
+require_once './config.php';
 
-$PMA_PORT="8080";
-$LOCAL_DOCUMENT_ROOT = '/Users/pukharajpareek/Desktop/mywork/docker-lamp/htdocs';
-$vhost_dir = '/etc/apache2/sites-enabled';
 $domainData = [];
 
 function extractDomainData($file)
@@ -28,8 +22,9 @@ function extractPattern($content, $pattern)
     return preg_match($pattern, $content, $matches) ? $matches[1] : '';
 }
 
-function getDomainData($vhost_dir)
+function getDomainData()
 {
+    $vhost_dir = '/etc/apache2/sites-enabled';
     $domainData = [];
     if (is_dir($vhost_dir)) {
         $confFiles = glob($vhost_dir . '/*.conf');
@@ -45,7 +40,7 @@ function getDomainData($vhost_dir)
     return $domainData;
 }
 
-$domainData = getDomainData($vhost_dir);
+$domainData = getDomainData();
 
 define('DOMAIN_APP_DIR', !empty($domainData[0]) ? explode("/", $domainData[0]['path'])[4] : 'applications');
 

@@ -1,11 +1,8 @@
 <?php
 
+require_once './config.php';
 
 $pdo = null;
-$MYSQL_HOST="database";
-$MYSQL_DATABASE="docker";
-$MYSQL_USER="docker";
-$MYSQL_PASSWORD="docker";
 
 try{
     $database = 'mysql:host='.$MYSQL_HOST.':3306';

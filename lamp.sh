@@ -293,14 +293,23 @@ lamp_config() {
     }
 
     update_local_document_indexFile() {
-        local indexFilePath=$(readlink -f "$lampPath/$DOCUMENT_ROOT/index.php")
+        local indexFilePath=$(readlink -f "$lampPath/$DOCUMENT_ROOT/config.php")
         local newLocalDocumentRoot=$(dirname "$indexFilePath")
 
         if [ -f "$indexFilePath" ]; then
             sed -i '' "s|\$LOCAL_DOCUMENT_ROOT = '.*';|\$LOCAL_DOCUMENT_ROOT = '$newLocalDocumentRoot';|" "$indexFilePath"
-            green_message "String \$LOCAL_DOCUMENT_ROOT value updated in $indexFilePath"
+
+            sed -i '' "s|\$MYSQL_HOST = '.*';|\$MYSQL_HOST = 'database';|" "$indexFilePath"
+            sed -i '' "s|\$MYSQL_DATABASE = '.*';|\$MYSQL_DATABASE = '$MYSQL_DATABASE';|" "$indexFilePath"
+            sed -i '' "s|\$MYSQL_USER = '.*';|\$MYSQL_USER = '$MYSQL_USER';|" "$indexFilePath"
+            sed -i '' "s|\$MYSQL_PASSWORD = '.*';|\$MYSQL_PASSWORD = '$MYSQL_PASSWORD';|" "$indexFilePath"
+
+            sed -i '' "s|\$PMA_PORT = '.*';|\$PMA_PORT = '$HOST_MACHINE_PMA_PORT';|" "$indexFilePath"
+
+
+            green_message "Config DATA updated in $indexFilePath"
         else
-            error_message "index.php file not found at $indexFilePath"
+            error_message "config.php file not found at $indexFilePath"
         fi
     }
 
