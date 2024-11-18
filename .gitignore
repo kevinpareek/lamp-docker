@@ -5,10 +5,13 @@
 
 /config/ssl/*
 /config/vhosts/*
+/config/nginx/*
 !/config/ssl/cert.pem
 !/config/ssl/cert-key.pem
 !/config/vhosts/default.conf
+!/config/nginx/nginx.conf
 
 /data/backup/*
 /data/mysql/*
+/data/redis/*
 /logs/*
