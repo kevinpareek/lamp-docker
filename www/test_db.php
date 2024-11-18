@@ -1,9 +1,6 @@
 <?php
 
-$MYSQL_HOST="database";
-$MYSQL_DATABASE="docker";
-$MYSQL_USER="docker";
-$MYSQL_PASSWORD="docker";
+require_once './config.php';
 
 $link = mysqli_connect($MYSQL_HOST, $MYSQL_USER, $MYSQL_PASSWORD, null);
 
