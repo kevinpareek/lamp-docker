@@ -610,13 +610,31 @@ EOL
         backup_dir="$lampPath/data/backup"
         mkdir -p "$backup_dir"
         timestamp=$(date +"%Y%m%d%H%M%S")
-        backup_file="$backup_dir/lamp_backup_$timestamp.tar.gz"
+        backup_file="$backup_dir/lamp_backup_$timestamp.tgz"
 
         info_message "Backing up LAMP stack to $backup_file..."
-        docker-compose exec webserver bash -c 'exec mysqldump --all-databases -uroot -p"$MYSQL_ROOT_PASSWORD" -h database' >"$backup_dir/db_backup.sql"
-        tar -czvf "$backup_file" -C "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME" . -C "$backup_dir" db_backup.sql
-        rm "$backup_dir/db_backup.sql"
-        green_message "Backup completed: $backup_file"
+        databases=$(docker-compose exec webserver bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
+        
+        # Create temporary directories for SQL and app data
+        temp_sql_dir="$backup_dir/sql"
+        temp_app_dir="$backup_dir/app"
+        mkdir -p "$temp_sql_dir" "$temp_app_dir"
+
+        for db in $databases; do
+            backup_sql_file="$temp_sql_dir/db_backup_$db.sql"
+            docker-compose exec webserver bash -c "exec mysqldump -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database --databases $db" >"$backup_sql_file"
+        done
+
+        # Copy application data to the temporary app directory
+        cp -r "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/." "$temp_app_dir/"
+
+        # Create the compressed backup file containing both SQL and app data
+        tar -czf "$backup_file" -C "$backup_dir" sql app
+
+        # Clean up temporary directories
+        rm -rf "$temp_sql_dir" "$temp_app_dir"
+
+        green_message "Backup completed: ${backup_file}"
 
     # Restore the LAMP stack
     elif [[ $1 == "restore" ]]; then
