@@ -1,5 +1,11 @@
 <?php
-$link = mysqli_connect("database", "root", $_ENV['MYSQL_ROOT_PASSWORD'], null);
+
+$MYSQL_HOST="database";
+$MYSQL_DATABASE="docker";
+$MYSQL_USER="docker";
+$MYSQL_PASSWORD="docker";
+
+$link = mysqli_connect($MYSQL_HOST, $MYSQL_USER, $MYSQL_PASSWORD, null);
 
 if (!$link) {
     echo "Error: Unable to connect to MySQL." . PHP_EOL;

@@ -1,4 +1,4 @@
-FROM php:8.3-apache-bookworm
+FROM php:8.3-apache
 
 # Surpresses debconf complaints of trying to install apt packages interactively
 # https://github.com/moby/moby/issues/4032#issuecomment-192327844
@@ -37,9 +37,9 @@ openssl && \
     curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 # Install xdebug
-RUN pecl install xdebug-3.3.1 && \
-    docker-php-ext-enable xdebug && \
-    mkdir /var/log/xdebug
+# RUN pecl install xdebug-3.3.1 && \
+#    docker-php-ext-enable xdebug && \
+#    mkdir /var/log/xdebug
 
 # Install redis
 RUN pecl install redis-6.0.2 && \
@@ -101,3 +101,6 @@ RUN a2enmod rewrite headers
 
 # Cleanup
 RUN rm -rf /usr/src/*
+
+# Cleanup unnecessary files/cached to reduce image size
+RUN rm -rf /var/lib/apt/lists/*

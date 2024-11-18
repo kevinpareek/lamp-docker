@@ -1,6 +1,16 @@
 <?php
 
-$LOCAL_DOCUMENT_ROOT = '';
+// echo '<pre>';
+// print_r($_ENV);
+// exit;
+
+$MYSQL_HOST="database";
+$MYSQL_DATABASE="docker";
+$MYSQL_USER="docker";
+$MYSQL_PASSWORD="docker";
+
+$PMA_PORT="8080";
+$LOCAL_DOCUMENT_ROOT = '/Users/pukharajpareek/Desktop/mywork/docker-lamp/htdocs';
 $vhost_dir = '/etc/apache2/sites-enabled';
 $domainData = [];
 
@@ -64,6 +74,38 @@ function getSubDir($currDir = null)
     <title>LAMP STACK</title>
     <link rel="shortcut icon" href="/assets/images/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/assets/css/bulma.min.css">
+    <style>
+        .hero {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        }
+
+        footer {
+            margin-top: auto;
+            padding: 20px 0;
+            background-color: #222;
+            color: #fff;
+            text-align: center;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            border-top: 5px solid #715dbb;
+        }
+
+        footer p {
+            margin: 5px 0;
+        }
+
+        footer a {
+            color: #715dbb;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            color: #fff;
+            text-decoration: underline;
+        }
+    </style>
 </head>
 
 <body>
@@ -91,7 +133,7 @@ function getSubDir($currDir = null)
                             <li>PHP <?= phpversion(); ?></li>
                             <li>
                                 <?php
-                                $link = mysqli_connect("database", "root", $_ENV['MYSQL_ROOT_PASSWORD'], null);
+                                $link = mysqli_connect($MYSQL_HOST, $MYSQL_USER, $MYSQL_PASSWORD, $MYSQL_DATABASE);
 
                                 if (mysqli_connect_errno()) {
                                     printf("MySQL connection failed: %s", mysqli_connect_error());
@@ -113,7 +155,7 @@ function getSubDir($currDir = null)
                     <hr>
                     <div class="content">
                         <ul>
-                            <li><a target="_blank" href="http://localhost:<?= $_ENV['PMA_PORT']; ?>">phpMyAdmin</a></li>
+                            <li><a target="_blank" href="http://localhost:<?= $PMA_PORT; ?>">phpMyAdmin</a></li>
                             <li><a href="/test_db.php">Test DB Connection with mysqli</a></li>
                             <li><a href="/test_db_pdo.php">Test DB Connection with PDO</a></li>
                             <li><a href="#">Check 404 Error</a></li>
@@ -174,6 +216,12 @@ function getSubDir($currDir = null)
             </div>
         </div>
     </section>
+    <footer>
+        <p>
+            <a href="https://github.com/kevinpareek/lamp-docker" target="_blank">LAMP Docker</a>
+        </p>
+        <p>Your local development environment</p>
+    </footer>
 </body>
 
 </html>
