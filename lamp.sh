@@ -148,6 +148,7 @@ is_array() {
 generate_ssl_certificates() {
     domain=$1
     vhost_file=$2
+    nginx_file=$3
 
     # Generate SSL certificates for the domain
     mkcert -key-file "$lampPath/config/ssl/$domain-key.pem" -cert-file "$lampPath/config/ssl/$domain-cert.pem" $domain "*.$domain"
@@ -155,6 +156,9 @@ generate_ssl_certificates() {
     # Update the vhost configuration file with the correct SSL certificate paths
     sed -i "" "s|SSLCertificateFile /etc/apache2/ssl/cert.pem|SSLCertificateFile /etc/apache2/ssl/$domain-cert.pem|" $vhost_file
     sed -i "" "s|SSLCertificateKeyFile /etc/apache2/ssl/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl/$domain-key.pem|" $vhost_file
+
+    sed -i "" "s|ssl_certificate /etc/nginx/ssl/cert.pem|ssl_certificate /etc/nginx/ssl/$domain-cert.pem|" $nginx_file
+    sed -i "" "s|ssl_certificate_key /etc/nginx/ssl/cert-key.pem|ssl_certificate_key /etc/nginx/ssl/$domain-key.pem|" $nginx_file
 
     info_message "SSL certificates generated for https://$domain"
 }
@@ -474,12 +478,16 @@ lamp() {
         fi
 
         # Define vhost directory and file using .env variables
-        vhost_dir="$VHOSTS_DIR"
-        vhost_file="${vhost_dir}/${domain}.conf"
+        vhost_file="${VHOSTS_DIR}/${domain}.conf"
+        nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
 
         # Create the vhost directory if it doesn't exist
-        if [[ ! -d $vhost_dir ]]; then
-            mkdir -p $vhost_dir
+        if [[ ! -d $VHOSTS_DIR ]]; then
+            mkdir -p $VHOSTS_DIR
+        fi
+
+        if [[ ! -d $NGINX_CONF_DIR ]]; then
+            mkdir -p $NGINX_CONF_DIR
         fi
 
         # Create the vhost configuration file
@@ -518,12 +526,52 @@ lamp() {
 </VirtualHost>
 EOL
 
+        cat >$nginx_file <<EOL
+# HTTP server configuration
+server {
+    listen 80;
+    server_name $domain www.$domain;
+
+    # Proxy all requests to the backend web server
+    location / {
+        proxy_pass http://webserver:80;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+
+# HTTPS server configuration
+server {
+    listen 443 ssl;
+    server_name $domain www.$domain;
+
+    # SSL/TLS certificate configuration
+    ssl_certificate /etc/nginx/ssl/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/cert-key.pem;
+
+    # Enforce secure protocols and ciphers
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    # Proxy all requests to the backend web server
+    location / {
+        proxy_pass http://webserver:80;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOL
+
         green_message "Vhost configuration file created at: $vhost_file"
 
         # Check if mkcert is installed
         if command -v mkcert &>/dev/null; then
 
-            generate_ssl_certificates $domain $vhost_file
+            generate_ssl_certificates $domain $vhost_file $nginx_file
             domainUrl="https://$domain"
         else
             yellow_message "SSL certificates not generated. Using http://$domain"
@@ -554,6 +602,7 @@ EOL
         if command -v docker >/dev/null; then
             # docker-compose exec webserver bash -c "cd /etc/apache2/sites-enabled && a2ensite $domain.conf && service apache2 reload"
             docker-compose exec webserver bash -c "service apache2 reload"
+            docker-compose exec reverse-proxy nginx -s reload
 
             green_message "Virtual host $domain activated and Apache reloaded."
         fi
@@ -688,13 +737,14 @@ EOL
         fi
 
         vhost_file="${VHOSTS_DIR}/${domain}.conf"
+        nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
 
         if [[ ! -f $vhost_file ]]; then
             error_message "Domain name invalid. Vhost configuration file not found for $domain."
             return 1
         fi
 
-        generate_ssl_certificates $domain $vhost_file
+        generate_ssl_certificates $domain $vhost_file $nginx_file
 
     else
         error_message "Usage: lamp {start|stop|restart|build|cmd|addapp|code|config|backup|restore|ssl}"
