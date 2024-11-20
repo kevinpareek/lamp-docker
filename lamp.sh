@@ -188,7 +188,7 @@ open_browser() {
 
 lamp_config() {
     # Set required configuration keys
-    reqConfig=("DOCUMENT_ROOT" "COMPOSE_PROJECT_NAME" "PHPVERSION" "DATABASE")
+    reqConfig=("APP_ENV" "DOCUMENT_ROOT" "COMPOSE_PROJECT_NAME" "PHPVERSION" "DATABASE")
 
     # Detect if Apple Silicon
     isAppleSilicon=false
@@ -270,6 +270,20 @@ lamp_config() {
         done
     }
 
+    set_app_env() {
+        local valid_options=("development" "production")
+        echo "Select the APP_ENV value:"
+        select option in "${valid_options[@]}"; do
+            if [[ " ${valid_options[*]} " == *" $option "* ]]; then
+                export APP_ENV="$option"
+                echo "APP_ENV is set to '$APP_ENV'."
+                break
+            else
+                echo "Invalid selection. Please choose a valid option."
+            fi
+        done
+    }
+
     # Function to update or create the .env file
     update_env_file() {
         info_message "Updating the .env file..."
@@ -282,6 +296,8 @@ lamp_config() {
                 choose_php_version
             elif [[ "$key" == "DATABASE" ]]; then
                 choose_database
+            elif [[ "$key" == "APP_ENV" ]]; then
+                set_app_env
             else
                 read -p "$key (Default: $default_value): " new_value
                 if [[ ! -z $new_value ]]; then
@@ -309,7 +325,6 @@ lamp_config() {
             sed -i '' "s|\$MYSQL_PASSWORD = '.*';|\$MYSQL_PASSWORD = '$MYSQL_PASSWORD';|" "$indexFilePath"
 
             sed -i '' "s|\$PMA_PORT = '.*';|\$PMA_PORT = '$HOST_MACHINE_PMA_PORT';|" "$indexFilePath"
-
 
             green_message "Config DATA updated in $indexFilePath"
         else
@@ -371,7 +386,7 @@ lamp_start() {
     fi
 
     # Start the containers in detached mode
-    if ! docker-compose up -d; then
+    if ! docker-compose --profile $APP_ENV up -d; then
         error_message "Failed to start the LAMP stack."
         exit 1
     fi
@@ -411,7 +426,7 @@ lamp() {
 
     # Stop the LAMP stack
     elif [[ $1 == "stop" ]]; then
-        docker-compose down
+        docker-compose --profile $APP_ENV down
         green_message "LAMP stack is stopped"
 
         # Optional: Close Docker Desktop on stop (uncomment if needed)
@@ -437,14 +452,14 @@ lamp() {
 
     # Restart the LAMP stack
     elif [[ $1 == "restart" ]]; then
-        docker-compose down && docker-compose up -d
+        docker-compose --profile $APP_ENV down && docker-compose --profile $APP_ENV up -d
         green_message "LAMP stack restarted."
 
     # Rebuild & Start
     elif [[ $1 == "build" ]]; then
-        docker-compose down
+        docker-compose --profile $APP_ENV down
         # docker-compose build
-        docker-compose up -d --build
+        docker-compose --profile $APP_ENV up -d --build
         green_message "LAMP stack rebuilt and running."
 
     # Add a new application and create a corresponding virtual host
@@ -663,7 +678,7 @@ EOL
 
         info_message "Backing up LAMP stack to $backup_file..."
         databases=$(docker-compose exec webserver bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
-        
+
         # Create temporary directories for SQL and app data
         temp_sql_dir="$backup_dir/sql"
         temp_app_dir="$backup_dir/app"
