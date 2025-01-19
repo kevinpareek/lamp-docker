@@ -1,8 +1,6 @@
-FROM php:8.3-apache
+FROM php:8.4-apache
 
-# Surpresses debconf complaints of trying to install apt packages interactively
-# https://github.com/moby/moby/issues/4032#issuecomment-192327844
- 
+# Suppresses debconf complaints of trying to install apt packages interactively
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Update
@@ -11,8 +9,7 @@ RUN apt-get -y update --fix-missing && \
     apt-get --no-install-recommends install -y apt-utils && \
     rm -rf /var/lib/apt/lists/*
 
-
-# Install useful tools and install important libaries
+# Install useful tools and important libraries
 RUN apt-get -y update && \
     apt-get -y --no-install-recommends install nano wget \
 dialog \
@@ -36,11 +33,6 @@ openssl && \
     rm -rf /var/lib/apt/lists/* && \
     curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-# Install xdebug
-# RUN pecl install xdebug-3.3.1 && \
-#    docker-php-ext-enable xdebug && \
-#    mkdir /var/log/xdebug
-
 # cron
 RUN apt-get update && apt-get install -y \
     cron \
@@ -48,7 +40,7 @@ RUN apt-get update && apt-get install -y \
     rm -rf /var/lib/apt/lists/*
 
 # Install redis
-RUN pecl install redis-6.0.2 && \
+RUN pecl install redis && \
     docker-php-ext-enable redis
 
 # Install imagick
@@ -56,8 +48,6 @@ RUN apt-get update && \
     apt-get -y --no-install-recommends install --fix-missing libmagickwand-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Imagick Commit to install
-# https://github.com/Imagick/imagick
 ARG IMAGICK_COMMIT="28f27044e435a2b203e32675e942eb8de620ee58"
 
 RUN cd /usr/local/src && \
@@ -72,7 +62,7 @@ RUN cd /usr/local/src && \
     rm -rf imagick && \
     docker-php-ext-enable imagick
 
-# Other PHP8 Extensions
+# Other PHP8.4 Extensions
 
 RUN docker-php-ext-install pdo_mysql && \
     docker-php-ext-install pdo_sqlite && \
@@ -86,8 +76,7 @@ RUN docker-php-ext-install pdo_mysql && \
     docker-php-ext-install calendar && \
     docker-php-ext-install exif
 
-
-# Install Freetype 
+# Install Freetype
 RUN apt-get -y update && \
     apt-get --no-install-recommends install -y libfreetype6-dev \
 libjpeg62-turbo-dev \
@@ -96,7 +85,7 @@ libpng-dev && \
     docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
     docker-php-ext-install gd
 
-# Insure an SSL directory exists
+# Ensure an SSL directory exists
 RUN mkdir -p /etc/apache2/ssl
 
 # Enable SSL support
