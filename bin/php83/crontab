@@ -1,0 +1,4 @@
+# Example cron job: Run a script every minute
+* * * * * root echo "Cron job running" >> /var/log/cron.log 2>&1
+
+# Add more cron jobs as needed
