@@ -1,112 +1,86 @@
-FROM php:8.3-apache
+# Use the official PHP 8.3 Apache image as the base
+FROM php:8.3-apache-bookworm
 
-# Surpresses debconf complaints of trying to install apt packages interactively
-# https://github.com/moby/moby/issues/4032#issuecomment-192327844
- 
+# Suppress debconf complaints when installing apt packages
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Update
-RUN apt-get -y update --fix-missing && \
+# Update, upgrade, and install required packages in a single RUN layer to reduce image size
+RUN apt-get update --fix-missing && \
     apt-get upgrade -y && \
-    apt-get --no-install-recommends install -y apt-utils && \
+    apt-get install -y --no-install-recommends \
+        apt-utils \
+        cron \
+        supervisor \
+        nano \
+        wget \
+        curl \
+        git \
+        unzip \
+        zip \
+        dialog \
+        libsqlite3-dev \
+        default-mysql-client \
+        zlib1g-dev \
+        libzip-dev \
+        libicu-dev \
+        build-essential \
+        libonig-dev \
+        iputils-ping \
+        libcurl4-openssl-dev \
+        libmagickwand-dev \
+        libfreetype6-dev \
+        libjpeg62-turbo-dev \
+        libpng-dev && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Install Composer globally
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-# Install useful tools and install important libaries
-RUN apt-get -y update && \
-    apt-get -y --no-install-recommends install nano wget \
-dialog \
-libsqlite3-dev \
-libsqlite3-0 && \
-    apt-get -y --no-install-recommends install default-mysql-client \
-zlib1g-dev \
-libzip-dev \
-libicu-dev && \
-    apt-get -y --no-install-recommends install --fix-missing apt-utils \
-build-essential \
-git \
-curl \
-libonig-dev && \ 
-    apt-get install -y iputils-ping && \
-    apt-get -y --no-install-recommends install --fix-missing libcurl4 \
-libcurl4-openssl-dev \
-zip \
-unzip \
-openssl && \
-    rm -rf /var/lib/apt/lists/* && \
-    curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-
-# Install xdebug
-# RUN pecl install xdebug-3.3.1 && \
-#    docker-php-ext-enable xdebug && \
-#    mkdir /var/log/xdebug
-
-# cron
-RUN apt-get update && apt-get install -y \
-    cron \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install redis
-RUN pecl install redis-6.0.2 && \
-    docker-php-ext-enable redis
-
-# Install imagick
-RUN apt-get update && \
-    apt-get -y --no-install-recommends install --fix-missing libmagickwand-dev && \
-    rm -rf /var/lib/apt/lists/*
-
-# Imagick Commit to install
-# https://github.com/Imagick/imagick
-ARG IMAGICK_COMMIT="28f27044e435a2b203e32675e942eb8de620ee58"
-
-RUN cd /usr/local/src && \
-    git clone https://github.com/Imagick/imagick && \
-    cd imagick && \
-    git checkout ${IMAGICK_COMMIT} && \
-    phpize && \
-    ./configure && \
-    make && \
-    make install && \
-    cd .. && \
-    rm -rf imagick && \
-    docker-php-ext-enable imagick
-
-# Other PHP8 Extensions
-
-RUN docker-php-ext-install pdo_mysql && \
-    docker-php-ext-install pdo_sqlite && \
-    docker-php-ext-install bcmath && \
-    docker-php-ext-install mysqli && \
-    docker-php-ext-install curl && \
-    docker-php-ext-install zip && \
-    docker-php-ext-install -j$(nproc) intl && \
-    docker-php-ext-install mbstring && \
-    docker-php-ext-install gettext && \
-    docker-php-ext-install calendar && \
-    docker-php-ext-install exif
-
-
-# Install Freetype 
-RUN apt-get -y update && \
-    apt-get --no-install-recommends install -y libfreetype6-dev \
-libjpeg62-turbo-dev \
-libpng-dev && \
-    rm -rf /var/lib/apt/lists/* && \
+# Install and configure PHP extensions
+RUN docker-php-ext-install \
+        pdo_mysql \
+        pdo_sqlite \
+        bcmath \
+        mysqli \
+        curl \
+        zip \
+        intl \
+        mbstring \
+        gettext \
+        calendar \
+        exif && \
     docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
     docker-php-ext-install gd
 
-# Insure an SSL directory exists
-RUN mkdir -p /etc/apache2/ssl
+# Install Redis PHP extension via PECL
+RUN pecl install redis && docker-php-ext-enable redis
 
-# Enable SSL support
-RUN a2enmod ssl && a2enmod rewrite
+# Install Imagick PHP extension from a specific commit
+ARG IMAGICK_COMMIT="28f27044e435a2b203e32675e942eb8de620ee58"
+RUN git clone https://github.com/Imagick/imagick /usr/local/src/imagick && \
+    cd /usr/local/src/imagick && \
+    git checkout ${IMAGICK_COMMIT} && \
+    phpize && ./configure && make && make install && \
+    rm -rf /usr/local/src/imagick && \
+    docker-php-ext-enable imagick
 
-# Enable apache modules
-RUN a2enmod rewrite headers
+# Enable necessary Apache modules
+RUN a2enmod ssl rewrite headers
 
-# Cleanup
-RUN rm -rf /usr/src/*
+# Create required directories and files
+RUN mkdir -p /etc/apache2/ssl /var/log/{cron,supervisor} && \
+    touch /var/log/cron.log /var/log/supervisor/supervisord.log
 
-# Cleanup unnecessary files/cached to reduce image size
-RUN rm -rf /var/lib/apt/lists/*
+# Copy custom cron jobs and Supervisor configuration
+# COPY crontab /etc/cron.d/custom-cron
+COPY supervisord.conf /etc/supervisor/supervisord.conf
+
+##Set permissions for cron jobs (commented out for now)
+# RUN chmod 0644 /etc/cron.d/custom-cron && crontab /etc/cron.d/custom-cron
+
+# Clean up unnecessary files to reduce image size
+RUN rm -rf /usr/src/* /tmp/* /var/tmp/*
+
+# Set the default command to start Supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
