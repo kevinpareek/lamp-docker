@@ -12,6 +12,7 @@ RUN apt-get update --fix-missing && \
         cron \
         supervisor \
         nano \
+        vim \
         wget \
         curl \
         git \
