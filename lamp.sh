@@ -145,12 +145,84 @@ is_array() {
     fi
 }
 
+install_mkcert() {
+    local os_name=$(uname -s)
+    
+    info_message "Installing mkcert for SSL certificate generation..."
+    
+    case "$os_name" in
+        Darwin)
+            # macOS installation
+            if command_exists brew; then
+                brew install mkcert nss
+            else
+                error_message "Homebrew not found. Please install Homebrew first: https://brew.sh"
+                return 1
+            fi
+            ;;
+        Linux)
+            # Linux installation
+            if command_exists apt; then
+                sudo apt update
+                sudo apt install -y libnss3-tools
+                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
+                chmod +x mkcert-v*-linux-amd64
+                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
+            elif command_exists yum; then
+                sudo yum install -y nss-tools
+                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
+                chmod +x mkcert-v*-linux-amd64
+                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
+            elif command_exists pacman; then
+                sudo pacman -S --noconfirm nss
+                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
+                chmod +x mkcert-v*-linux-amd64
+                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
+            else
+                error_message "Unsupported Linux package manager. Please install mkcert manually."
+                return 1
+            fi
+            ;;
+        CYGWIN*|MINGW32*|MSYS*|MINGW*)
+            # Windows installation
+            if command_exists choco; then
+                choco install mkcert
+            else
+                error_message "Chocolatey not found. Please install Chocolatey first: https://chocolatey.org/install"
+                return 1
+            fi
+            ;;
+        *)
+            error_message "Unsupported operating system: $os_name"
+            return 1
+            ;;
+    esac
+    
+    # Initialize mkcert and create local CA
+    mkcert -install
+    return $?
+}
+
 generate_ssl_certificates() {
     domain=$1
     vhost_file=$2
     nginx_file=$3
 
+    # Check if mkcert is installed
+    if ! command -v mkcert &>/dev/null; then
+        if yes_no_prompt "mkcert is not installed. Would you like to install it now?"; then
+            if ! install_mkcert; then
+                error_message "Failed to install mkcert. SSL certificates cannot be generated."
+                return 1
+            fi
+        else
+            yellow_message "SSL certificates not generated. Using http://$domain"
+            return 1
+        fi
+    fi
+
     # Generate SSL certificates for the domain
+    mkdir -p "$lampPath/config/ssl"
     mkcert -key-file "$lampPath/config/ssl/$domain-key.pem" -cert-file "$lampPath/config/ssl/$domain-cert.pem" $domain "*.$domain"
 
     # Update the vhost configuration file with the correct SSL certificate paths
@@ -161,6 +233,7 @@ generate_ssl_certificates() {
     sed -i "" "s|ssl_certificate_key /etc/nginx/ssl/cert-key.pem|ssl_certificate_key /etc/nginx/ssl/$domain-key.pem|" $nginx_file
 
     info_message "SSL certificates generated for https://$domain"
+    return 0
 }
 
 open_browser() {
@@ -585,13 +658,10 @@ EOL
         green_message "Vhost configuration file created at: $vhost_file"
 
         # Check if mkcert is installed
-        if command -v mkcert &>/dev/null; then
-
-            generate_ssl_certificates $domain $vhost_file $nginx_file
-            domainUrl="https://$domain"
-        else
-            yellow_message "SSL certificates not generated. Using http://$domain"
+        if ! generate_ssl_certificates $domain $vhost_file $nginx_file; then
             domainUrl="http://$domain"
+        else
+            domainUrl="https://$domain"
         fi
 
         # Create the application document root directory
@@ -738,14 +808,6 @@ EOL
 
     # Generate SSL certificates for a domain
     elif [[ $1 == "ssl" ]]; then
-
-        # Check if mkcert is installed
-        if ! command -v mkcert &>/dev/null; then
-            error_message "mkcert is not installed."
-            info_message "For Install. Please follow the instructions at https://github.com/FiloSottile/mkcert#installation."
-            return 1
-        fi
-
         domain=$2
         if [[ -z $domain ]]; then
             error_message "Domain name is required."
