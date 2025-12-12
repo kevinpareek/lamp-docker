@@ -51,6 +51,7 @@ services:
       APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
       APPLICATIONS_DIR_NAME: "${APPLICATIONS_DIR_NAME}"
       APP_ENV: "${APP_ENV:-development}"
+      STACK_MODE: "${STACK_MODE:-hybrid}"
     networks:
       - frontend
     healthcheck:
@@ -234,7 +235,7 @@ services:
     container_name: "${COMPOSE_PROJECT_NAME}-varnish"
     restart: unless-stopped
     volumes:
-      - "./config/varnish/default.vcl:/etc/varnish/default.vcl:ro"
+      - "./config/varnish/${STACK_MODE:-hybrid}.vcl:/etc/varnish/default.vcl:ro"
     tmpfs:
       - /var/lib/varnish:exec
     environment:

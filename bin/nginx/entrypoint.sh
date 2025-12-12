@@ -6,10 +6,19 @@ mkdir -p /etc/nginx/http.d
 
 # Wait for webserver to be ready
 echo "Waiting for webserver..."
-until curl -s "http://webserver" > /dev/null 2>&1 || [ $? -eq 52 ] || [ $? -eq 7 ]; do
-  echo "Waiting for webserver..."
-  sleep 2
-done
+if [ "$STACK_MODE" = "thunder" ]; then
+    # Check for PHP-FPM on port 9000
+    until nc -z webserver 9000 > /dev/null 2>&1; do
+        echo "Waiting for PHP-FPM..."
+        sleep 2
+    done
+else
+    # Check for Apache on port 80
+    until curl -s "http://webserver" > /dev/null 2>&1 || [ $? -eq 52 ] || [ $? -eq 7 ]; do
+        echo "Waiting for Apache..."
+        sleep 2
+    done
+fi
 echo "Webserver is reachable."
 
 # Determine Static Asset Expiration based on Environment
