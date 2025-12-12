@@ -34,7 +34,8 @@ services:
   # Reverse Proxy (NGINX)
   # ============================================
   reverse-proxy:
-    image: nginx:alpine
+    build:
+      context: ./bin/nginx
     container_name: "${COMPOSE_PROJECT_NAME}-nginx"
     restart: unless-stopped
     ports:
@@ -100,6 +101,7 @@ services:
     volumes:
       - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:rw"
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
+      - "./config/php/www.conf:/usr/local/etc/php-fpm.d/www.conf:ro"
       - "${APACHE_LOG_DIR}:/var/log/php-fpm"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
     healthcheck:
@@ -152,8 +154,9 @@ services:
       - "${REDIS_DATA_DIR}:/data"
     command: >
       redis-server
-      --appendonly yes
-      --maxmemory 128mb
+      --appendonly no
+      --save ""
+      --maxmemory 256mb
       --maxmemory-policy allkeys-lru
       --tcp-keepalive 300
       --timeout 0
@@ -208,6 +211,37 @@ services:
       - backend
     profiles:
       - development
+    logging: *default-logging
+
+  # ============================================
+  # Memcached
+  # ============================================
+  memcached:
+    image: memcached:alpine
+    container_name: "${COMPOSE_PROJECT_NAME}-memcached"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11211:11211"
+    networks:
+      - backend
+    logging: *default-logging
+
+  # ============================================
+  # Varnish Cache
+  # ============================================
+  varnish:
+    image: varnish:stable
+    container_name: "${COMPOSE_PROJECT_NAME}-varnish"
+    restart: unless-stopped
+    volumes:
+      - "./config/varnish/default.vcl:/etc/varnish/default.vcl:ro"
+    tmpfs:
+      - /var/lib/varnish:exec
+    environment:
+      VARNISH_SIZE: 128M
+    networks:
+      - frontend
+      - backend
     logging: *default-logging
 
 # ============================================

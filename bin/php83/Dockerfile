@@ -31,7 +31,8 @@ RUN apt-get update --fix-missing && \
         libmagickwand-dev \
         libfreetype6-dev \
         libjpeg62-turbo-dev \
-        libpng-dev && \
+        libpng-dev \
+        libmemcached-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -56,6 +57,9 @@ RUN docker-php-ext-install \
 
 # Install Redis PHP extension via PECL
 RUN pecl install redis && docker-php-ext-enable redis
+
+# Install Memcached PHP extension via PECL
+RUN pecl install memcached && docker-php-ext-enable memcached
 
 # Install Xdebug
 RUN pecl install xdebug && docker-php-ext-enable xdebug
