@@ -152,8 +152,8 @@ function getSubDir($currDir = null)
                             <li><a target="_blank" href="http://localhost:<?= $PMA_PORT; ?>">phpMyAdmin</a></li>
                             <li><a href="/test_db.php">Test DB Connection with mysqli</a></li>
                             <li><a href="/test_db_pdo.php">Test DB Connection with PDO</a></li>
-                            <li><a href="#">Check 404 Error</a></li>
-                            <li><a href="#">Check Error</a></li>
+                            <li><a href="/nonexistent-page-test">Check 404 Error</a></li>
+                            <li><a target="_blank" href="http://localhost:8025">Mailpit</a></li>
                         </ul>
                     </div>
                 </div>

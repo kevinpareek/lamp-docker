@@ -1,11 +1,24 @@
 vcl 4.0;
 
+# ============================================
+# Default Varnish Configuration Template
+# Copy and modify for custom setups
+# Use hybrid.vcl or thunder.vcl for LAMP stack
+# ============================================
+
 backend default {
     .host = "webserver";
     .port = "80";
     .first_byte_timeout = 60s;
     .connect_timeout = 5s;
     .between_bytes_timeout = 2s;
+    .probe = {
+        .url = "/";
+        .timeout = 2s;
+        .interval = 5s;
+        .window = 5;
+        .threshold = 3;
+    }
 }
 
 sub vcl_recv {

@@ -242,7 +242,7 @@ compose build` and restart the Docker containers.
 phpMyAdmin is configured to run on port 8080. Use the following default credentials:
 - URL: `http://localhost:8080/`
 - Username: `root`
-- Password: `tiger`
+- Password: `root` (or as configured in your `.env` file)
 
 ## Xdebug
 

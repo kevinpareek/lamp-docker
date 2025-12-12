@@ -1,6 +1,6 @@
 FROM php:8.2.1-apache-buster
 
-# Surpresses debconf complaints of trying to install apt packages interactively
+# Suppresses debconf complaints of trying to install apt packages interactively
 # https://github.com/moby/moby/issues/4032#issuecomment-192327844
  
 ARG DEBIAN_FRONTEND=noninteractive
@@ -12,7 +12,7 @@ RUN apt-get -y update --fix-missing && \
     rm -rf /var/lib/apt/lists/*
 
 
-# Install useful tools and install important libaries
+# Install useful tools and install important libraries
 RUN apt-get -y update && \
     apt-get -y --no-install-recommends install nano wget \
 dialog \
@@ -93,6 +93,10 @@ libpng-dev && \
     rm -rf /var/lib/apt/lists/* && \
     docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
     docker-php-ext-install gd
+
+# Install mhsendmail for Mailpit
+RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
+    chmod +x /usr/local/bin/mhsendmail
 
 # Ensure an SSL directory exists
 RUN mkdir -p /etc/apache2/ssl

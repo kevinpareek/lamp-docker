@@ -43,7 +43,11 @@ RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
     && echo "xdebug.remote_enable=1" >> /usr/local/etc/php/php.ini; \
     fi
 
-# Insure an SSL directory exists
+# Install mhsendmail for Mailpit
+RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
+    chmod +x /usr/local/bin/mhsendmail
+
+# Ensure an SSL directory exists
 RUN mkdir -p /etc/apache2/ssl
 
 # Enable SSL support and Apache modules

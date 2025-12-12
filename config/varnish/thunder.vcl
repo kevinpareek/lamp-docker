@@ -6,6 +6,13 @@ backend default {
     .first_byte_timeout = 60s;
     .connect_timeout = 5s;
     .between_bytes_timeout = 2s;
+    .probe = {
+        .url = "/nginx-health";
+        .timeout = 2s;
+        .interval = 5s;
+        .window = 5;
+        .threshold = 3;
+    }
 }
 
 sub vcl_recv {

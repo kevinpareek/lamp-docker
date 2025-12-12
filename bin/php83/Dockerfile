@@ -99,6 +99,10 @@ COPY supervisord.conf /etc/supervisor/supervisord.conf
 # Clean up unnecessary files to reduce image size
 RUN rm -rf /usr/src/* /tmp/* /var/tmp/*
 
+# Health Check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -sf http://localhost/ || exit 1
+
 # Expose Ports
 EXPOSE 80
 
