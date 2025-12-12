@@ -57,6 +57,13 @@ RUN docker-php-ext-install \
 # Install Redis PHP extension via PECL
 RUN pecl install redis && docker-php-ext-enable redis
 
+# Install Xdebug
+RUN pecl install xdebug && docker-php-ext-enable xdebug
+
+# Install mhsendmail for Mailpit
+RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
+    chmod +x /usr/local/bin/mhsendmail
+
 # Install Imagick PHP extension from a specific commit
 ARG IMAGICK_COMMIT="28f27044e435a2b203e32675e942eb8de620ee58"
 RUN git clone https://github.com/Imagick/imagick /usr/local/src/imagick && \

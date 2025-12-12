@@ -78,11 +78,16 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: "512M"
+
+  mailpit:
+    image: axllent/mailpit
+    container_name: "${COMPOSE_PROJECT_NAME}_mailpit"
+    restart: always
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    networks:
+      - backend
 
   redis:
     image: redis:alpine
