@@ -1,12 +1,26 @@
 <?php
 
+// Security headers
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: SAMEORIGIN');
+header('X-XSS-Protection: 1; mode=block');
+header('Content-Type: text/html; charset=UTF-8');
+
 require_once './config.php';
+
+// Helper function for safe HTML output
+function e(string $str): string {
+    return htmlspecialchars($str, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+}
 
 $domainData = [];
 
 function extractDomainData($file)
 {
     $content = file_get_contents($file);
+    if ($content === false) {
+        return null;
+    }
     $domain = extractPattern($content, '/ServerName\s+([^\s;]+)/i');
     $path = extractPattern($content, '/DocumentRoot\s+([^\s;]+)/i');
 
@@ -135,17 +149,20 @@ function getSubDir($currDir = null)
                 <?php
                 if (!empty($domainData)) {
                     echo '<div class="column">
-    <h3 class="title is-3 has-text-centered">' . ucfirst(DOMAIN_APP_DIR) . '</h3>
+    <h3 class="title is-3 has-text-centered">' . e(ucfirst(DOMAIN_APP_DIR)) . '</h3>
     <hr>
     <div class="content">
         <ul>';
 
                     foreach ($domainData as $dd) {
+                        $apacheRoot = $_ENV['APACHE_DOCUMENT_ROOT'] ?? '/var/www/html';
+                        $displayPath = str_replace($apacheRoot . '/' . DOMAIN_APP_DIR . '/', '', $dd['path']);
+                        $localPath = str_replace($apacheRoot, $LOCAL_DOCUMENT_ROOT, $dd['path']);
                         echo '
                         <li>
-                            <a target="_blank" href="https://' . $dd['domain'] . '">' . str_replace($_ENV['APACHE_DOCUMENT_ROOT'] . '/' . DOMAIN_APP_DIR . '/', '', $dd['path']) . '</a>
-                            <br> -<code>' . $dd['path'] . '</code>
-                            <br> -<code>' . str_replace($_ENV['APACHE_DOCUMENT_ROOT'], $LOCAL_DOCUMENT_ROOT, $dd['path']) . '</code>
+                            <a target="_blank" href="https://' . e($dd['domain']) . '">' . e($displayPath) . '</a>
+                            <br> -<code>' . e($dd['path']) . '</code>
+                            <br> -<code>' . e($localPath) . '</code>
                          </li>';
                     }
                     echo    '</ul>
@@ -157,7 +174,7 @@ function getSubDir($currDir = null)
                 if (!empty($sDirList)) {
                     foreach ($sDirList as $sDirName) {
                         echo '<div class="column">
-                    <h3 class="title is-3 has-text-centered">' . ucfirst($sDirName) . '</h3>
+                    <h3 class="title is-3 has-text-centered">' . e(ucfirst($sDirName)) . '</h3>
                     <hr>
                     <div class="content">
                         <ul>';
@@ -165,7 +182,7 @@ function getSubDir($currDir = null)
                         $ssDirList = getSubDir(__DIR__ . '/' . $sDirName);
                         if (!empty($ssDirList)) {
                             foreach ($ssDirList as $ssDirName) {
-                                echo '<li><a target="_blank" href="http://localhost/' . $sDirName . '/' . $ssDirName . '/">' . $ssDirName . '</a></li>';
+                                echo '<li><a target="_blank" href="http://localhost/' . e($sDirName) . '/' . e($ssDirName) . '/">' . e($ssDirName) . '</a></li>';
                             }
                         }
 

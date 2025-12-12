@@ -6,11 +6,14 @@
  */
 
 // Only enable verbose errors in development
-if (getenv('APP_ENV') === 'development') {
-    ini_set('display_errors', true);
+$appEnv = $_SERVER['APP_ENV'] ?? getenv('APP_ENV') ?: 'development';
+if ($appEnv === 'development') {
+    ini_set('display_errors', '1');
     error_reporting(E_ALL);
+} else {
+    ini_set('display_errors', '0');
 }
-ini_set("error_log", "404error.txt");
+ini_set('error_log', '/var/log/php_errors.log');
 
 // Require dependencies
 require_once __DIR__ . '/Medoo.php';

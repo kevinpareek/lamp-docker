@@ -127,6 +127,13 @@ server {
         fastcgi_buffer_size 4k;
         fastcgi_buffers 8 4k;
     }
+
+    # Health check endpoint
+    location /nginx-health {
+        access_log off;
+        return 200 "OK";
+        add_header Content-Type text/plain;
+    }
 }
 
 # Include extra sites
