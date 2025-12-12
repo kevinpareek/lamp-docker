@@ -35,9 +35,13 @@ RUN docker-php-ext-install curl \
     && docker-php-ext-install -j$(nproc) intl \
     && docker-php-ext-install mbstring \
     && docker-php-ext-configure gd --with-freetype-dir=/usr/include/ --with-jpeg-dir=/usr/include/ \
-    && docker-php-ext-install -j$(nproc) gd \
-    && pecl install xdebug-2.5.5 && docker-php-ext-enable xdebug \
-    && echo "xdebug.remote_enable=1" >> /usr/local/etc/php/php.ini
+    && docker-php-ext-install -j$(nproc) gd
+
+ARG INSTALL_XDEBUG=false
+RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
+    pecl install xdebug-2.5.5 && docker-php-ext-enable xdebug \
+    && echo "xdebug.remote_enable=1" >> /usr/local/etc/php/php.ini; \
+    fi
 
 # Insure an SSL directory exists
 RUN mkdir -p /etc/apache2/ssl

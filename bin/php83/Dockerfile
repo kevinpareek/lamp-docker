@@ -3,6 +3,7 @@ FROM php:8.3-apache-bookworm
 
 # Suppress debconf complaints when installing apt packages
 ARG DEBIAN_FRONTEND=noninteractive
+ARG INSTALL_XDEBUG=false
 
 # Update, upgrade, and install required packages in a single RUN layer to reduce image size
 RUN apt-get update --fix-missing && \
@@ -51,7 +52,10 @@ RUN docker-php-ext-install \
         mbstring \
         gettext \
         calendar \
-        exif && \
+        exif \
+        opcache \
+        pcntl \
+        sockets && \
     docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
     docker-php-ext-install gd
 
@@ -61,8 +65,13 @@ RUN pecl install redis && docker-php-ext-enable redis
 # Install Memcached PHP extension via PECL
 RUN pecl install memcached && docker-php-ext-enable memcached
 
+# Install APCu PHP extension via PECL
+RUN pecl install apcu && docker-php-ext-enable apcu
+
 # Install Xdebug
-RUN pecl install xdebug && docker-php-ext-enable xdebug
+RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
+    pecl install xdebug && docker-php-ext-enable xdebug; \
+    fi
 
 # Install mhsendmail for Mailpit
 RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
@@ -93,4 +102,4 @@ COPY supervisord.conf /etc/supervisor/supervisord.conf
 RUN rm -rf /usr/src/* /tmp/* /var/tmp/*
 
 # Set the default command to start Supervisor
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]EXPOSE 80

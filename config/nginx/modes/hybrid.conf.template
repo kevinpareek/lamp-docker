@@ -22,7 +22,7 @@ server {
 
     # Serve Static Assets Directly (Bypass Backend)
     location ~* \.(jpg|jpeg|gif|png|css|js|ico|xml|svg|woff|woff2|ttf|eot)$ {
-        root /var/www/html;
+        root ${APACHE_DOCUMENT_ROOT};
         access_log off;
         log_not_found off;
         expires ${NGINX_STATIC_EXPIRES};
@@ -82,7 +82,7 @@ server {
 
     # Serve Static Assets Directly (Bypass Backend)
     location ~* \.(jpg|jpeg|gif|png|css|js|ico|xml|svg|woff|woff2|ttf|eot)$ {
-        root /var/www/html;
+        root ${APACHE_DOCUMENT_ROOT};
         access_log off;
         log_not_found off;
         expires ${NGINX_STATIC_EXPIRES};

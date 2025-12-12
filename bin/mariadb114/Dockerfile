@@ -20,6 +20,9 @@ ENV MARIADB_AUTO_UPGRADE=1 \
 # ============================================
 COPY my.cnf /etc/mysql/conf.d/custom.cnf
 
+COPY healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/healthcheck.sh
+
 # ============================================
 # Create Log Directory
 # ============================================

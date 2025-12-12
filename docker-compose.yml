@@ -54,6 +54,8 @@ services:
       STACK_MODE: "${STACK_MODE:-hybrid}"
     networks:
       - frontend
+    depends_on:
+      - varnish
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
@@ -243,6 +245,11 @@ services:
     networks:
       - frontend
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "varnishadm ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     logging: *default-logging
 
 # ============================================
