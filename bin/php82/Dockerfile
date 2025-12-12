@@ -50,7 +50,7 @@ RUN apt-get update && \
     apt-get -y --no-install-recommends install --fix-missing libmagickwand-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Workarround until imagick is available in pecl with php8 support
+# Workaround until imagick is available in pecl with php8 support
 # Imagick Commit to install
 # https://github.com/Imagick/imagick
 ARG IMAGICK_COMMIT="661405abe21d12003207bc8eb0963fafc2c02ee4"
@@ -91,7 +91,7 @@ libpng-dev && \
     docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
     docker-php-ext-install gd
 
-# Insure an SSL directory exists
+# Ensure an SSL directory exists
 RUN mkdir -p /etc/apache2/ssl
 
 # Enable SSL support and Apache modules

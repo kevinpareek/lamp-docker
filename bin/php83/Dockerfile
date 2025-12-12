@@ -81,11 +81,9 @@ RUN mkdir -p /etc/apache2/ssl /var/log/{cron,supervisor} && \
     touch /var/log/cron.log /var/log/supervisor/supervisord.log
 
 # Copy custom cron jobs and Supervisor configuration
-# COPY crontab /etc/cron.d/custom-cron
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 
-##Set permissions for cron jobs (commented out for now)
-# RUN chmod 0644 /etc/cron.d/custom-cron && crontab /etc/cron.d/custom-cron
+
 
 # Clean up unnecessary files to reduce image size
 RUN rm -rf /usr/src/* /tmp/* /var/tmp/*
