@@ -50,6 +50,7 @@ services:
     environment:
       APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
       APPLICATIONS_DIR_NAME: "${APPLICATIONS_DIR_NAME}"
+      APP_ENV: "${APP_ENV:-development}"
     networks:
       - frontend
     healthcheck:
@@ -154,8 +155,7 @@ services:
       - "${REDIS_DATA_DIR}:/data"
     command: >
       redis-server
-      --appendonly no
-      --save ""
+      --appendonly yes
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
       --tcp-keepalive 300

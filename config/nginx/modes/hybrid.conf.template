@@ -8,11 +8,6 @@ server {
     listen [::]:80 default_server;
     server_name localhost _;
 
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
     # Gzip Compression
     gzip on;
     gzip_vary on;
@@ -20,19 +15,24 @@ server {
     gzip_comp_level 6;
     gzip_types text/plain text/css text/xml application/json application/javascript application/rss+xml application/atom+xml image/svg+xml;
 
-    # Brotli directives removed; module not present
+    # Brotli Compression
+    brotli on;
+    brotli_comp_level 6;
+    brotli_types text/plain text/css text/xml application/json application/javascript application/rss+xml application/atom+xml image/svg+xml;
 
     # Serve Static Assets Directly (Bypass Backend)
     location ~* \.(jpg|jpeg|gif|png|css|js|ico|xml|svg|woff|woff2|ttf|eot)$ {
         root /var/www/html;
         access_log off;
         log_not_found off;
-        expires 365d;
+        expires ${NGINX_STATIC_EXPIRES};
         add_header Cache-Control "public, no-transform";
     }
 
     # Proxy to Varnish
     location / {
+        proxy_hide_header Vary;
+        proxy_set_header Accept-Encoding "";
         proxy_pass http://varnish:80;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -75,19 +75,24 @@ server {
     gzip_comp_level 6;
     gzip_types text/plain text/css text/xml application/json application/javascript application/rss+xml application/atom+xml image/svg+xml;
 
-    # Brotli directives removed; module not present
+    # Brotli Compression
+    brotli on;
+    brotli_comp_level 6;
+    brotli_types text/plain text/css text/xml application/json application/javascript application/rss+xml application/atom+xml image/svg+xml;
 
     # Serve Static Assets Directly (Bypass Backend)
     location ~* \.(jpg|jpeg|gif|png|css|js|ico|xml|svg|woff|woff2|ttf|eot)$ {
         root /var/www/html;
         access_log off;
         log_not_found off;
-        expires 365d;
+        expires ${NGINX_STATIC_EXPIRES};
         add_header Cache-Control "public, no-transform";
     }
 
     # Proxy to Varnish
     location / {
+        proxy_hide_header Vary;
+        proxy_set_header Accept-Encoding "";
         proxy_pass http://varnish:80;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
