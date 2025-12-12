@@ -224,14 +224,23 @@ lamp_config() {
     fetch_dynamic_versions() {
         local bin_dir="$lampPath/bin"
         phpVersions=()
-        databaseList=()
+        mysqlOptions=()
+        mariadbOptions=()
 
         for entry in "$bin_dir"/*; do
             entry_name=$(basename "$entry")
-            if ([[ -d "$entry" ]] && [[ "$entry_name" == php* ]]); then
-                phpVersions+=("$entry_name")
-            elif [[ -d "$entry" ]]; then
-                databaseList+=("$entry_name")
+            if [[ -d "$entry" ]]; then
+                case "$entry_name" in
+                php*)
+                    phpVersions+=("$entry_name")
+                    ;;
+                mysql*)
+                    mysqlOptions+=("$entry_name")
+                    ;;
+                mariadb*)
+                    mariadbOptions+=("$entry_name")
+                    ;;
+                esac
             fi
         done
     }
@@ -280,18 +289,33 @@ lamp_config() {
 
     # Function to prompt user to input a valid database
     choose_database() {
+        local legacy_php=false
+        if [[ "$PHPVERSION" =~ php5[4-6] || "$PHPVERSION" == "php71" || "$PHPVERSION" == "php72" || "$PHPVERSION" == "php73" || "$PHPVERSION" == "php74" ]]; then
+            legacy_php=true
+        fi
+
         if $isAppleSilicon; then
-            yellow_message "Apple Silicon detected. Only MariaDB options are available."
-            databaseOptions=("${databaseList[@]:2}") # Only MariaDB options
+            yellow_message "Apple Silicon detected. Using MariaDB images for best compatibility."
+            databaseOptions=("${mariadbOptions[@]}")
         else
-            # For PHP versions <= 7.4, MySQL 8 is excluded
-            if [[ "$PHPVERSION" =~ php5[4-6] || "$PHPVERSION" == "php71" || "$PHPVERSION" == "php72" || "$PHPVERSION" == "php73" || "$PHPVERSION" == "php74" ]]; then
-                yellow_message "Available databases (MySQL 8 is not supported for PHP versions <= 7.4):"
-                databaseOptions=("${databaseList[@]:0:5}") # MySQL 5.7 and MariaDB options
+            if $legacy_php; then
+                yellow_message "Available databases (MySQL 8+ excluded for PHP <= 7.4):"
+                databaseOptions=()
+                for db in "${mysqlOptions[@]}"; do
+                    if [[ "$db" == "mysql57" ]]; then
+                        databaseOptions+=("$db")
+                    fi
+                done
+                databaseOptions+=("${mariadbOptions[@]}")
             else
                 blue_message "Available databases:"
-                databaseOptions=("${databaseList[@]}")
+                databaseOptions=("${mysqlOptions[@]}" "${mariadbOptions[@]}")
             fi
+        fi
+
+        if [[ ${#databaseOptions[@]} -eq 0 ]]; then
+            error_message "No database options found in ./bin. Please add mysql*/mariadb* folders."
+            exit 1
         fi
 
         green_message "${databaseOptions[*]}"
@@ -783,11 +807,12 @@ EOL
         # Enable the new virtual host and reload Apache
         yellow_message "Activating the virtual host..."
         if command -v docker >/dev/null; then
-            # docker compose exec webserver bash -c "cd /etc/apache2/sites-enabled && a2ensite $domain.conf && service apache2 reload"
-            docker compose exec webserver bash -c "service apache2 reload"
+            if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
+            fi
             docker compose exec reverse-proxy nginx -s reload
 
-            green_message "Virtual host $domain activated and Apache reloaded."
+            green_message "Virtual host $domain activated and web servers reloaded."
         fi
 
         # Open the domain in the default web browser
@@ -845,7 +870,7 @@ EOL
         backup_file="$backup_dir/lamp_backup_$timestamp.tgz"
 
         info_message "Backing up LAMP stack to $backup_file..."
-        databases=$(docker compose exec webserver bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
+        databases=$(docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
 
         # Create temporary directories for SQL and app data
         temp_sql_dir="$backup_dir/sql"
@@ -854,7 +879,7 @@ EOL
 
         for db in $databases; do
             backup_sql_file="$temp_sql_dir/db_backup_$db.sql"
-            docker compose exec webserver bash -c "exec mysqldump -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database --databases $db" >"$backup_sql_file"
+            docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysqldump -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database --databases $db" >"$backup_sql_file"
         done
 
         # Copy application data to the temporary app directory
@@ -919,9 +944,9 @@ EOL
                     # So it should contain CREATE DATABASE statement.
                     
                     # Copy sql file to container to avoid pipe issues with large files or special chars
-                    docker cp "$sql_file" "${COMPOSE_PROJECT_NAME}_webserver:/tmp/restore.sql"
-                    docker compose exec webserver bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database < /tmp/restore.sql"
-                    docker compose exec webserver bash -c "rm /tmp/restore.sql"
+                    docker compose cp "$sql_file" "$WEBSERVER_SERVICE:/tmp/restore.sql"
+                    docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database < /tmp/restore.sql"
+                    docker compose exec "$WEBSERVER_SERVICE" bash -c "rm /tmp/restore.sql"
                 fi
             done
         fi
