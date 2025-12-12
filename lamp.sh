@@ -533,8 +533,6 @@ lamp() {
         # Load all variables while excluding comments
         export $(grep -v '^#' .env | xargs)
     elif [[ $1 != "config" ]]; then
-        # error_message ".env file not found. RUN '$ lamp config'"
-        # return 1
         info_message ".env file not found. running.'$ lamp config'"
         lamp_config
     fi
@@ -560,23 +558,6 @@ lamp() {
     elif [[ $1 == "stop" ]]; then
         docker compose --profile "*" down
         green_message "LAMP stack is stopped"
-
-        # Optional: Close Docker Desktop on stop (uncomment if needed)
-        # case "$(uname -s)" in
-        # Darwin)
-        #     osascript -e 'quit app "Docker"'
-        #     ;;
-        # Linux)
-        #     sudo systemctl stop docker
-        #     ;;
-        # CYGWIN* | MINGW32* | MSYS* | MINGW*)
-        #     taskkill //IM "Docker Desktop.exe" //F
-        #     ;;
-        # *)
-        #     yellow_message "Unsupported OS. Please close Docker manually."
-        #     ;;
-        # esac
-        # green_message "Docker is stopped"
 
     # Open a bash shell inside the webserver container
     elif [[ $1 == "cmd" ]]; then

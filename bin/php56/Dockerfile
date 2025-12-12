@@ -43,6 +43,17 @@ RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
     && echo "xdebug.remote_enable=1" >> /usr/local/etc/php/php.ini; \
     fi
 
+# Install redis
+RUN pecl install redis-4.3.0 && \
+    docker-php-ext-enable redis
+
+# Install memcached
+RUN apt-get update && \
+    apt-get -y --no-install-recommends install --fix-missing libmemcached-dev && \
+    rm -rf /var/lib/apt/lists/* && \
+    pecl install memcached-2.2.0 && \
+    docker-php-ext-enable memcached
+
 # Install mhsendmail for Mailpit
 RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
     chmod +x /usr/local/bin/mhsendmail

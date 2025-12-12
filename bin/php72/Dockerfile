@@ -21,7 +21,7 @@ RUN apt-get -y upgrade
 RUN apt-get -yq install apt-utils nano wget dialog
 
 # Install important libraries
-RUN apt-get -y install --fix-missing apt-utils build-essential git curl libcurl3 libcurl3-dev zip openssl
+RUN apt-get -y install --fix-missing apt-utils build-essential git curl libcurl3 libcurl3-dev libmemcached-dev zip openssl
 
 # Composer
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
@@ -35,6 +35,10 @@ RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
 # Install redis
 RUN pecl install redis-4.0.1
 RUN docker-php-ext-enable redis
+
+# Install memcached
+RUN pecl install memcached
+RUN docker-php-ext-enable memcached
 
 # Other PHP7 Extensions
 

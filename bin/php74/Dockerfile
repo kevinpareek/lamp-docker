@@ -30,6 +30,7 @@ libonig-dev && \
     apt-get install -y iputils-ping && \
     apt-get -y --no-install-recommends install --fix-missing libcurl4 \
 libcurl4-openssl-dev \
+libmemcached-dev \
 zip \
 unzip \
 openssl && \
@@ -47,6 +48,10 @@ RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
 # Install redis
 RUN pecl install redis-5.1.1 && \
     docker-php-ext-enable redis
+
+# Install memcached
+RUN pecl install memcached && \
+    docker-php-ext-enable memcached
 
 # Install imagick
 RUN apt-get update && \

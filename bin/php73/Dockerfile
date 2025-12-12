@@ -26,7 +26,7 @@ RUN apt-get -y update && \
     apt-get -y --no-install-recommends install nano wget dialog libsqlite3-dev libsqlite3-0 && \
     apt-get -y --no-install-recommends install mysql-client zlib1g-dev libzip-dev libicu-dev && \
     apt-get -y --no-install-recommends install --fix-missing apt-utils build-essential git curl && \ 
-    apt-get -y --no-install-recommends install --fix-missing libcurl3 libcurl3-dev zip openssl && \
+    apt-get -y --no-install-recommends install --fix-missing libcurl3 libcurl3-dev libmemcached-dev zip openssl && \
     rm -rf /var/lib/apt/lists/* && \
     curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
@@ -39,6 +39,10 @@ RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
 # Install redis
 RUN pecl install redis-5.0.2 && \
     docker-php-ext-enable redis
+
+# Install memcached
+RUN pecl install memcached && \
+    docker-php-ext-enable memcached
 
 # Other PHP7 Extensions
 
