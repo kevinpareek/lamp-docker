@@ -504,7 +504,7 @@ lamp() {
 
     # Stop the LAMP stack
     elif [[ $1 == "stop" ]]; then
-        docker compose --profile $APP_ENV down
+        docker compose --profile "*" down
         green_message "LAMP stack is stopped"
 
         # Optional: Close Docker Desktop on stop (uncomment if needed)
@@ -530,12 +530,12 @@ lamp() {
 
     # Restart the LAMP stack
     elif [[ $1 == "restart" ]]; then
-        docker compose --profile $APP_ENV down && docker compose --profile $APP_ENV up -d
+        docker compose --profile "*" down && docker compose --profile $APP_ENV up -d
         green_message "LAMP stack restarted."
 
     # Rebuild & Start
     elif [[ $1 == "build" ]]; then
-        docker compose --profile $APP_ENV down
+        docker compose --profile "*" down
         # docker compose build
         docker compose --profile $APP_ENV up -d --build
         green_message "LAMP stack rebuilt and running."

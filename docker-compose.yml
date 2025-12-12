@@ -178,4 +178,4 @@ networks:
   backend:
     driver: bridge
     name: "${COMPOSE_PROJECT_NAME}-backend"
-    internal: true
+    # internal: true
