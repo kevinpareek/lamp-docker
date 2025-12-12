@@ -59,20 +59,20 @@ RUN docker-php-ext-install \
     docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
     docker-php-ext-install gd
 
+# Install Redis PHP extension via PECL
+RUN pecl install redis && docker-php-ext-enable redis
+
 # Install Memcached PHP extension via PECL
 RUN pecl install memcached && docker-php-ext-enable memcached
 
 # Install APCu PHP extension via PECL
 RUN pecl install apcu && docker-php-ext-enable apcu
 
-# Install Xdebug
+# Install Xdebug (optional)
 ARG INSTALL_XDEBUG=false
 RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
     pecl install xdebug && docker-php-ext-enable xdebug; \
     fi
-
-# Install Xdebug
-RUN pecl install xdebug && docker-php-ext-enable xdebug
 
 # Install mhsendmail for Mailpit
 RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \

@@ -146,4 +146,3 @@ EXPOSE 9000
 # Entrypoint
 # ============================================
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
-EXPOSE 9000

@@ -160,4 +160,3 @@ EXPOSE 80 443
 # Entrypoint
 # ============================================
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
-EXPOSE 80

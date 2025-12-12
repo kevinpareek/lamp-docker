@@ -96,10 +96,11 @@ RUN mkdir -p /etc/apache2/ssl /var/log/{cron,supervisor} && \
 # Copy custom cron jobs and Supervisor configuration
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 
-
-
 # Clean up unnecessary files to reduce image size
 RUN rm -rf /usr/src/* /tmp/* /var/tmp/*
 
+# Expose Ports
+EXPOSE 80
+
 # Set the default command to start Supervisor
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]EXPOSE 80
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
