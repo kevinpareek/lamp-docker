@@ -3,7 +3,7 @@
 
 FROM php:7.2-apache-stretch
 
-#Surpresses debconf complaints of trying to install apt packages interactively
+#Suppresses debconf complaints of trying to install apt packages interactively
 #https://github.com/moby/moby/issues/4032#issuecomment-192327844
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -21,18 +21,24 @@ RUN apt-get -y upgrade
 RUN apt-get -yq install apt-utils nano wget dialog
 
 # Install important libraries
-RUN apt-get -y install --fix-missing apt-utils build-essential git curl libcurl3 libcurl3-dev zip openssl
+RUN apt-get -y install --fix-missing apt-utils build-essential git curl libcurl3 libcurl3-dev libmemcached-dev zip openssl
 
 # Composer
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 # Install xdebug
-RUN pecl install xdebug-2.6.0
-RUN docker-php-ext-enable xdebug
+ARG INSTALL_XDEBUG=false
+RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
+    pecl install xdebug-2.6.0 && docker-php-ext-enable xdebug; \
+    fi
 
 # Install redis
 RUN pecl install redis-4.0.1
 RUN docker-php-ext-enable redis
+
+# Install memcached
+RUN pecl install memcached
+RUN docker-php-ext-enable memcached
 
 # Other PHP7 Extensions
 
@@ -59,7 +65,11 @@ RUN apt-get install -y libfreetype6-dev libjpeg62-turbo-dev libpng-dev
 RUN docker-php-ext-configure gd --with-freetype-dir=/usr/include/ --with-jpeg-dir=/usr/include/ 
 RUN docker-php-ext-install -j$(nproc) gd
 
-# Insure an SSL directory exists
+# Install mhsendmail for Mailpit
+RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
+    chmod +x /usr/local/bin/mhsendmail
+
+# Ensure an SSL directory exists
 RUN mkdir -p /etc/apache2/ssl
 
 # Enable SSL support and Apache modules

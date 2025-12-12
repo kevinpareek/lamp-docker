@@ -1,12 +1,12 @@
 # ============================================
-# PHP 8.4 FPM Production Ready Docker Image
+# PHP 8.5 Production Ready Docker Image
 # Optimized for Performance & Security
 # ============================================
-FROM php:8.4-fpm-bookworm AS base
+FROM php:8.5-apache-bookworm AS base
 
 LABEL maintainer="LAMP Docker <github.com/kevinpareek/lamp-docker>"
 LABEL version="2.0"
-LABEL description="Production-ready PHP 8.4 FPM with Redis, Imagick"
+LABEL description="Production-ready PHP 8.5 with Apache, Redis, Imagick"
 LABEL org.opencontainers.image.source="https://github.com/kevinpareek/lamp-docker"
 
 # ============================================
@@ -38,8 +38,6 @@ RUN set -eux; \
         unzip \
         zip \
         ca-certificates \
-        # Healthcheck
-        libfcgi-bin \
         # Database
         default-mysql-client \
         # PHP Dependencies
@@ -118,10 +116,26 @@ RUN curl -fsSL 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/m
     && chmod +x /usr/local/bin/mhsendmail
 
 # ============================================
+# Apache Configuration
+# ============================================
+RUN set -eux; \
+    echo "ServerName localhost" >> /etc/apache2/apache2.conf \
+    && a2enmod ssl rewrite headers expires deflate proxy proxy_http \
+    && { \
+        echo 'ServerTokens Prod'; \
+        echo 'ServerSignature Off'; \
+        echo 'TraceEnable Off'; \
+        echo 'Header always set X-Content-Type-Options "nosniff"'; \
+        echo 'Header always set X-Frame-Options "SAMEORIGIN"'; \
+        echo 'Header always set X-XSS-Protection "1; mode=block"'; \
+    } >> /etc/apache2/conf-available/security.conf \
+    && a2enconf security
+
+# ============================================
 # Setup Directories & Permissions
 # ============================================
 RUN set -eux; \
-    mkdir -p /var/log/{cron,supervisor} /var/www/html \
+    mkdir -p /etc/apache2/ssl /var/log/{cron,supervisor} /var/www/html \
     && touch /var/log/cron.log /var/log/supervisor/supervisord.log \
     && chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html
@@ -134,12 +148,12 @@ RUN set -eux; \
 # Health Check
 # ============================================
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD cgi-fcgi -bind -connect 127.0.0.1:9000 || exit 1
+    CMD curl -sf http://localhost/server-status || curl -sf http://localhost/ || exit 1
 
 # ============================================
 # Expose Ports
 # ============================================
-EXPOSE 9000
+EXPOSE 80 443
 
 # ============================================
 # Entrypoint

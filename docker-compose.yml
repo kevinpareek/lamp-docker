@@ -50,10 +50,15 @@ services:
     environment:
       APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
       APPLICATIONS_DIR_NAME: "${APPLICATIONS_DIR_NAME}"
+      APP_ENV: "${APP_ENV:-development}"
+      STACK_MODE: "${STACK_MODE:-hybrid}"
     networks:
       - frontend
+      - backend
+    depends_on:
+      - varnish
     healthcheck:
-      test: ["CMD", "nginx", "-t"]
+      test: ["CMD", "curl", "-f", "http://localhost/nginx-health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -75,6 +80,7 @@ services:
       - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:rw"
       - "${VHOSTS_DIR}:/etc/apache2/sites-enabled:ro"
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
+      - "./config/php/supervisord.conf:/etc/supervisor/supervisord.conf:ro"
       - "${APACHE_LOG_DIR}:/var/log/apache2"
       - "${SSL_DIR}:/etc/apache2/ssl:ro"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
@@ -101,6 +107,7 @@ services:
     volumes:
       - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:rw"
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
+      - "./config/php/supervisord.fpm.conf:/etc/supervisor/supervisord.conf:ro"
       - "./config/php/www.conf:/usr/local/etc/php-fpm.d/www.conf:ro"
       - "${APACHE_LOG_DIR}:/var/log/php-fpm"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
@@ -125,6 +132,8 @@ services:
       - "${MYSQL_INITDB_DIR}:/docker-entrypoint-initdb.d:ro"
       - "${MYSQL_DATA_DIR}:/var/lib/mysql"
       - "${MYSQL_LOG_DIR}:/var/log/mysql"
+      - "./config/mariadb/my.cnf:/etc/mysql/conf.d/custom.cnf:ro"
+      - "./bin/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro"
     environment:
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
       MYSQL_DATABASE: "${MYSQL_DATABASE}"
@@ -154,8 +163,7 @@ services:
       - "${REDIS_DATA_DIR}:/data"
     command: >
       redis-server
-      --appendonly no
-      --save ""
+      --appendonly yes
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
       --tcp-keepalive 300
@@ -234,7 +242,7 @@ services:
     container_name: "${COMPOSE_PROJECT_NAME}-varnish"
     restart: unless-stopped
     volumes:
-      - "./config/varnish/default.vcl:/etc/varnish/default.vcl:ro"
+      - "./config/varnish/${STACK_MODE:-hybrid}.vcl:/etc/varnish/default.vcl:ro"
     tmpfs:
       - /var/lib/varnish:exec
     environment:
@@ -242,6 +250,11 @@ services:
     networks:
       - frontend
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "varnishadm ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     logging: *default-logging
 
 # ============================================

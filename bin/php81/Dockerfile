@@ -1,6 +1,6 @@
 FROM php:8.1-apache-buster
 
-# Surpresses debconf complaints of trying to install apt packages interactively
+# Suppresses debconf complaints of trying to install apt packages interactively
 # https://github.com/moby/moby/issues/4032#issuecomment-192327844
  
 ARG DEBIAN_FRONTEND=noninteractive
@@ -12,7 +12,7 @@ RUN apt-get -y update --fix-missing && \
     rm -rf /var/lib/apt/lists/*
 
 
-# Install useful tools and install important libaries
+# Install useful tools and install important libraries
 RUN apt-get -y update && \
     apt-get -y --no-install-recommends install nano wget \
 dialog \
@@ -30,6 +30,7 @@ libonig-dev && \
     apt-get install -y iputils-ping && \
     apt-get -y --no-install-recommends install --fix-missing libcurl4 \
 libcurl4-openssl-dev \
+libmemcached-dev \
 zip \
 unzip \
 openssl && \
@@ -37,20 +38,27 @@ openssl && \
     curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 # Install xdebug
-RUN pecl install xdebug-3.1.4 && \
+ARG INSTALL_XDEBUG=false
+RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
+    pecl install xdebug-3.1.4 && \
     docker-php-ext-enable xdebug && \
-    mkdir /var/log/xdebug
+    mkdir /var/log/xdebug; \
+    fi
 
 # Install redis
 RUN pecl install redis-5.3.3 && \
     docker-php-ext-enable redis
+
+# Install memcached
+RUN pecl install memcached && \
+    docker-php-ext-enable memcached
 
 # Install imagick
 RUN apt-get update && \
     apt-get -y --no-install-recommends install --fix-missing libmagickwand-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Workarround until imagick is available in pecl with php8 support
+# Workaround until imagick is available in pecl with php8 support
 # Imagick Commit to install
 # https://github.com/Imagick/imagick
 ARG IMAGICK_COMMIT="661405abe21d12003207bc8eb0963fafc2c02ee4"
@@ -91,7 +99,11 @@ libpng-dev && \
     docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
     docker-php-ext-install gd
 
-# Insure an SSL directory exists
+# Install mhsendmail for Mailpit
+RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
+    chmod +x /usr/local/bin/mhsendmail
+
+# Ensure an SSL directory exists
 RUN mkdir -p /etc/apache2/ssl
 
 # Enable SSL support and Apache modules

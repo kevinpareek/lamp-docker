@@ -1,12 +1,12 @@
 # ============================================
-# PHP 8.4 FPM Production Ready Docker Image
+# PHP 8.5 FPM Production Ready Docker Image
 # Optimized for Performance & Security
 # ============================================
-FROM php:8.4-fpm-bookworm AS base
+FROM php:8.5-fpm-bookworm AS base
 
 LABEL maintainer="LAMP Docker <github.com/kevinpareek/lamp-docker>"
 LABEL version="2.0"
-LABEL description="Production-ready PHP 8.4 FPM with Redis, Imagick"
+LABEL description="Production-ready PHP 8.5 FPM with Redis, Imagick"
 LABEL org.opencontainers.image.source="https://github.com/kevinpareek/lamp-docker"
 
 # ============================================

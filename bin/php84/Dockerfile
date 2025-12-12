@@ -119,7 +119,8 @@ RUN curl -fsSL 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/m
 # Apache Configuration
 # ============================================
 RUN set -eux; \
-    a2enmod ssl rewrite headers expires deflate proxy proxy_http \
+    echo "ServerName localhost" >> /etc/apache2/apache2.conf \
+    && a2enmod ssl rewrite headers expires deflate proxy proxy_http \
     && { \
         echo 'ServerTokens Prod'; \
         echo 'ServerSignature Off'; \
@@ -142,7 +143,6 @@ RUN set -eux; \
 # ============================================
 # Copy Configuration
 # ============================================
-COPY supervisord.conf /etc/supervisor/supervisord.conf
 
 # ============================================
 # Health Check

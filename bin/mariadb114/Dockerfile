@@ -18,7 +18,7 @@ ENV MARIADB_AUTO_UPGRADE=1 \
 # ============================================
 # Copy Custom Configuration
 # ============================================
-COPY my.cnf /etc/mysql/conf.d/custom.cnf
+
 
 # ============================================
 # Create Log Directory
@@ -31,6 +31,6 @@ RUN mkdir -p /var/log/mysql \
 # Health Check
 # ============================================
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD healthcheck.sh --connect --innodb_initialized || exit 1
+    CMD mariadb-admin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" --silent
 
 EXPOSE 3306

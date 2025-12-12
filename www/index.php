@@ -1,12 +1,26 @@
 <?php
 
+// Security headers
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: SAMEORIGIN');
+header('X-XSS-Protection: 1; mode=block');
+header('Content-Type: text/html; charset=UTF-8');
+
 require_once './config.php';
+
+// Helper function for safe HTML output
+function e(string $str): string {
+    return htmlspecialchars($str, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+}
 
 $domainData = [];
 
 function extractDomainData($file)
 {
     $content = file_get_contents($file);
+    if ($content === false) {
+        return null;
+    }
     $domain = extractPattern($content, '/ServerName\s+([^\s;]+)/i');
     $path = extractPattern($content, '/DocumentRoot\s+([^\s;]+)/i');
 
@@ -68,38 +82,7 @@ function getSubDir($currDir = null)
     <title>LAMP STACK</title>
     <link rel="shortcut icon" href="/assets/images/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/assets/css/bulma.min.css">
-    <style>
-        .hero {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-        }
-
-        footer {
-            margin-top: auto;
-            padding: 20px 0;
-            background-color: #222;
-            color: #fff;
-            text-align: center;
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            border-top: 5px solid #715dbb;
-        }
-
-        footer p {
-            margin: 5px 0;
-        }
-
-        footer a {
-            color: #715dbb;
-            text-decoration: none;
-        }
-
-        footer a:hover {
-            color: #fff;
-            text-decoration: underline;
-        }
-    </style>
+    <link rel="stylesheet" href="/style.css">
 </head>
 
 <body>
@@ -150,10 +133,9 @@ function getSubDir($currDir = null)
                     <div class="content">
                         <ul>
                             <li><a target="_blank" href="http://localhost:<?= $PMA_PORT; ?>">phpMyAdmin</a></li>
-                            <li><a href="/test_db.php">Test DB Connection with mysqli</a></li>
-                            <li><a href="/test_db_pdo.php">Test DB Connection with PDO</a></li>
-                            <li><a href="#">Check 404 Error</a></li>
-                            <li><a href="#">Check Error</a></li>
+                            <li><a href="/test_db.php">Test DB Connection (MySQLi & PDO)</a></li>
+                            <li><a href="/nonexistent-page-test">Check 404 Error</a></li>
+                            <li><a target="_blank" href="http://localhost:8025">Mailpit</a></li>
                         </ul>
                     </div>
                 </div>
@@ -167,17 +149,20 @@ function getSubDir($currDir = null)
                 <?php
                 if (!empty($domainData)) {
                     echo '<div class="column">
-    <h3 class="title is-3 has-text-centered">' . ucfirst(DOMAIN_APP_DIR) . '</h3>
+    <h3 class="title is-3 has-text-centered">' . e(ucfirst(DOMAIN_APP_DIR)) . '</h3>
     <hr>
     <div class="content">
         <ul>';
 
                     foreach ($domainData as $dd) {
+                        $apacheRoot = $_ENV['APACHE_DOCUMENT_ROOT'] ?? '/var/www/html';
+                        $displayPath = str_replace($apacheRoot . '/' . DOMAIN_APP_DIR . '/', '', $dd['path']);
+                        $localPath = str_replace($apacheRoot, $LOCAL_DOCUMENT_ROOT, $dd['path']);
                         echo '
                         <li>
-                            <a target="_blank" href="https://' . $dd['domain'] . '">' . str_replace($_ENV['APACHE_DOCUMENT_ROOT'] . '/' . DOMAIN_APP_DIR . '/', '', $dd['path']) . '</a>
-                            <br> -<code>' . $dd['path'] . '</code>
-                            <br> -<code>' . str_replace($_ENV['APACHE_DOCUMENT_ROOT'], $LOCAL_DOCUMENT_ROOT, $dd['path']) . '</code>
+                            <a target="_blank" href="https://' . e($dd['domain']) . '">' . e($displayPath) . '</a>
+                            <br> -<code>' . e($dd['path']) . '</code>
+                            <br> -<code>' . e($localPath) . '</code>
                          </li>';
                     }
                     echo    '</ul>
@@ -189,7 +174,7 @@ function getSubDir($currDir = null)
                 if (!empty($sDirList)) {
                     foreach ($sDirList as $sDirName) {
                         echo '<div class="column">
-                    <h3 class="title is-3 has-text-centered">' . ucfirst($sDirName) . '</h3>
+                    <h3 class="title is-3 has-text-centered">' . e(ucfirst($sDirName)) . '</h3>
                     <hr>
                     <div class="content">
                         <ul>';
@@ -197,7 +182,7 @@ function getSubDir($currDir = null)
                         $ssDirList = getSubDir(__DIR__ . '/' . $sDirName);
                         if (!empty($ssDirList)) {
                             foreach ($ssDirList as $ssDirName) {
-                                echo '<li><a target="_blank" href="http://localhost/' . $sDirName . '/' . $ssDirName . '/">' . $ssDirName . '</a></li>';
+                                echo '<li><a target="_blank" href="http://localhost/' . e($sDirName) . '/' . e($ssDirName) . '/">' . e($ssDirName) . '</a></li>';
                             }
                         }
 

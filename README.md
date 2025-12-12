@@ -8,7 +8,7 @@ Whether you're a seasoned Docker pro or just getting started, this stack has you
 
 ## ✨ Features
 
-*   **Multiple PHP Versions**: Switch between PHP 5.4 to 8.5 easily.
+*   **Multiple PHP Versions**: Switch between PHP 5.4 to 8.4 easily.
 *   **Database Choice**: Choose between MySQL (5.7, 8.0) or MariaDB (10.3 - 11.4).
 *   **Automatic SSL**: Built-in `mkcert` integration for valid HTTPS on local domains.
 *   **VHost Management**: Create new sites with a single command.
@@ -242,7 +242,7 @@ compose build` and restart the Docker containers.
 phpMyAdmin is configured to run on port 8080. Use the following default credentials:
 - URL: `http://localhost:8080/`
 - Username: `root`
-- Password: `tiger`
+- Password: `root` (or as configured in your `.env` file)
 
 ## Xdebug
 

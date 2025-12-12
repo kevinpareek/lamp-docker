@@ -32,7 +32,8 @@ RUN apt-get update --fix-missing && \
         libmagickwand-dev \
         libfreetype6-dev \
         libjpeg62-turbo-dev \
-        libpng-dev && \
+        libpng-dev \
+        libmemcached-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -51,15 +52,27 @@ RUN docker-php-ext-install \
         mbstring \
         gettext \
         calendar \
-        exif && \
+        exif \
+        opcache \
+        pcntl \
+        sockets && \
     docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
     docker-php-ext-install gd
 
 # Install Redis PHP extension via PECL
 RUN pecl install redis && docker-php-ext-enable redis
 
-# Install Xdebug
-RUN pecl install xdebug && docker-php-ext-enable xdebug
+# Install Memcached PHP extension via PECL
+RUN pecl install memcached && docker-php-ext-enable memcached
+
+# Install APCu PHP extension via PECL
+RUN pecl install apcu && docker-php-ext-enable apcu
+
+# Install Xdebug (optional)
+ARG INSTALL_XDEBUG=false
+RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
+    pecl install xdebug && docker-php-ext-enable xdebug; \
+    fi
 
 # Install mhsendmail for Mailpit
 RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
@@ -79,7 +92,6 @@ RUN mkdir -p /var/log/{cron,supervisor} && \
     touch /var/log/cron.log /var/log/supervisor/supervisord.log
 
 # Copy custom cron jobs and Supervisor configuration
-COPY supervisord.fpm.conf /etc/supervisor/supervisord.conf
 
 # Clean up unnecessary files to reduce image size
 RUN rm -rf /usr/src/* /tmp/* /var/tmp/*

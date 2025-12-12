@@ -224,14 +224,23 @@ lamp_config() {
     fetch_dynamic_versions() {
         local bin_dir="$lampPath/bin"
         phpVersions=()
-        databaseList=()
+        mysqlOptions=()
+        mariadbOptions=()
 
         for entry in "$bin_dir"/*; do
             entry_name=$(basename "$entry")
-            if ([[ -d "$entry" ]] && [[ "$entry_name" == php* ]]); then
-                phpVersions+=("$entry_name")
-            elif [[ -d "$entry" ]]; then
-                databaseList+=("$entry_name")
+            if [[ -d "$entry" ]]; then
+                case "$entry_name" in
+                php*)
+                    phpVersions+=("$entry_name")
+                    ;;
+                mysql*)
+                    mysqlOptions+=("$entry_name")
+                    ;;
+                mariadb*)
+                    mariadbOptions+=("$entry_name")
+                    ;;
+                esac
             fi
         done
     }
@@ -280,18 +289,33 @@ lamp_config() {
 
     # Function to prompt user to input a valid database
     choose_database() {
+        local legacy_php=false
+        if [[ "$PHPVERSION" =~ php5[4-6] || "$PHPVERSION" == "php71" || "$PHPVERSION" == "php72" || "$PHPVERSION" == "php73" || "$PHPVERSION" == "php74" ]]; then
+            legacy_php=true
+        fi
+
         if $isAppleSilicon; then
-            yellow_message "Apple Silicon detected. Only MariaDB options are available."
-            databaseOptions=("${databaseList[@]:2}") # Only MariaDB options
+            yellow_message "Apple Silicon detected. Using MariaDB images for best compatibility."
+            databaseOptions=("${mariadbOptions[@]}")
         else
-            # For PHP versions <= 7.4, MySQL 8 is excluded
-            if [[ "$PHPVERSION" =~ php5[4-6] || "$PHPVERSION" == "php71" || "$PHPVERSION" == "php72" || "$PHPVERSION" == "php73" || "$PHPVERSION" == "php74" ]]; then
-                yellow_message "Available databases (MySQL 8 is not supported for PHP versions <= 7.4):"
-                databaseOptions=("${databaseList[@]:0:5}") # MySQL 5.7 and MariaDB options
+            if $legacy_php; then
+                yellow_message "Available databases (MySQL 8+ excluded for PHP <= 7.4):"
+                databaseOptions=()
+                for db in "${mysqlOptions[@]}"; do
+                    if [[ "$db" == "mysql57" ]]; then
+                        databaseOptions+=("$db")
+                    fi
+                done
+                databaseOptions+=("${mariadbOptions[@]}")
             else
                 blue_message "Available databases:"
-                databaseOptions=("${databaseList[@]}")
+                databaseOptions=("${mysqlOptions[@]}" "${mariadbOptions[@]}")
             fi
+        fi
+
+        if [[ ${#databaseOptions[@]} -eq 0 ]]; then
+            error_message "No database options found in ./bin. Please add mysql*/mariadb* folders."
+            exit 1
         fi
 
         green_message "${databaseOptions[*]}"
@@ -495,6 +519,7 @@ lamp_start() {
     fi
     info_message "  • Database: localhost:${HOST_MACHINE_MYSQL_PORT:-3306}"
     info_message "  • Redis: localhost:${HOST_MACHINE_REDIS_PORT:-6379}"
+    info_message "  • Memcached: localhost:11211"
     print_line
 }
 
@@ -508,8 +533,6 @@ lamp() {
         # Load all variables while excluding comments
         export $(grep -v '^#' .env | xargs)
     elif [[ $1 != "config" ]]; then
-        # error_message ".env file not found. RUN '$ lamp config'"
-        # return 1
         info_message ".env file not found. running.'$ lamp config'"
         lamp_config
     fi
@@ -535,23 +558,6 @@ lamp() {
     elif [[ $1 == "stop" ]]; then
         docker compose --profile "*" down
         green_message "LAMP stack is stopped"
-
-        # Optional: Close Docker Desktop on stop (uncomment if needed)
-        # case "$(uname -s)" in
-        # Darwin)
-        #     osascript -e 'quit app "Docker"'
-        #     ;;
-        # Linux)
-        #     sudo systemctl stop docker
-        #     ;;
-        # CYGWIN* | MINGW32* | MSYS* | MINGW*)
-        #     taskkill //IM "Docker Desktop.exe" //F
-        #     ;;
-        # *)
-        #     yellow_message "Unsupported OS. Please close Docker manually."
-        #     ;;
-        # esac
-        # green_message "Docker is stopped"
 
     # Open a bash shell inside the webserver container
     elif [[ $1 == "cmd" ]]; then
@@ -783,17 +789,108 @@ EOL
         # Enable the new virtual host and reload Apache
         yellow_message "Activating the virtual host..."
         if command -v docker >/dev/null; then
-            # docker compose exec webserver bash -c "cd /etc/apache2/sites-enabled && a2ensite $domain.conf && service apache2 reload"
-            docker compose exec webserver bash -c "service apache2 reload"
+            if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
+            fi
             docker compose exec reverse-proxy nginx -s reload
 
-            green_message "Virtual host $domain activated and Apache reloaded."
+            green_message "Virtual host $domain activated and web servers reloaded."
         fi
 
         # Open the domain in the default web browser
         open_browser "$domainUrl"
 
         green_message "App setup complete: $app_name with domain $domain"
+
+    # Remove an application
+    elif [[ $1 == "removeapp" ]]; then
+        if [[ -z $2 ]]; then
+            error_message "Application name is required."
+            return 1
+        fi
+
+        app_name=$2
+        
+        # Try to find the domain from the vhost file or assume default
+        # This is tricky because we don't store the mapping. 
+        # We can search for the app_name in the vhosts directory.
+        
+        # Simple approach: Ask for domain or assume default
+        domain=$3
+        if [[ -z $domain ]]; then
+             # Try to find a vhost file containing the app path
+             found_vhost=$(grep -l "$APPLICATIONS_DIR_NAME/$app_name" "$VHOSTS_DIR"/*.conf 2>/dev/null | head -n 1)
+             if [[ -n "$found_vhost" ]]; then
+                 domain=$(basename "$found_vhost" .conf)
+                 info_message "Found domain $domain for app $app_name"
+             else
+                 domain="${app_name}.localhost"
+                 yellow_message "Domain not provided and not found. Assuming $domain"
+             fi
+        fi
+
+        vhost_file="${VHOSTS_DIR}/${domain}.conf"
+        nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
+        app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name"
+
+        if [[ ! -f $vhost_file && ! -d $app_root ]]; then
+            error_message "Application $app_name not found."
+            return 1
+        fi
+
+        if yes_no_prompt "Are you sure you want to remove app '$app_name' and domain '$domain'? This will delete configuration files."; then
+            # Remove config files
+            if [[ -f $vhost_file ]]; then
+                rm "$vhost_file"
+                green_message "Removed $vhost_file"
+            fi
+            if [[ -f $nginx_file ]]; then
+                rm "$nginx_file"
+                green_message "Removed $nginx_file"
+            fi
+            
+            # Remove SSL certs if they exist
+            if [[ -f "$lampPath/config/ssl/$domain-key.pem" ]]; then
+                rm "$lampPath/config/ssl/$domain-key.pem"
+                rm "$lampPath/config/ssl/$domain-cert.pem"
+                green_message "Removed SSL certificates for $domain"
+            fi
+
+            # Remove app directory
+            if [[ -d $app_root ]]; then
+                if yes_no_prompt "Do you also want to delete the application files at $app_root?"; then
+                    rm -rf "$app_root"
+                    green_message "Removed application files."
+                else
+                    info_message "Application files kept at $app_root"
+                fi
+            fi
+
+            # Reload servers
+            yellow_message "Reloading web servers..."
+            if command -v docker >/dev/null; then
+                if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
+                    docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
+                fi
+                docker compose exec reverse-proxy nginx -s reload
+                green_message "Web servers reloaded."
+            fi
+        else
+            info_message "Operation cancelled."
+        fi
+
+    # Show logs
+    elif [[ $1 == "logs" ]]; then
+        service=$2
+        if [[ -z $service ]]; then
+            docker compose logs -f
+        else
+            docker compose logs -f "$service"
+        fi
+
+    # Show status
+    elif [[ $1 == "status" ]]; then
+        docker compose ps
 
     # Handle 'code' command to open application directories
     elif [[ $1 == "code" ]]; then
@@ -845,7 +942,7 @@ EOL
         backup_file="$backup_dir/lamp_backup_$timestamp.tgz"
 
         info_message "Backing up LAMP stack to $backup_file..."
-        databases=$(docker compose exec webserver bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
+        databases=$(docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
 
         # Create temporary directories for SQL and app data
         temp_sql_dir="$backup_dir/sql"
@@ -854,7 +951,7 @@ EOL
 
         for db in $databases; do
             backup_sql_file="$temp_sql_dir/db_backup_$db.sql"
-            docker compose exec webserver bash -c "exec mysqldump -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database --databases $db" >"$backup_sql_file"
+            docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysqldump -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database --databases $db" >"$backup_sql_file"
         done
 
         # Copy application data to the temporary app directory
@@ -919,9 +1016,9 @@ EOL
                     # So it should contain CREATE DATABASE statement.
                     
                     # Copy sql file to container to avoid pipe issues with large files or special chars
-                    docker cp "$sql_file" "${COMPOSE_PROJECT_NAME}_webserver:/tmp/restore.sql"
-                    docker compose exec webserver bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database < /tmp/restore.sql"
-                    docker compose exec webserver bash -c "rm /tmp/restore.sql"
+                    docker compose cp "$sql_file" "$WEBSERVER_SERVICE:/tmp/restore.sql"
+                    docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database < /tmp/restore.sql"
+                    docker compose exec "$WEBSERVER_SERVICE" bash -c "rm /tmp/restore.sql"
                 fi
             done
         fi
@@ -979,11 +1076,14 @@ EOL
         echo "  build       Rebuild and start the LAMP stack"
         echo "  cmd         Open a bash shell in the webserver container"
         echo "  addapp      Add a new application (usage: lamp addapp <name> [domain])"
+        echo "  removeapp   Remove an application (usage: lamp removeapp <name> [domain])"
         echo "  code        Open VS Code for an app (usage: lamp code [name])"
         echo "  config      Configure the environment"
         echo "  backup      Backup databases and applications"
         echo "  restore     Restore from a backup"
         echo "  ssl         Generate SSL certificates (usage: lamp ssl <domain>)"
+        echo "  logs        Show logs (usage: lamp logs [service])"
+        echo "  status      Show stack status"
         echo "  mail        Open Mailpit"
         echo "  pma         Open phpMyAdmin"
         echo "  redis-cli   Open Redis CLI"

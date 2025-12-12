@@ -1,11 +1,5 @@
 vcl 4.0;
 
-# ============================================
-# Default Varnish Configuration Template
-# Copy and modify for custom setups
-# Use hybrid.vcl or thunder.vcl for LAMP stack
-# ============================================
-
 backend default {
     .host = "webserver";
     .port = "80";
@@ -15,9 +9,10 @@ backend default {
     .probe = {
         .url = "/";
         .timeout = 2s;
-        .interval = 5s;
+        .interval = 2s;
         .window = 5;
         .threshold = 3;
+        .initial = 3;
     }
 }
 
@@ -41,29 +36,21 @@ sub vcl_recv {
 }
 
 sub vcl_backend_response {
-    # Grace mode: Keep content for 2 minutes beyond TTL
-    set beresp.grace = 2m;
-
-    # Set a default TTL if not set by the backend
-    if (beresp.ttl <= 0s) {
-        set beresp.ttl = 120s;
-        set beresp.uncacheable = true;
-        return (deliver);
+    # Set TTL for static assets
+    if (bereq.url ~ "\.(css|js|png|gif|jp(e)?g|swf|ico)") {
+        unset beresp.http.cookie;
+        set beresp.ttl = 365d;
     }
-    return (deliver);
+
+    # Allow stale content if backend is down
+    set beresp.grace = 6h;
 }
 
 sub vcl_deliver {
-    # Add a header to indicate cache status
+    # Add debug header
     if (obj.hits > 0) {
         set resp.http.X-Cache = "HIT";
     } else {
         set resp.http.X-Cache = "MISS";
     }
-    
-    # Remove some headers for security/cleanliness
-    unset resp.http.X-Powered-By;
-    unset resp.http.Server;
-    unset resp.http.Via;
-    unset resp.http.X-Varnish;
 }

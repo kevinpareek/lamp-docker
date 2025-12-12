@@ -10,11 +10,6 @@ server {
     root ${APACHE_DOCUMENT_ROOT};
     index index.php index.html index.htm;
 
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
     # Gzip Compression
     gzip on;
     gzip_vary on;
@@ -31,12 +26,14 @@ server {
     location ~* \.(jpg|jpeg|gif|png|css|js|ico|xml|svg|woff|woff2|ttf|eot)$ {
         access_log off;
         log_not_found off;
-        expires 365d;
+        expires ${NGINX_STATIC_EXPIRES};
         add_header Cache-Control "public, no-transform";
     }
 
     # Proxy to Varnish
     location / {
+        proxy_hide_header Vary;
+        proxy_set_header Accept-Encoding "";
         proxy_pass http://varnish:80;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -68,8 +65,30 @@ server {
     ssl_certificate_key /etc/nginx/ssl/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
+    # Gzip Compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/rss+xml application/atom+xml image/svg+xml;
+
+    # Brotli Compression
+    brotli on;
+    brotli_comp_level 6;
+    brotli_types text/plain text/css text/xml application/json application/javascript application/rss+xml application/atom+xml image/svg+xml;
+
+    # Serve Static Assets Directly (Bypass Backend)
+    location ~* \.(jpg|jpeg|gif|png|css|js|ico|xml|svg|woff|woff2|ttf|eot)$ {
+        access_log off;
+        log_not_found off;
+        expires ${NGINX_STATIC_EXPIRES};
+        add_header Cache-Control "public, no-transform";
+    }
+
     # Proxy to Varnish
     location / {
+        proxy_hide_header Vary;
+        proxy_set_header Accept-Encoding "";
         proxy_pass http://varnish:80;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -107,6 +126,13 @@ server {
         fastcgi_read_timeout 60s;
         fastcgi_buffer_size 4k;
         fastcgi_buffers 8 4k;
+    }
+
+    # Health check endpoint
+    location /nginx-health {
+        access_log off;
+        return 200 "OK";
+        add_header Content-Type text/plain;
     }
 }
 
