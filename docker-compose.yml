@@ -54,10 +54,11 @@ services:
       STACK_MODE: "${STACK_MODE:-hybrid}"
     networks:
       - frontend
+      - backend
     depends_on:
       - varnish
     healthcheck:
-      test: ["CMD", "nginx", "-t"]
+      test: ["CMD", "curl", "-f", "http://localhost/nginx-health"]
       interval: 30s
       timeout: 5s
       retries: 3

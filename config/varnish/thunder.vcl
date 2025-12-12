@@ -9,9 +9,10 @@ backend default {
     .probe = {
         .url = "/nginx-health";
         .timeout = 2s;
-        .interval = 5s;
+        .interval = 2s;
         .window = 5;
         .threshold = 3;
+        .initial = 3;
     }
 }
 
