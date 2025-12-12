@@ -9,7 +9,9 @@
 !/config/ssl/cert.pem
 !/config/ssl/cert-key.pem
 !/config/vhosts/default.conf
-!/config/nginx/nginx.conf
+!/config/nginx/modes/
+!/config/nginx/sites/
+!/config/nginx/sites/.gitkeep
 
 /data/backup/*
 /data/mysql/*

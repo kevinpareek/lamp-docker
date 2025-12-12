@@ -48,6 +48,7 @@ RUN set -eux; \
         libonig-dev \
         libcurl4-openssl-dev \
         libssl-dev \
+        libmemcached-dev \
         # Image Processing
         libmagickwand-dev \
         libfreetype6-dev \
@@ -87,8 +88,8 @@ RUN set -eux; \
         gd \
     # PECL Extensions
     && pecl channel-update pecl.php.net \
-    && pecl install -o -f redis apcu imagick \
-    && docker-php-ext-enable redis apcu imagick \
+    && pecl install -o -f redis apcu imagick memcached \
+    && docker-php-ext-enable redis apcu imagick memcached \
     && pecl clear-cache \
     && rm -rf /tmp/pear
 

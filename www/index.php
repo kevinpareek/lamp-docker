@@ -123,7 +123,7 @@ function getSubDir($currDir = null)
                     <hr>
                     <div class="content">
                         <ul>
-                            <li><?= apache_get_version(); ?></li>
+                            <li><?= function_exists('apache_get_version') ? apache_get_version() : $_SERVER['SERVER_SOFTWARE']; ?></li>
                             <li>PHP <?= phpversion(); ?></li>
                             <li>
                                 <?php

@@ -1,5 +1,5 @@
-# Use the official PHP 8.3 Apache image as the base
-FROM php:8.3-apache-bookworm
+# Use the official PHP 8.3 FPM image as the base
+FROM php:8.3-fpm-bookworm
 
 # Suppress debconf complaints when installing apt packages
 ARG DEBIAN_FRONTEND=noninteractive
@@ -19,6 +19,7 @@ RUN apt-get update --fix-missing && \
         unzip \
         zip \
         dialog \
+        libfcgi-bin \
         libsqlite3-dev \
         default-mysql-client \
         zlib1g-dev \
@@ -31,8 +32,7 @@ RUN apt-get update --fix-missing && \
         libmagickwand-dev \
         libfreetype6-dev \
         libjpeg62-turbo-dev \
-        libpng-dev \
-        libmemcached-dev && \
+        libpng-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -58,9 +58,6 @@ RUN docker-php-ext-install \
 # Install Redis PHP extension via PECL
 RUN pecl install redis && docker-php-ext-enable redis
 
-# Install Memcached PHP extension via PECL
-RUN pecl install memcached && docker-php-ext-enable memcached
-
 # Install Xdebug
 RUN pecl install xdebug && docker-php-ext-enable xdebug
 
@@ -77,20 +74,22 @@ RUN git clone https://github.com/Imagick/imagick /usr/local/src/imagick && \
     rm -rf /usr/local/src/imagick && \
     docker-php-ext-enable imagick
 
-# Enable necessary Apache modules
-RUN a2enmod ssl rewrite headers
-
 # Create required directories and files
-RUN mkdir -p /etc/apache2/ssl /var/log/{cron,supervisor} && \
+RUN mkdir -p /var/log/{cron,supervisor} && \
     touch /var/log/cron.log /var/log/supervisor/supervisord.log
 
 # Copy custom cron jobs and Supervisor configuration
-COPY supervisord.conf /etc/supervisor/supervisord.conf
-
-
+COPY supervisord.fpm.conf /etc/supervisor/supervisord.conf
 
 # Clean up unnecessary files to reduce image size
 RUN rm -rf /usr/src/* /tmp/* /var/tmp/*
+
+# Health Check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD cgi-fcgi -bind -connect 127.0.0.1:9000 || exit 1
+
+# Expose Ports
+EXPOSE 9000
 
 # Set the default command to start Supervisor
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

@@ -1,4 +1,4 @@
-FROM php:8.2.1-apache-buster
+FROM php:8.0.19-fpm-buster
 
 # Surpresses debconf complaints of trying to install apt packages interactively
 # https://github.com/moby/moby/issues/4032#issuecomment-192327844
@@ -16,6 +16,7 @@ RUN apt-get -y update --fix-missing && \
 RUN apt-get -y update && \
     apt-get -y --no-install-recommends install nano wget \
 dialog \
+libfcgi-bin \
 libsqlite3-dev \
 libsqlite3-0 && \
     apt-get -y --no-install-recommends install default-mysql-client \
@@ -37,12 +38,12 @@ openssl && \
     curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 # Install xdebug
-RUN pecl install xdebug-3.2.1 && \
+RUN pecl install xdebug-3.1.4 && \
     docker-php-ext-enable xdebug && \
     mkdir /var/log/xdebug
 
 # Install redis
-RUN pecl install redis-5.3.7 && \
+RUN pecl install redis-5.3.3 && \
     docker-php-ext-enable redis
 
 # Install imagick
@@ -50,10 +51,10 @@ RUN apt-get update && \
     apt-get -y --no-install-recommends install --fix-missing libmagickwand-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Workaround until imagick is available in pecl with php8 support
+# Workarround until imagick is available in pecl with php8 support
 # Imagick Commit to install
 # https://github.com/Imagick/imagick
-ARG IMAGICK_COMMIT="661405abe21d12003207bc8eb0963fafc2c02ee4"
+ARG IMAGICK_COMMIT="132a11fd26675db9eb9f0e9a3e2887c161875206"
 
 RUN cd /usr/local/src && \
     git clone https://github.com/Imagick/imagick && \
@@ -74,6 +75,7 @@ RUN docker-php-ext-install pdo_mysql && \
     docker-php-ext-install bcmath && \
     docker-php-ext-install mysqli && \
     docker-php-ext-install curl && \
+    docker-php-ext-install tokenizer && \
     docker-php-ext-install zip && \
     docker-php-ext-install -j$(nproc) intl && \
     docker-php-ext-install mbstring && \
@@ -91,11 +93,11 @@ libpng-dev && \
     docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
     docker-php-ext-install gd
 
-# Ensure an SSL directory exists
-RUN mkdir -p /etc/apache2/ssl
+# Health Check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD cgi-fcgi -bind -connect 127.0.0.1:9000 || exit 1
 
-# Enable SSL support and Apache modules
-RUN a2enmod ssl rewrite headers
+# Expose Ports
+EXPOSE 9000
 
-# Cleanup unnecessary files to reduce image size
-RUN rm -rf /usr/src/* /tmp/* /var/tmp/*
+CMD ["php-fpm"]

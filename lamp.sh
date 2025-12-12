@@ -212,7 +212,7 @@ open_browser() {
 
 lamp_config() {
     # Set required configuration keys
-    reqConfig=("APP_ENV" "DOCUMENT_ROOT" "APPLICATIONS_DIR_NAME" "COMPOSE_PROJECT_NAME" "PHPVERSION" "DATABASE")
+    reqConfig=("APP_ENV" "STACK_MODE" "DOCUMENT_ROOT" "APPLICATIONS_DIR_NAME" "COMPOSE_PROJECT_NAME" "PHPVERSION" "DATABASE")
 
     # Detect if Apple Silicon
     isAppleSilicon=false
@@ -244,6 +244,21 @@ lamp_config() {
                 eval "$key='$value'"
             fi
         done <"$env_file"
+    }
+
+    # Function to prompt user to input a valid stack mode
+    choose_stack_mode() {
+        local valid_options=("hybrid" "thunder")
+        echo "Select the STACK_MODE value:"
+        select option in "${valid_options[@]}"; do
+            if [[ " ${valid_options[*]} " == *" $option "* ]]; then
+                STACK_MODE="$option"
+                echo "STACK_MODE is set to '$STACK_MODE'."
+                break
+            else
+                echo "Invalid selection. Please choose a valid option."
+            fi
+        done
     }
 
     # Function to prompt user to input a valid PHP version
@@ -336,6 +351,8 @@ lamp_config() {
                 choose_database
             elif [[ "$key" == "APP_ENV" ]]; then
                 set_app_env
+            elif [[ "$key" == "STACK_MODE" ]]; then
+                choose_stack_mode
             else
                 read -p "$key (Default: $default_value): " new_value
                 if [[ ! -z $new_value ]]; then
@@ -454,8 +471,14 @@ lamp_start() {
     fi
 
     # Build and start containers
-    info_message "Starting LAMP stack (${APP_ENV} mode)..."
-    if ! docker compose --profile "${APP_ENV:-development}" up -d --build; then
+    info_message "Starting LAMP stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
+    
+    PROFILES="--profile ${STACK_MODE:-hybrid}"
+    if [[ "$APP_ENV" == "development" ]]; then
+        PROFILES="$PROFILES --profile development"
+    fi
+
+    if ! docker compose $PROFILES up -d --build; then
         error_message "Failed to start the LAMP stack."
         exit 1
     fi
@@ -491,8 +514,14 @@ lamp() {
         lamp_config
     fi
 
+    # Determine webserver service name based on stack mode
+    WEBSERVER_SERVICE="webserver-apache"
+    if [[ "${STACK_MODE:-hybrid}" == "thunder" ]]; then
+        WEBSERVER_SERVICE="webserver-fpm"
+    fi
+
     # Check LAMP stack status
-    if [[ $1 != "stop" && ! $(docker compose ps -q webserver) ]]; then
+    if [[ $1 != "stop" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
         yellow_message "LAMP stack is not running. Starting LAMP stack..."
         lamp_start
     fi
@@ -526,18 +555,26 @@ lamp() {
 
     # Open a bash shell inside the webserver container
     elif [[ $1 == "cmd" ]]; then
-        docker compose exec webserver bash
+        docker compose exec $WEBSERVER_SERVICE bash
 
     # Restart the LAMP stack
     elif [[ $1 == "restart" ]]; then
-        docker compose --profile "*" down && docker compose --profile $APP_ENV up -d
+        PROFILES="--profile ${STACK_MODE:-hybrid}"
+        if [[ "$APP_ENV" == "development" ]]; then
+            PROFILES="$PROFILES --profile development"
+        fi
+        docker compose --profile "*" down && docker compose $PROFILES up -d
         green_message "LAMP stack restarted."
 
     # Rebuild & Start
     elif [[ $1 == "build" ]]; then
+        PROFILES="--profile ${STACK_MODE:-hybrid}"
+        if [[ "$APP_ENV" == "development" ]]; then
+            PROFILES="$PROFILES --profile development"
+        fi
         docker compose --profile "*" down
         # docker compose build
-        docker compose --profile $APP_ENV up -d --build
+        docker compose $PROFILES up -d --build
         green_message "LAMP stack rebuilt and running."
 
     # Add a new application and create a corresponding virtual host
@@ -617,7 +654,64 @@ lamp() {
 </VirtualHost>
 EOL
 
-        cat >$nginx_file <<EOL
+        if [[ "${STACK_MODE:-hybrid}" == "thunder" ]]; then
+            # Thunder Mode (FPM)
+            cat >$nginx_file <<EOL
+# HTTP server configuration
+server {
+    listen 80;
+    server_name $domain www.$domain;
+    root $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name;
+    index index.php index.html index.htm;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+
+    location ~ \.php$ {
+        try_files \$uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass webserver:9000;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_param PATH_INFO \$fastcgi_path_info;
+    }
+}
+
+# HTTPS server configuration
+server {
+    listen 443 ssl;
+    server_name $domain www.$domain;
+    root $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name;
+    index index.php index.html index.htm;
+
+    # SSL/TLS certificate configuration
+    ssl_certificate /etc/nginx/ssl/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/cert-key.pem;
+
+    # Enforce secure protocols and ciphers
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+
+    location ~ \.php$ {
+        try_files \$uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass webserver:9000;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_param PATH_INFO \$fastcgi_path_info;
+    }
+}
+EOL
+        else
+            # Hybrid Mode (Apache)
+            cat >$nginx_file <<EOL
 # HTTP server configuration
 server {
     listen 80;
@@ -656,6 +750,7 @@ server {
     }
 }
 EOL
+        fi
 
         green_message "Vhost configuration file created at: $vhost_file"
 
