@@ -472,7 +472,13 @@ lamp_start() {
 
     # Build and start containers
     info_message "Starting LAMP stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
-    if ! docker compose --profile "${STACK_MODE:-hybrid}" up -d --build; then
+    
+    PROFILES="--profile ${STACK_MODE:-hybrid}"
+    if [[ "$APP_ENV" == "development" ]]; then
+        PROFILES="$PROFILES --profile development"
+    fi
+
+    if ! docker compose $PROFILES up -d --build; then
         error_message "Failed to start the LAMP stack."
         exit 1
     fi
@@ -553,14 +559,22 @@ lamp() {
 
     # Restart the LAMP stack
     elif [[ $1 == "restart" ]]; then
-        docker compose --profile "*" down && docker compose --profile "${STACK_MODE:-hybrid}" up -d
+        PROFILES="--profile ${STACK_MODE:-hybrid}"
+        if [[ "$APP_ENV" == "development" ]]; then
+            PROFILES="$PROFILES --profile development"
+        fi
+        docker compose --profile "*" down && docker compose $PROFILES up -d
         green_message "LAMP stack restarted."
 
     # Rebuild & Start
     elif [[ $1 == "build" ]]; then
+        PROFILES="--profile ${STACK_MODE:-hybrid}"
+        if [[ "$APP_ENV" == "development" ]]; then
+            PROFILES="$PROFILES --profile development"
+        fi
         docker compose --profile "*" down
         # docker compose build
-        docker compose --profile "${STACK_MODE:-hybrid}" up -d --build
+        docker compose $PROFILES up -d --build
         green_message "LAMP stack rebuilt and running."
 
     # Add a new application and create a corresponding virtual host
