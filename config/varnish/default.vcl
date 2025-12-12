@@ -1,8 +1,8 @@
 vcl 4.0;
 
 backend default {
-    .host = "webserver";
-    .port = "80";
+    .host = "reverse-proxy";
+    .port = "8080";
     .first_byte_timeout = 60s;
     .connect_timeout = 5s;
     .between_bytes_timeout = 2s;
