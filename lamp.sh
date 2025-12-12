@@ -497,25 +497,41 @@ lamp_start() {
             ;;
         esac
 
-        # Wait for Docker to start
+        # Wait for Docker to start (max 60 seconds)
+        local timeout=60
+        local elapsed=0
         while ! docker info >/dev/null 2>&1; do
-            yellow_message "Waiting for Docker to start..."
+            if [ $elapsed -ge $timeout ]; then
+                error_message "Docker failed to start within ${timeout} seconds."
+                exit 1
+            fi
+            yellow_message "Waiting for Docker to start... (${elapsed}s)"
             sleep 2
+            elapsed=$((elapsed + 2))
         done
         info_message "Docker is running."
-
     fi
 
-    # Start the containers in detached mode
-    if ! docker compose --profile $APP_ENV up -d; then
+    # Build and start containers
+    info_message "Starting LAMP stack (${APP_ENV} mode)..."
+    if ! docker compose --profile "${APP_ENV:-development}" up -d --build; then
         error_message "Failed to start the LAMP stack."
         exit 1
     fi
 
-    # for cutom .env file
-    # docker compose --env-file <env_file_path> up -d --build
-
     green_message "LAMP stack is running"
+    
+    # Show status
+    print_line
+    info_message "Services:"
+    info_message "  • Web: http://localhost"
+    if [[ "$APP_ENV" == "development" ]]; then
+        info_message "  • phpMyAdmin: http://localhost:${HOST_MACHINE_PMA_PORT:-8080}"
+        info_message "  • Mailpit: http://localhost:8025"
+    fi
+    info_message "  • Database: localhost:${HOST_MACHINE_MYSQL_PORT:-3306}"
+    info_message "  • Redis: localhost:${HOST_MACHINE_REDIS_PORT:-6379}"
+    print_line
 }
 
 lamp() {
@@ -925,7 +941,7 @@ EOL
 }
 
 # Check if required commands are available
-required_commands=("docker" "sed" "curl" "awk" "dd" "tee" "unzip")
+required_commands=("docker" "sed" "curl")
 for cmd in "${required_commands[@]}"; do
     if ! command_exists "$cmd"; then
         error_message "Required command '$cmd' is not installed."
@@ -933,20 +949,34 @@ for cmd in "${required_commands[@]}"; do
     fi
 done
 
-# Ensure Docker Compose v2 plugin is available (used throughout as 'docker compose')
+# Ensure Docker Compose v2 plugin is available
 if ! docker compose version >/dev/null 2>&1; then
     error_message "Docker Compose plugin is missing. Please install Docker Desktop or the compose plugin."
     exit 1
 fi
 
-# Check if 'lamp' function already exists in .zshrc
-if [ -f "$HOME/.zshrc" ] && ! grep -q "lamp()" "$HOME/.zshrc"; then
-    echo "
-# docker compose lamp
-lamp() {
-  bash \"$lampFile\" \$1 \$2 \$3
-}" >>"$HOME/.zshrc"
-    info_message "Function 'lamp' added to .zshrc"
-fi
+# Add lamp function to shell config (zsh/bash)
+add_lamp_to_shell() {
+    local shell_rc=""
+    if [ -f "$HOME/.zshrc" ]; then
+        shell_rc="$HOME/.zshrc"
+    elif [ -f "$HOME/.bashrc" ]; then
+        shell_rc="$HOME/.bashrc"
+    fi
+    
+    if [ -n "$shell_rc" ] && ! grep -q "lamp()" "$shell_rc"; then
+        cat >> "$shell_rc" << EOF
 
-lamp "$1" "$2" "$3"
+# LAMP Docker helper function
+lamp() {
+    bash "$lampFile" "\$@"
+}
+EOF
+        info_message "Function 'lamp' added to $(basename $shell_rc)"
+    fi
+}
+
+add_lamp_to_shell
+
+# Run lamp with all arguments
+lamp "$@"
