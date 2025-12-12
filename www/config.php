@@ -1,11 +1,12 @@
 <?php
 
-# config value data update automatic
-$MYSQL_HOST = '';
-$MYSQL_DATABASE = '';
-$MYSQL_USER = '';
-$MYSQL_PASSWORD = '';
+# config value data - updated by lamp config command
+# Default values for development environment
+$MYSQL_HOST = 'database';
+$MYSQL_DATABASE = 'docker';
+$MYSQL_USER = 'docker';
+$MYSQL_PASSWORD = 'docker';
 
-$PMA_PORT = '';
-$LOCAL_DOCUMENT_ROOT = '';
-$APACHE_DOCUMENT_ROOT = '';
+$PMA_PORT = '8080';
+$LOCAL_DOCUMENT_ROOT = dirname(__FILE__);
+$APACHE_DOCUMENT_ROOT = '/var/www/html';

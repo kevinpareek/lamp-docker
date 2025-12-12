@@ -62,8 +62,8 @@ RUN docker-php-ext-install -j$(nproc) gd
 # Insure an SSL directory exists
 RUN mkdir -p /etc/apache2/ssl
 
-# Enable SSL support
-RUN a2enmod ssl && a2enmod rewrite
+# Enable SSL support and Apache modules
+RUN a2enmod ssl rewrite headers
 
-# Enable apache modules
-RUN a2enmod rewrite headers
+# Cleanup
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

@@ -100,14 +100,8 @@ libpng-dev && \
 # Insure an SSL directory exists
 RUN mkdir -p /etc/apache2/ssl
 
-# Enable SSL support
-RUN a2enmod ssl && a2enmod rewrite
+# Enable SSL support and Apache modules
+RUN a2enmod ssl rewrite headers
 
-# Enable apache modules
-RUN a2enmod rewrite headers
-
-# Cleanup
-RUN rm -rf /usr/src/*
-
-# Cleanup unnecessary files/cached to reduce image size
-RUN rm -rf /var/lib/apt/lists/*
+# Cleanup unnecessary files to reduce image size
+RUN rm -rf /usr/src/* /tmp/* /var/tmp/* /var/lib/apt/lists/*

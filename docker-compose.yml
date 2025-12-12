@@ -57,6 +57,8 @@ services:
       context: ./bin/${DATABASE}
     container_name: "${COMPOSE_PROJECT_NAME}_database"
     restart: always
+    ports:
+      - "127.0.0.1:${HOST_MACHINE_MYSQL_PORT}:3306"  # Expose MySQL/MariaDB only to localhost
     volumes:
       - "${MYSQL_INITDB_DIR}:/docker-entrypoint-initdb.d:ro"  # Initialization scripts
       - "${MYSQL_DATA_DIR}:/var/lib/mysql"                   # MySQL data

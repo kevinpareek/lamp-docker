@@ -46,12 +46,11 @@ RUN pecl install xdebug-2.4.0RC4 && docker-php-ext-enable xdebug \
 # Insure an SSL directory exists
 RUN mkdir -p /etc/apache2/ssl
 
-# Enable SSL support
-RUN a2enmod ssl && a2enmod rewrite
+# Enable SSL support and Apache modules
+RUN a2enmod ssl rewrite headers rpaf
 
-# Enable apache modules
-RUN a2enmod rewrite headers
-RUN a2enmod rewrite rpaf
+# Cleanup
+RUN apt-get clean && rm -rf /tmp/* /var/tmp/*
 
 EXPOSE 80
 EXPOSE 443

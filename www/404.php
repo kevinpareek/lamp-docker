@@ -50,6 +50,3 @@
     <a href="/">Go to Homepage</a>
 </body>
 </html>
-
-echo '<hr/>';
-echo '<a href="/">Back</a>';

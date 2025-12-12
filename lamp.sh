@@ -889,13 +889,19 @@ EOL
 }
 
 # Check if required commands are available
-required_commands=("docker" "docker-compose" "sed" "curl" "awk" "dd" "tee" "unzip")
+required_commands=("docker" "sed" "curl" "awk" "dd" "tee" "unzip")
 for cmd in "${required_commands[@]}"; do
     if ! command_exists "$cmd"; then
         error_message "Required command '$cmd' is not installed."
         exit 1
     fi
 done
+
+# Ensure Docker Compose v2 plugin is available (used throughout as 'docker compose')
+if ! docker compose version >/dev/null 2>&1; then
+    error_message "Docker Compose plugin is missing. Please install Docker Desktop or the compose plugin."
+    exit 1
+fi
 
 # Check if 'lamp' function already exists in .zshrc
 if [ -f "$HOME/.zshrc" ] && ! grep -q "lamp()" "$HOME/.zshrc"; then
