@@ -361,6 +361,20 @@ lamp_config() {
             if [[ " ${valid_options[*]} " == *" $option "* ]]; then
                 export APP_ENV="$option"
                 echo "APP_ENV is set to '$APP_ENV'."
+                
+                # Auto-configure based on environment
+                if [[ "$APP_ENV" == "development" ]]; then
+                    export INSTALL_XDEBUG="true"
+                    export APP_DEBUG="true"
+                else
+                    export INSTALL_XDEBUG="false"
+                    export APP_DEBUG="false"
+                fi
+                
+                # Update these in .env file
+                sed_i "s|^INSTALL_XDEBUG=.*|INSTALL_XDEBUG=${INSTALL_XDEBUG}|" .env 2>/dev/null || echo "INSTALL_XDEBUG=${INSTALL_XDEBUG}" >>.env
+                sed_i "s|^APP_DEBUG=.*|APP_DEBUG=${APP_DEBUG}|" .env 2>/dev/null || echo "APP_DEBUG=${APP_DEBUG}" >>.env
+                
                 break
             else
                 echo "Invalid selection. Please choose a valid option."
@@ -392,6 +406,28 @@ lamp_config() {
             # Update the .env file
             sed_i "s|^$key=.*|$key=${!key}|" .env 2>/dev/null || echo "$key=${!key}" >>.env
         done
+
+        # Show environment summary
+        print_line
+        if [[ "$APP_ENV" == "development" ]]; then
+            green_message "✅ Development Environment Configured:"
+            info_message "   • Xdebug: Enabled"
+            info_message "   • OPcache: Disabled"
+            info_message "   • Error Display: On"
+            info_message "   • phpMyAdmin: Available on port $HOST_MACHINE_PMA_PORT"
+            info_message "   • Mailpit: Available on port 8025"
+            info_message "   • PHP Config: php.development.ini"
+        else
+            green_message "✅ Production Environment Configured:"
+            info_message "   • Xdebug: Disabled"
+            info_message "   • OPcache: Enabled with JIT"
+            info_message "   • Error Display: Off (logged)"
+            info_message "   • phpMyAdmin: Disabled"
+            info_message "   • Mailpit: Disabled"
+            info_message "   • PHP Config: php.production.ini"
+            yellow_message "   ⚠️  Remember to change default database passwords!"
+        fi
+        print_line
 
         green_message ".env file updated!"
     }

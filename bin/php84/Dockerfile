@@ -1,88 +1,160 @@
-# Use the official PHP 8.4 Apache image as the base
-FROM php:8.4-apache-bookworm
+# ============================================
+# PHP 8.4 Production Ready Docker Image
+# Optimized for Performance & Security
+# ============================================
+FROM php:8.4-apache-bookworm AS base
 
-# Suppress debconf complaints when installing apt packages
+LABEL maintainer="LAMP Docker <github.com/kevinpareek/lamp-docker>"
+LABEL version="2.0"
+LABEL description="Production-ready PHP 8.4 with Apache, Redis, Imagick"
+LABEL org.opencontainers.image.source="https://github.com/kevinpareek/lamp-docker"
+
+# ============================================
+# Build Arguments
+# ============================================
 ARG DEBIAN_FRONTEND=noninteractive
+ARG INSTALL_XDEBUG=false
 
-# Update, upgrade, and install required packages in a single RUN layer to reduce image size
-RUN apt-get update --fix-missing && \
+# ============================================
+# Environment Variables
+# ============================================
+ENV COMPOSER_ALLOW_SUPERUSER=1 \
+    COMPOSER_HOME=/tmp/composer \
+    COMPOSER_NO_INTERACTION=1
+
+# ============================================
+# Install System Dependencies (Single Layer)
+# ============================================
+RUN set -eux; \
+    apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-        apt-utils \
+        # Essential
         cron \
         supervisor \
-        nano \
-        vim \
-        wget \
         curl \
+        wget \
         git \
         unzip \
         zip \
-        dialog \
-        libsqlite3-dev \
+        ca-certificates \
+        # Database
         default-mysql-client \
+        # PHP Dependencies
+        libsqlite3-dev \
         zlib1g-dev \
         libzip-dev \
         libicu-dev \
-        build-essential \
         libonig-dev \
-        iputils-ping \
         libcurl4-openssl-dev \
+        libssl-dev \
+        # Image Processing
         libmagickwand-dev \
         libfreetype6-dev \
         libjpeg62-turbo-dev \
-        libpng-dev && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+        libpng-dev \
+        libwebp-dev \
+        libavif-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/cache/apt/*
 
-# Install Composer globally
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-
-# Install and configure PHP extensions
-RUN docker-php-ext-install \
+# ============================================
+# Install PHP Extensions (Optimized)
+# ============================================
+RUN set -eux; \
+    # Configure GD with all formats
+    docker-php-ext-configure gd \
+        --enable-gd \
+        --with-freetype \
+        --with-jpeg \
+        --with-webp \
+        --with-avif \
+    # Install all extensions in parallel
+    && docker-php-ext-install -j"$(nproc)" \
         pdo_mysql \
         pdo_sqlite \
-        bcmath \
         mysqli \
-        curl \
+        bcmath \
         zip \
         intl \
         mbstring \
         gettext \
         calendar \
-        exif && \
-    docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
-    docker-php-ext-install gd
+        exif \
+        opcache \
+        pcntl \
+        sockets \
+        gd \
+    # PECL Extensions
+    && pecl channel-update pecl.php.net \
+    && pecl install -o -f redis apcu imagick \
+    && docker-php-ext-enable redis apcu imagick \
+    && pecl clear-cache \
+    && rm -rf /tmp/pear
 
-# Install Redis PHP extension via PECL
-RUN pecl install redis && docker-php-ext-enable redis
+# ============================================
+# Install Xdebug (Conditional)
+# ============================================
+RUN set -eux; \
+    if [ "${INSTALL_XDEBUG}" = "true" ]; then \
+        pecl install xdebug \
+        && docker-php-ext-enable xdebug \
+        && pecl clear-cache; \
+    fi
 
-# Install Imagick via PECL
-RUN pecl install imagick && docker-php-ext-enable imagick
+# ============================================
+# Install Composer (Latest Stable)
+# ============================================
+COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
 
-# Install Xdebug
-RUN pecl install xdebug && docker-php-ext-enable xdebug
+# ============================================
+# Install mhsendmail
+# ============================================
+RUN curl -fsSL 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' \
+        -o /usr/local/bin/mhsendmail \
+    && chmod +x /usr/local/bin/mhsendmail
 
-# Install mhsendmail for Mailpit
-RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
-    chmod +x /usr/local/bin/mhsendmail
+# ============================================
+# Apache Configuration
+# ============================================
+RUN set -eux; \
+    a2enmod ssl rewrite headers expires deflate proxy proxy_http \
+    && { \
+        echo 'ServerTokens Prod'; \
+        echo 'ServerSignature Off'; \
+        echo 'TraceEnable Off'; \
+        echo 'Header always set X-Content-Type-Options "nosniff"'; \
+        echo 'Header always set X-Frame-Options "SAMEORIGIN"'; \
+        echo 'Header always set X-XSS-Protection "1; mode=block"'; \
+    } >> /etc/apache2/conf-available/security.conf \
+    && a2enconf security
 
-# Enable necessary Apache modules
-RUN a2enmod ssl rewrite headers
+# ============================================
+# Setup Directories & Permissions
+# ============================================
+RUN set -eux; \
+    mkdir -p /etc/apache2/ssl /var/log/{cron,supervisor} /var/www/html \
+    && touch /var/log/cron.log /var/log/supervisor/supervisord.log \
+    && chown -R www-data:www-data /var/www/html \
+    && chmod -R 755 /var/www/html
 
-# Create required directories and files
-RUN mkdir -p /etc/apache2/ssl /var/log/{cron,supervisor} && \
-    touch /var/log/cron.log /var/log/supervisor/supervisord.log
-
-# Copy custom cron jobs and Supervisor configuration
-# COPY crontab /etc/cron.d/custom-cron
+# ============================================
+# Copy Configuration
+# ============================================
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 
-##Set permissions for cron jobs (commented out for now)
-# RUN chmod 0644 /etc/cron.d/custom-cron && crontab /etc/cron.d/custom-cron
+# ============================================
+# Health Check
+# ============================================
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -sf http://localhost/server-status || curl -sf http://localhost/ || exit 1
 
-# Clean up unnecessary files to reduce image size
-RUN rm -rf /usr/src/* /tmp/* /var/tmp/*
+# ============================================
+# Expose Ports
+# ============================================
+EXPOSE 80 443
 
-# Set the default command to start Supervisor
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+# ============================================
+# Entrypoint
+# ============================================
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
