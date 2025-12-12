@@ -1,9 +1,5 @@
 <?php
 
-// echo '<pre>';
-// print_r($_ENV);
-// exit;
-
 require_once './config.php';
 
 $domainData = [];

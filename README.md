@@ -91,6 +91,26 @@ following command to log in to the container via SSH:
 ./lamp.sh cmd
 ```
 
+### Additional Tools
+
+- **Mailpit:**
+    ```sh
+    ./lamp.sh mail
+    ```
+    Opens Mailpit web interface at `http://localhost:8025`.
+
+- **phpMyAdmin:**
+    ```sh
+    ./lamp.sh pma
+    ```
+    Opens phpMyAdmin at `http://localhost:8080`.
+
+- **Redis CLI:**
+    ```sh
+    ./lamp.sh redis-cli
+    ```
+    Opens Redis CLI inside the container.
+
 ## SSL Certificates
 
 - **Generate SSL certificates for a domain:**

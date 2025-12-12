@@ -65,6 +65,17 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Cross-platform sed in-place editing
+sed_i() {
+    local expression=$1
+    local file=$2
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i "" "$expression" "$file"
+    else
+        sed -i "$expression" "$file"
+    fi
+}
+
 print_line() {
     echo ""
     printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' -
@@ -226,11 +237,11 @@ generate_ssl_certificates() {
     mkcert -key-file "$lampPath/config/ssl/$domain-key.pem" -cert-file "$lampPath/config/ssl/$domain-cert.pem" $domain "*.$domain"
 
     # Update the vhost configuration file with the correct SSL certificate paths
-    sed -i "" "s|SSLCertificateFile /etc/apache2/ssl/cert.pem|SSLCertificateFile /etc/apache2/ssl/$domain-cert.pem|" $vhost_file
-    sed -i "" "s|SSLCertificateKeyFile /etc/apache2/ssl/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl/$domain-key.pem|" $vhost_file
+    sed_i "s|SSLCertificateFile /etc/apache2/ssl/cert.pem|SSLCertificateFile /etc/apache2/ssl/$domain-cert.pem|" $vhost_file
+    sed_i "s|SSLCertificateKeyFile /etc/apache2/ssl/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl/$domain-key.pem|" $vhost_file
 
-    sed -i "" "s|ssl_certificate /etc/nginx/ssl/cert.pem|ssl_certificate /etc/nginx/ssl/$domain-cert.pem|" $nginx_file
-    sed -i "" "s|ssl_certificate_key /etc/nginx/ssl/cert-key.pem|ssl_certificate_key /etc/nginx/ssl/$domain-key.pem|" $nginx_file
+    sed_i "s|ssl_certificate /etc/nginx/ssl/cert.pem|ssl_certificate /etc/nginx/ssl/$domain-cert.pem|" $nginx_file
+    sed_i "s|ssl_certificate_key /etc/nginx/ssl/cert-key.pem|ssl_certificate_key /etc/nginx/ssl/$domain-key.pem|" $nginx_file
 
     info_message "SSL certificates generated for https://$domain"
     return 0
@@ -379,7 +390,7 @@ lamp_config() {
             fi
 
             # Update the .env file
-            sed -i "" "s|^$key=.*|$key=${!key}|" .env 2>/dev/null || echo "$key=${!key}" >>.env
+            sed_i "s|^$key=.*|$key=${!key}|" .env 2>/dev/null || echo "$key=${!key}" >>.env
         done
 
         green_message ".env file updated!"
@@ -390,15 +401,15 @@ lamp_config() {
         local newLocalDocumentRoot=$(dirname "$indexFilePath")
 
         if [ -f "$indexFilePath" ]; then
-            sed -i '' "s|\$LOCAL_DOCUMENT_ROOT = '.*';|\$LOCAL_DOCUMENT_ROOT = '$newLocalDocumentRoot';|" "$indexFilePath"
-            sed -i '' "s|\$APACHE_DOCUMENT_ROOT = '.*';|\$APACHE_DOCUMENT_ROOT = '$APACHE_DOCUMENT_ROOT';|" "$indexFilePath"
+            sed_i "s|\$LOCAL_DOCUMENT_ROOT = '.*';|\$LOCAL_DOCUMENT_ROOT = '$newLocalDocumentRoot';|" "$indexFilePath"
+            sed_i "s|\$APACHE_DOCUMENT_ROOT = '.*';|\$APACHE_DOCUMENT_ROOT = '$APACHE_DOCUMENT_ROOT';|" "$indexFilePath"
 
-            sed -i '' "s|\$MYSQL_HOST = '.*';|\$MYSQL_HOST = 'database';|" "$indexFilePath"
-            sed -i '' "s|\$MYSQL_DATABASE = '.*';|\$MYSQL_DATABASE = '$MYSQL_DATABASE';|" "$indexFilePath"
-            sed -i '' "s|\$MYSQL_USER = '.*';|\$MYSQL_USER = '$MYSQL_USER';|" "$indexFilePath"
-            sed -i '' "s|\$MYSQL_PASSWORD = '.*';|\$MYSQL_PASSWORD = '$MYSQL_PASSWORD';|" "$indexFilePath"
+            sed_i "s|\$MYSQL_HOST = '.*';|\$MYSQL_HOST = 'database';|" "$indexFilePath"
+            sed_i "s|\$MYSQL_DATABASE = '.*';|\$MYSQL_DATABASE = '$MYSQL_DATABASE';|" "$indexFilePath"
+            sed_i "s|\$MYSQL_USER = '.*';|\$MYSQL_USER = '$MYSQL_USER';|" "$indexFilePath"
+            sed_i "s|\$MYSQL_PASSWORD = '.*';|\$MYSQL_PASSWORD = '$MYSQL_PASSWORD';|" "$indexFilePath"
 
-            sed -i '' "s|\$PMA_PORT = '.*';|\$PMA_PORT = '$HOST_MACHINE_PMA_PORT';|" "$indexFilePath"
+            sed_i "s|\$PMA_PORT = '.*';|\$PMA_PORT = '$HOST_MACHINE_PMA_PORT';|" "$indexFilePath"
 
             green_message "Config DATA updated in $indexFilePath"
         else
@@ -460,13 +471,13 @@ lamp_start() {
     fi
 
     # Start the containers in detached mode
-    if ! docker-compose --profile $APP_ENV up -d; then
+    if ! docker compose --profile $APP_ENV up -d; then
         error_message "Failed to start the LAMP stack."
         exit 1
     fi
 
     # for cutom .env file
-    # docker-compose --env-file <env_file_path> up -d --build
+    # docker compose --env-file <env_file_path> up -d --build
 
     green_message "LAMP stack is running"
 }
@@ -488,7 +499,7 @@ lamp() {
     fi
 
     # Check LAMP stack status
-    if [[ $1 != "stop" && ! $(docker-compose ps -q webserver) ]]; then
+    if [[ $1 != "stop" && ! $(docker compose ps -q webserver) ]]; then
         yellow_message "LAMP stack is not running. Starting LAMP stack..."
         lamp_start
     fi
@@ -500,7 +511,7 @@ lamp() {
 
     # Stop the LAMP stack
     elif [[ $1 == "stop" ]]; then
-        docker-compose --profile $APP_ENV down
+        docker compose --profile $APP_ENV down
         green_message "LAMP stack is stopped"
 
         # Optional: Close Docker Desktop on stop (uncomment if needed)
@@ -522,18 +533,18 @@ lamp() {
 
     # Open a bash shell inside the webserver container
     elif [[ $1 == "cmd" ]]; then
-        docker-compose exec webserver bash
+        docker compose exec webserver bash
 
     # Restart the LAMP stack
     elif [[ $1 == "restart" ]]; then
-        docker-compose --profile $APP_ENV down && docker-compose --profile $APP_ENV up -d
+        docker compose --profile $APP_ENV down && docker compose --profile $APP_ENV up -d
         green_message "LAMP stack restarted."
 
     # Rebuild & Start
     elif [[ $1 == "build" ]]; then
-        docker-compose --profile $APP_ENV down
-        # docker-compose build
-        docker-compose --profile $APP_ENV up -d --build
+        docker compose --profile $APP_ENV down
+        # docker compose build
+        docker compose --profile $APP_ENV up -d --build
         green_message "LAMP stack rebuilt and running."
 
     # Add a new application and create a corresponding virtual host
@@ -676,7 +687,7 @@ EOL
         # Create an index.php file in the app's document root
         index_file="${app_root}/index.php"
         indexHtml="$lampPath/data/pages/site-created.html"
-        sed -e "s|exmple.com|$domain|g" \
+        sed -e "s|example.com|$domain|g" \
             -e "s|index.html|index.php|g" \
             -e "s|/var/www/html|$app_root|g" \
             -e "s|lamp code|lamp code $app_name|g" \
@@ -686,9 +697,9 @@ EOL
         # Enable the new virtual host and reload Apache
         yellow_message "Activating the virtual host..."
         if command -v docker >/dev/null; then
-            # docker-compose exec webserver bash -c "cd /etc/apache2/sites-enabled && a2ensite $domain.conf && service apache2 reload"
-            docker-compose exec webserver bash -c "service apache2 reload"
-            docker-compose exec reverse-proxy nginx -s reload
+            # docker compose exec webserver bash -c "cd /etc/apache2/sites-enabled && a2ensite $domain.conf && service apache2 reload"
+            docker compose exec webserver bash -c "service apache2 reload"
+            docker compose exec reverse-proxy nginx -s reload
 
             green_message "Virtual host $domain activated and Apache reloaded."
         fi
@@ -748,7 +759,7 @@ EOL
         backup_file="$backup_dir/lamp_backup_$timestamp.tgz"
 
         info_message "Backing up LAMP stack to $backup_file..."
-        databases=$(docker-compose exec webserver bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
+        databases=$(docker compose exec webserver bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
 
         # Create temporary directories for SQL and app data
         temp_sql_dir="$backup_dir/sql"
@@ -757,7 +768,7 @@ EOL
 
         for db in $databases; do
             backup_sql_file="$temp_sql_dir/db_backup_$db.sql"
-            docker-compose exec webserver bash -c "exec mysqldump -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database --databases $db" >"$backup_sql_file"
+            docker compose exec webserver bash -c "exec mysqldump -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database --databases $db" >"$backup_sql_file"
         done
 
         # Copy application data to the temporary app directory
@@ -779,7 +790,7 @@ EOL
             return 1
         fi
 
-        backup_files=($(ls -t "$backup_dir"/*.tar.gz))
+        backup_files=($(ls -t "$backup_dir"/*.tgz))
         if [[ ${#backup_files[@]} -eq 0 ]]; then
             error_message "No backup files found in $backup_dir"
             return 1
@@ -801,9 +812,45 @@ EOL
         fi
 
         info_message "Restoring LAMP stack from $selected_backup..."
-        tar -xzvf "$selected_backup" -C "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
-        docker-compose exec webserver bash -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -h database' <"$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/db_backup.sql"
-        rm "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/db_backup.sql"
+        
+        # Create temp directory for extraction
+        temp_restore_dir="$backup_dir/restore_temp"
+        mkdir -p "$temp_restore_dir"
+        
+        # Extract backup
+        tar -xzf "$selected_backup" -C "$temp_restore_dir"
+        
+        # Restore Databases
+        if [[ -d "$temp_restore_dir/sql" ]]; then
+            info_message "Restoring databases..."
+            for sql_file in "$temp_restore_dir/sql"/*.sql; do
+                if [[ -f "$sql_file" ]]; then
+                    db_name=$(basename "$sql_file" | sed 's/db_backup_//;s/\.sql//')
+                    info_message "Restoring database: $db_name"
+                    # Create DB if not exists (optional, mysqldump usually includes it if --databases used)
+                    # But here we pipe content, so we rely on dump content.
+                    # The backup command used: mysqldump ... --databases $db
+                    # So it should contain CREATE DATABASE statement.
+                    
+                    # Copy sql file to container to avoid pipe issues with large files or special chars
+                    docker cp "$sql_file" "${COMPOSE_PROJECT_NAME}_webserver:/tmp/restore.sql"
+                    docker compose exec webserver bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database < /tmp/restore.sql"
+                    docker compose exec webserver bash -c "rm /tmp/restore.sql"
+                fi
+            done
+        fi
+        
+        # Restore Applications
+        if [[ -d "$temp_restore_dir/app" ]]; then
+            info_message "Restoring applications..."
+            # We need to be careful not to overwrite existing files blindly, or maybe we should?
+            # Usually restore implies overwriting.
+            cp -R "$temp_restore_dir/app/." "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/"
+        fi
+        
+        # Clean up
+        rm -rf "$temp_restore_dir"
+        
         green_message "Restore completed from $selected_backup"
 
     # Generate SSL certificates for a domain
@@ -824,8 +871,20 @@ EOL
 
         generate_ssl_certificates $domain $vhost_file $nginx_file
 
+    # Open Mailpit
+    elif [[ $1 == "mail" ]]; then
+        open_browser "http://localhost:8025"
+
+    # Open phpMyAdmin
+    elif [[ $1 == "pma" ]]; then
+        open_browser "http://localhost:${HOST_MACHINE_PMA_PORT}"
+
+    # Open Redis CLI
+    elif [[ $1 == "redis-cli" ]]; then
+        docker compose exec redis redis-cli
+
     else
-        error_message "Usage: lamp {start|stop|restart|build|cmd|addapp|code|config|backup|restore|ssl}"
+        error_message "Usage: lamp {start|stop|restart|build|cmd|addapp|code|config|backup|restore|ssl|mail|pma|redis-cli}"
     fi
 }
 

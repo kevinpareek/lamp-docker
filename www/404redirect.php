@@ -6,7 +6,8 @@ error_reporting(E_ALL);
 ini_set("error_log", "404error.txt");
 
 // Require Composer's autoloader.
-require '404Medoo.php';
+require 'Medoo.php';
+require 'config.php';
 
 // Using Medoo namespace.
 use Medoo\Medoo;
@@ -14,10 +15,10 @@ use Medoo\Medoo;
 $database = new Medoo([
     // [required]
     'type' => 'mysql',
-    'host' => 'database',
-    'database' => 'docker',
-    'username' => 'docker',
-    'password' => 'docker',
+    'host' => $MYSQL_HOST,
+    'database' => $MYSQL_DATABASE,
+    'username' => $MYSQL_USER,
+    'password' => $MYSQL_PASSWORD,
 
 
     // [optional]
@@ -97,9 +98,5 @@ if (!empty($query) && count($query) > 0) {
 
 } else {
     $data = $database->insert("page404", ["p404_http_referer" => $url, "p404_request_uri" => $r_url, "p404_create" => $c_time, "p404_update" => $c_time, "p404_ip" => $ip]);
-    //echo $data->rowCount(); // Returns the number of rows affected by the last SQL statement
-    //$account_id = $data->id(); //Last Insert ID
     redirect("/404");
-
-
 }
