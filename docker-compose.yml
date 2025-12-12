@@ -1,3 +1,34 @@
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-webserver-common: &webserver-common
+  restart: unless-stopped
+  volumes:
+    - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:rw"
+    - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
+    - "${BACKUP_DIR}:/var/lib/bkup/dumps"
+  environment:
+    APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
+    APP_ENV: "${APP_ENV:-development}"
+    APP_DEBUG: "${APP_DEBUG:-true}"
+    TZ: "Asia/Kolkata"
+  depends_on:
+    database:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks:
+    backend:
+      aliases:
+        - webserver
+    frontend:
+      aliases:
+        - webserver
+  logging: *default-logging
+
 services:
   # ============================================
   # Reverse Proxy (NGINX)
@@ -25,38 +56,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-    logging: &default-logging
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
-
-  # ============================================
-  # Common Webserver Configuration
-  # ============================================
-  x-webserver-common: &webserver-common
-    restart: unless-stopped
-    volumes:
-      - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:rw"
-      - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
-      - "${BACKUP_DIR}:/var/lib/bkup/dumps"
-    environment:
-      APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
-      APP_ENV: "${APP_ENV:-development}"
-      APP_DEBUG: "${APP_DEBUG:-true}"
-      TZ: "Asia/Kolkata"
-    depends_on:
-      database:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      backend:
-        aliases:
-          - webserver
-      frontend:
-        aliases:
-          - webserver
     logging: *default-logging
 
   # ============================================
