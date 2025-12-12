@@ -98,11 +98,22 @@ libpng-dev && \
 RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
     chmod +x /usr/local/bin/mhsendmail
 
-# Ensure an SSL directory exists
-RUN mkdir -p /etc/apache2/ssl
+# Install Supervisor and Cron
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends supervisor cron && \
+    rm -rf /var/lib/apt/lists/*
+
+# Setup Directories & Permissions
+RUN mkdir -p /etc/apache2/ssl /var/log/supervisor /var/www/html && \
+    touch /var/log/cron.log /var/log/supervisor/supervisord.log && \
+    chown -R www-data:www-data /var/www/html && \
+    chmod -R 755 /var/www/html
 
 # Enable SSL support and Apache modules
 RUN a2enmod ssl rewrite headers
 
 # Cleanup unnecessary files to reduce image size
 RUN rm -rf /usr/src/* /tmp/* /var/tmp/*
+
+# Entrypoint
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

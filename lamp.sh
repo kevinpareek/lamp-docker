@@ -519,6 +519,7 @@ lamp_start() {
     fi
     info_message "  • Database: localhost:${HOST_MACHINE_MYSQL_PORT:-3306}"
     info_message "  • Redis: localhost:${HOST_MACHINE_REDIS_PORT:-6379}"
+    info_message "  • Memcached: localhost:11211"
     print_line
 }
 
@@ -820,6 +821,96 @@ EOL
 
         green_message "App setup complete: $app_name with domain $domain"
 
+    # Remove an application
+    elif [[ $1 == "removeapp" ]]; then
+        if [[ -z $2 ]]; then
+            error_message "Application name is required."
+            return 1
+        fi
+
+        app_name=$2
+        
+        # Try to find the domain from the vhost file or assume default
+        # This is tricky because we don't store the mapping. 
+        # We can search for the app_name in the vhosts directory.
+        
+        # Simple approach: Ask for domain or assume default
+        domain=$3
+        if [[ -z $domain ]]; then
+             # Try to find a vhost file containing the app path
+             found_vhost=$(grep -l "$APPLICATIONS_DIR_NAME/$app_name" "$VHOSTS_DIR"/*.conf 2>/dev/null | head -n 1)
+             if [[ -n "$found_vhost" ]]; then
+                 domain=$(basename "$found_vhost" .conf)
+                 info_message "Found domain $domain for app $app_name"
+             else
+                 domain="${app_name}.localhost"
+                 yellow_message "Domain not provided and not found. Assuming $domain"
+             fi
+        fi
+
+        vhost_file="${VHOSTS_DIR}/${domain}.conf"
+        nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
+        app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name"
+
+        if [[ ! -f $vhost_file && ! -d $app_root ]]; then
+            error_message "Application $app_name not found."
+            return 1
+        fi
+
+        if yes_no_prompt "Are you sure you want to remove app '$app_name' and domain '$domain'? This will delete configuration files."; then
+            # Remove config files
+            if [[ -f $vhost_file ]]; then
+                rm "$vhost_file"
+                green_message "Removed $vhost_file"
+            fi
+            if [[ -f $nginx_file ]]; then
+                rm "$nginx_file"
+                green_message "Removed $nginx_file"
+            fi
+            
+            # Remove SSL certs if they exist
+            if [[ -f "$lampPath/config/ssl/$domain-key.pem" ]]; then
+                rm "$lampPath/config/ssl/$domain-key.pem"
+                rm "$lampPath/config/ssl/$domain-cert.pem"
+                green_message "Removed SSL certificates for $domain"
+            fi
+
+            # Remove app directory
+            if [[ -d $app_root ]]; then
+                if yes_no_prompt "Do you also want to delete the application files at $app_root?"; then
+                    rm -rf "$app_root"
+                    green_message "Removed application files."
+                else
+                    info_message "Application files kept at $app_root"
+                fi
+            fi
+
+            # Reload servers
+            yellow_message "Reloading web servers..."
+            if command -v docker >/dev/null; then
+                if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
+                    docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
+                fi
+                docker compose exec reverse-proxy nginx -s reload
+                green_message "Web servers reloaded."
+            fi
+        else
+            info_message "Operation cancelled."
+        fi
+
+    # Show logs
+    elif [[ $1 == "logs" ]]; then
+        service=$2
+        if [[ -z $service ]]; then
+            docker compose logs -f
+        else
+            docker compose logs -f "$service"
+        fi
+
+    # Show status
+    elif [[ $1 == "status" ]]; then
+        docker compose ps
+
     # Handle 'code' command to open application directories
     elif [[ $1 == "code" ]]; then
         if [[ $2 == "lamp" ]]; then
@@ -1004,11 +1095,14 @@ EOL
         echo "  build       Rebuild and start the LAMP stack"
         echo "  cmd         Open a bash shell in the webserver container"
         echo "  addapp      Add a new application (usage: lamp addapp <name> [domain])"
+        echo "  removeapp   Remove an application (usage: lamp removeapp <name> [domain])"
         echo "  code        Open VS Code for an app (usage: lamp code [name])"
         echo "  config      Configure the environment"
         echo "  backup      Backup databases and applications"
         echo "  restore     Restore from a backup"
         echo "  ssl         Generate SSL certificates (usage: lamp ssl <domain>)"
+        echo "  logs        Show logs (usage: lamp logs [service])"
+        echo "  status      Show stack status"
         echo "  mail        Open Mailpit"
         echo "  pma         Open phpMyAdmin"
         echo "  redis-cli   Open Redis CLI"

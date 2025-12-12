@@ -94,7 +94,6 @@ RUN mkdir -p /etc/apache2/ssl /var/log/{cron,supervisor} && \
     touch /var/log/cron.log /var/log/supervisor/supervisord.log
 
 # Copy custom cron jobs and Supervisor configuration
-COPY supervisord.conf /etc/supervisor/supervisord.conf
 
 # Clean up unnecessary files to reduce image size
 RUN rm -rf /usr/src/* /tmp/* /var/tmp/*

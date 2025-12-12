@@ -143,7 +143,6 @@ RUN set -eux; \
 # ============================================
 # Copy Configuration
 # ============================================
-COPY supervisord.conf /etc/supervisor/supervisord.conf
 
 # ============================================
 # Health Check

@@ -79,6 +79,7 @@ services:
       - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:rw"
       - "${VHOSTS_DIR}:/etc/apache2/sites-enabled:ro"
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
+      - "./config/php/supervisord.conf:/etc/supervisor/supervisord.conf:ro"
       - "${APACHE_LOG_DIR}:/var/log/apache2"
       - "${SSL_DIR}:/etc/apache2/ssl:ro"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
@@ -105,6 +106,7 @@ services:
     volumes:
       - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:rw"
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
+      - "./config/php/supervisord.fpm.conf:/etc/supervisor/supervisord.conf:ro"
       - "./config/php/www.conf:/usr/local/etc/php-fpm.d/www.conf:ro"
       - "${APACHE_LOG_DIR}:/var/log/php-fpm"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
@@ -129,6 +131,8 @@ services:
       - "${MYSQL_INITDB_DIR}:/docker-entrypoint-initdb.d:ro"
       - "${MYSQL_DATA_DIR}:/var/lib/mysql"
       - "${MYSQL_LOG_DIR}:/var/log/mysql"
+      - "./config/mariadb/my.cnf:/etc/mysql/conf.d/custom.cnf:ro"
+      - "./bin/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro"
     environment:
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
       MYSQL_DATABASE: "${MYSQL_DATABASE}"

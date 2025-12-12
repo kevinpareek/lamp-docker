@@ -129,7 +129,6 @@ RUN set -eux; \
 # ============================================
 # Copy Configuration
 # ============================================
-COPY supervisord.fpm.conf /etc/supervisor/supervisord.conf
 
 # ============================================
 # Health Check
