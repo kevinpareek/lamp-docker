@@ -33,51 +33,30 @@ $database = new Medoo([
 
 function redirect(string $url = '/')
 {
-    header('Location: ' . $url);
+    if (!headers_sent()) {
+        header('Location: ' . $url);
+    } else {
+        echo '<script>window.location.href="' . $url . '";</script>';
+        echo '<noscript><meta http-equiv="refresh" content="0;url=' . $url . '" /></noscript>';
+    }
     exit();
 }
 
 function getIP()
 {
-    foreach (array('HTTP_CF_CONNECTING_IP', 'REMOTE_ADDR', 'HTTP_X_FORWARDED_FOR',) as $key) {
-        if (array_key_exists($key, $_SERVER) === true) {
+    $keys = ['HTTP_CF_CONNECTING_IP', 'REMOTE_ADDR', 'HTTP_X_FORWARDED_FOR'];
+    foreach ($keys as $key) {
+        if (!empty($_SERVER[$key])) {
             foreach (explode(',', $_SERVER[$key]) as $ip) {
                 $ip = trim($ip);
-                if ($ip == "::1") {
-                    return '127.0.0.1';
-                } elseif (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false) {
+                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false) {
                     return $ip;
                 }
             }
         }
     }
-
     return '127.0.0.1';
 }
-
-function pr($data, $type = 0)
-{
-    if (is_array($data)) {
-        echo '<pre>';
-        print_r($data);
-        echo '</pre>';
-    } elseif (is_object($data)) {
-        //$data  = (array) $data;
-        echo '<pre>';
-        print_r($data);
-        echo '</pre>';
-    } else {
-        echo $data;
-    }
-
-    if ($type != 0) {
-        exit();
-    } else {
-        echo '<hr>';
-    }
-}
-
-
 
 if (isset($_SERVER['HTTP_REFERER'])) {
     $url = $_SERVER['HTTP_REFERER'];

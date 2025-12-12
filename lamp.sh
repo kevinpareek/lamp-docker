@@ -5,6 +5,9 @@ lampFile=$(readlink -f "$0")
 lampPath=$(dirname "$lampFile")
 # echo $lampPath;
 
+# Allowed TLDs for application domains
+ALLOWED_TLDS="\.localhost|\.com|\.org|\.net|\.info|\.biz|\.name|\.pro|\.aero|\.coop|\.museum|\.jobs|\.mobi|\.travel|\.asia|\.cat|\.tel|\.app|\.blog|\.shop|\.xyz|\.tech|\.online|\.site|\.web|\.store|\.club|\.media|\.news|\.agency|\.guru|\.in|\.co.in|\.ai.in|\.net.in|\.org.in|\.firm.in|\.gen.in|\.ind.in|\.com.au|\.co.uk|\.co.nz|\.co.za|\.com.br|\.co.jp|\.ca|\.de|\.fr|\.cn|\.ru|\.us"
+
 red_message() {
     local RED='\033[0;31m'
     local NC='\033[0m' # No Color
@@ -91,69 +94,6 @@ yes_no_prompt() {
         *) yellow_message "Please answer yes or no." ;;
         esac
     done
-}
-
-# Function to prompt for input with a default value
-prompt_with_default() {
-    local prompt_message=$1
-    local default_value=$2
-    local user_input
-
-    read -p "$prompt_message [$default_value]: " user_input
-
-    # If input is empty, use default value
-    if [ -z "$user_input" ]; then
-        user_input=$default_value
-    fi
-
-    echo $user_input
-}
-
-# Function to read array input from user and validate
-read_array_value() {
-    local arr_name="$1"
-    local count=${2:-1}
-
-    echo ""
-    echo "Enter array values separated by spaces:"
-    read -a temp_array
-
-    # Validate each input
-    for value in "${temp_array[@]}"; do
-        if ! is_integer "$value"; then
-            error_message "Invalid value: $value"
-            ((count++))
-            if [[ $count -le 3 ]]; then
-                attempt_message $count
-                read_array_value $arr_name $count
-            else
-                red_message "Exceeded maximum attempts. Exiting."
-                exit 1
-            fi
-
-        fi
-    done
-
-    # Assign the temporary array to the named array if all values are valid
-    eval "$arr_name=(\"\${temp_array[@]}\")"
-}
-
-is_integer() {
-    local var="$1"
-    if [[ "$var" =~ ^-?[0-9]+$ ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-is_array() {
-    local var_name="$1"
-    if declare -p "$var_name" 2>/dev/null | grep -q 'declare \-a'; then
-        return 0
-    else
-        return 1
-    fi
 }
 
 install_mkcert() {
@@ -272,7 +212,7 @@ open_browser() {
 
 lamp_config() {
     # Set required configuration keys
-    reqConfig=("APP_ENV" "DOCUMENT_ROOT" "COMPOSE_PROJECT_NAME" "PHPVERSION" "DATABASE")
+    reqConfig=("APP_ENV" "DOCUMENT_ROOT" "APPLICATIONS_DIR_NAME" "COMPOSE_PROJECT_NAME" "PHPVERSION" "DATABASE")
 
     # Detect if Apple Silicon
     isAppleSilicon=false
@@ -439,6 +379,7 @@ lamp_config() {
         if [ -f "$indexFilePath" ]; then
             sed_i "s|\$LOCAL_DOCUMENT_ROOT = '.*';|\$LOCAL_DOCUMENT_ROOT = '$newLocalDocumentRoot';|" "$indexFilePath"
             sed_i "s|\$APACHE_DOCUMENT_ROOT = '.*';|\$APACHE_DOCUMENT_ROOT = '$APACHE_DOCUMENT_ROOT';|" "$indexFilePath"
+            sed_i "s|\$APPLICATIONS_DIR_NAME = '.*';|\$APPLICATIONS_DIR_NAME = '$APPLICATIONS_DIR_NAME';|" "$indexFilePath"
 
             sed_i "s|\$MYSQL_HOST = '.*';|\$MYSQL_HOST = 'database';|" "$indexFilePath"
             sed_i "s|\$MYSQL_DATABASE = '.*';|\$MYSQL_DATABASE = '$MYSQL_DATABASE';|" "$indexFilePath"
@@ -609,15 +550,13 @@ lamp() {
 
         app_name=$2
         domain=$3
-        # Allowed TLDs stored in a variable
-        allowed_tlds="\.localhost|\.com|\.org|\.net|\.info|\.biz|\.name|\.pro|\.aero|\.coop|\.museum|\.jobs|\.mobi|\.travel|\.asia|\.cat|\.tel|\.app|\.blog|\.shop|\.xyz|\.tech|\.online|\.site|\.web|\.store|\.club|\.media|\.news|\.agency|\.guru|\.in|\.co.in|\.ai.in|\.net.in|\.org.in|\.firm.in|\.gen.in|\.ind.in|\.com.au|\.co.uk|\.co.nz|\.co.za|\.com.br|\.co.jp|\.ca|\.de|\.fr|\.cn|\.ru|\.us"
 
         # Set default domain to <app_name>.localhost if not provided
         if [[ -z $domain ]]; then
             domain="${app_name}.localhost"
         else
             # Check if the domain matches the allowed TLDs
-            if [[ ! $domain =~ ^[a-zA-Z0-9.-]+($allowed_tlds)$ ]]; then
+            if [[ ! $domain =~ ^[a-zA-Z0-9.-]+($ALLOWED_TLDS)$ ]]; then
                 error_message "Domain must end with a valid TLD."
                 return 1
             fi
@@ -936,7 +875,24 @@ EOL
         docker compose exec redis redis-cli
 
     else
-        error_message "Usage: lamp {start|stop|restart|build|cmd|addapp|code|config|backup|restore|ssl|mail|pma|redis-cli}"
+        echo "Usage: lamp [command] [args]"
+        echo ""
+        echo "Commands:"
+        echo "  start       Start the LAMP stack"
+        echo "  stop        Stop the LAMP stack"
+        echo "  restart     Restart the LAMP stack"
+        echo "  build       Rebuild and start the LAMP stack"
+        echo "  cmd         Open a bash shell in the webserver container"
+        echo "  addapp      Add a new application (usage: lamp addapp <name> [domain])"
+        echo "  code        Open VS Code for an app (usage: lamp code [name])"
+        echo "  config      Configure the environment"
+        echo "  backup      Backup databases and applications"
+        echo "  restore     Restore from a backup"
+        echo "  ssl         Generate SSL certificates (usage: lamp ssl <domain>)"
+        echo "  mail        Open Mailpit"
+        echo "  pma         Open phpMyAdmin"
+        echo "  redis-cli   Open Redis CLI"
+        echo ""
     fi
 }
 

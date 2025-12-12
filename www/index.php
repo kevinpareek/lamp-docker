@@ -7,8 +7,11 @@ $domainData = [];
 function extractDomainData($file)
 {
     $content = file_get_contents($file);
-    $domain = extractPattern($content, '/ServerName\s+(\S+)/');
-    $path = extractPattern($content, '/DocumentRoot\s+(\S+)/');
+    $domain = extractPattern($content, '/ServerName\s+([^\s;]+)/i');
+    $path = extractPattern($content, '/DocumentRoot\s+([^\s;]+)/i');
+
+    // Remove quotes if present
+    $path = trim($path, '"\'');
 
     return $domain && $path ? ['domain' => $domain, 'path' => $path] : null;
 }
@@ -38,7 +41,7 @@ function getDomainData()
 
 $domainData = getDomainData();
 
-define('DOMAIN_APP_DIR', !empty($domainData[0]) ? explode("/", $domainData[0]['path'])[4] : 'applications');
+define('DOMAIN_APP_DIR', $APPLICATIONS_DIR_NAME ?? 'applications');
 
 function getSubDir($currDir = null)
 {

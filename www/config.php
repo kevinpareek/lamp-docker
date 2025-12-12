@@ -10,3 +10,4 @@ $MYSQL_PASSWORD = 'docker';
 $PMA_PORT = '8080';
 $LOCAL_DOCUMENT_ROOT = dirname(__FILE__);
 $APACHE_DOCUMENT_ROOT = '/var/www/html';
+$APPLICATIONS_DIR_NAME = 'applications';
