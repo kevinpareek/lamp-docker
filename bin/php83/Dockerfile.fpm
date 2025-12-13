@@ -33,7 +33,9 @@ RUN apt-get update --fix-missing && \
         libfreetype6-dev \
         libjpeg62-turbo-dev \
         libpng-dev \
-        libmemcached-dev && \
+        libmemcached-dev \
+        libssl-dev \
+        pkg-config && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
