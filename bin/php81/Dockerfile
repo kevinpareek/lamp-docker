@@ -1,4 +1,4 @@
-FROM php:8.1-apache-buster
+FROM php:8.1-apache-bookworm
 
 # Suppresses debconf complaints of trying to install apt packages interactively
 # https://github.com/moby/moby/issues/4032#issuecomment-192327844
@@ -31,6 +31,8 @@ libonig-dev && \
     apt-get -y --no-install-recommends install --fix-missing libcurl4 \
 libcurl4-openssl-dev \
 libmemcached-dev \
+libssl-dev \
+pkg-config \
 zip \
 unzip \
 openssl && \
