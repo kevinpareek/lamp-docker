@@ -544,7 +544,7 @@ lamp() {
     fi
 
     # Check LAMP stack status
-    if [[ $1 != "stop" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
+    if [[ $1 != "stop" && $1 != "config" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
         yellow_message "LAMP stack is not running. Starting LAMP stack..."
         lamp_start
     fi
