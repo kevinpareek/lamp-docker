@@ -7,4 +7,10 @@
 /data/mysql/*
 /data/redis/*
 /logs/*
-/sites/*
+
+/sites/apache/*
+!/sites/apache/.gitkeep
+/sites/nginx/*
+!/sites/nginx/.gitkeep
+/sites/ssl/*
+!/sites/ssl/.gitkeep
