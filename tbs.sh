@@ -30,7 +30,7 @@ red_message() {
 }
 
 error_message() {
-    echo -e "${RED}Error: $1${NC}"
+    echo -e "  ${RED}Error: $1${NC}"
 }
 
 value_message() {
@@ -46,11 +46,11 @@ green_message() {
 }
 
 info_message() {
-    echo -e "${CYAN}$1${NC}"
+    echo -e "  ${CYAN}$1${NC}"
 }
 
 yellow_message() {
-    echo -e "${YELLOW}$1${NC}"
+    echo -e "  ${YELLOW}$1${NC}"
 }
 
 attempt_message() {
@@ -175,7 +175,7 @@ open_browser() {
 tbs_config() {
     print_header
     # Set required configuration keys
-    reqConfig=("APP_ENV" "STACK_MODE" "DOCUMENT_ROOT" "PHPVERSION" "DATABASE")
+    reqConfig=("APP_ENV" "STACK_MODE" "PHPVERSION" "DATABASE")
 
     # Detect if Apple Silicon
     isAppleSilicon=false
@@ -281,11 +281,11 @@ tbs_config() {
 
         if $isAppleSilicon; then
             blue_message "Available Databases versions:"
-            yellow_message "⚠ Apple Silicon detected. Using MariaDB images for best compatibility."
+            yellow_message "Apple Silicon detected. Using MariaDB images for best compatibility."
             databaseOptions=("${mariadbOptions[@]}")
         else
             if $legacy_php; then
-                yellow_message "Available Databases versions (MySQL 8+ excluded for PHP <= 7.4):"
+                blue_message "Available Databases versions (MySQL 8+ excluded for PHP <= 7.4):"
                 databaseOptions=()
                 for db in "${mysqlOptions[@]}"; do
                     if [[ "$db" == "mysql5.7" ]]; then
@@ -627,7 +627,7 @@ tbs() {
     fi
 
     # Check Turbo Stack status
-    if [[ -n "$1" && $1 != "stop" && $1 != "config" && $1 != "build" && $1 != "status" && $1 != "logs" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
+    if [[ "$1" =~ ^(start|addapp|removeapp|cmd|backup|restore|ssl|mail|pma|redis-cli)$ && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
         yellow_message "Turbo Stack is not running. Starting Turbo Stack..."
         tbs_start
     fi
