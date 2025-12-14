@@ -8,48 +8,49 @@ tbsPath=$(dirname "$tbsFile")
 # Allowed TLDs for application domains
 ALLOWED_TLDS="\.localhost|\.com|\.org|\.net|\.info|\.biz|\.name|\.pro|\.aero|\.coop|\.museum|\.jobs|\.mobi|\.travel|\.asia|\.cat|\.tel|\.app|\.blog|\.shop|\.xyz|\.tech|\.online|\.site|\.web|\.store|\.club|\.media|\.news|\.agency|\.guru|\.in|\.co.in|\.ai.in|\.net.in|\.org.in|\.firm.in|\.gen.in|\.ind.in|\.com.au|\.co.uk|\.co.nz|\.co.za|\.com.br|\.co.jp|\.ca|\.de|\.fr|\.cn|\.ru|\.us"
 
+# Colors and Styles
+BOLD='\033[1m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+NC='\033[0m' # No Color
+
+print_header() {
+    echo -e "${BLUE}============================================================${NC}"
+    echo -e "${BOLD}${CYAN}   🚀  TURBO STACK MANAGER  ${NC}"
+    echo -e "${BLUE}============================================================${NC}"
+    echo ""
+}
+
 red_message() {
-    local RED='\033[0;31m'
-    local NC='\033[0m' # No Color
     echo -e "${RED}$1${NC}"
 }
 
 error_message() {
-    local RED='\033[0;31m'
-    local NC='\033[0m' # No Color
-    echo -e "${RED}Error: $1${NC}"
+    echo -e "  ${RED}Error: $1${NC}"
 }
 
 value_message() {
-    local BLUE='\033[0;34m'
-    local GREEN='\033[0;32m'
-    local NC='\033[0m' # No Color
-
     echo -e "${BLUE}${1}${NC} ${GREEN}${2}${NC}"
 }
 
 blue_message() {
-    local BLUE='\033[0;34m'
-    local NC='\033[0m' # No Color
     echo -e "${BLUE}$1${NC}"
 }
 
 green_message() {
-    local GREEN='\033[0;32m'
-    local NC='\033[0m' # No Color
     echo -e "${GREEN}$1${NC}"
 }
 
 info_message() {
-    local CYAN='\033[0;36m'
-    local NC='\033[0m' # No Color
-    echo -e "${CYAN}$1${NC}"
+    echo -e "  ${CYAN}$1${NC}"
 }
 
 yellow_message() {
-    local YELLOW='\033[0;33m'
-    local NC='\033[0m' # No Color
-    echo -e "${YELLOW}$1${NC}"
+    echo -e "  ${YELLOW}$1${NC}"
 }
 
 attempt_message() {
@@ -81,7 +82,7 @@ sed_i() {
 
 print_line() {
     echo ""
-    printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' -
+    echo -e "${BLUE}$(printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' -)${NC}"
     echo ""
 }
 
@@ -148,10 +149,6 @@ generate_ssl_certificates() {
     fi
 }
 
-    info_message "SSL certificates configured for https://$domain"
-    return 0
-}
-
 open_browser() {
     local domain=$1
     local os_name=$(uname -s)
@@ -176,8 +173,9 @@ open_browser() {
 }
 
 tbs_config() {
+    print_header
     # Set required configuration keys
-    reqConfig=("APP_ENV" "STACK_MODE" "DOCUMENT_ROOT" "APPLICATIONS_DIR_NAME" "COMPOSE_PROJECT_NAME" "PHPVERSION" "DATABASE")
+    reqConfig=("APP_ENV" "STACK_MODE" "PHPVERSION" "DATABASE")
 
     # Detect if Apple Silicon
     isAppleSilicon=false
@@ -208,6 +206,12 @@ tbs_config() {
                 esac
             fi
         done
+
+        # Sort arrays using version sort
+        IFS=$'\n' phpVersions=($(sort -V <<<"${phpVersions[*]}"))
+        IFS=$'\n' mysqlOptions=($(sort -V <<<"${mysqlOptions[*]}"))
+        IFS=$'\n' mariadbOptions=($(sort -V <<<"${mariadbOptions[*]}"))
+        unset IFS
     }
 
     # Function to read environment variables from a file (either .env or sample.env)
@@ -223,21 +227,37 @@ tbs_config() {
     # Function to prompt user to input a valid stack mode
     choose_stack_mode() {
         local valid_options=("hybrid" "thunder")
-        echo "Select the STACK_MODE value:"
-        select option in "${valid_options[@]}"; do
-            if [[ " ${valid_options[*]} " == *" $option "* ]]; then
-                STACK_MODE="$option"
-                echo "STACK_MODE is set to '$STACK_MODE'."
+        blue_message "Available Stack Modes:"
+        for i in "${!valid_options[@]}"; do
+            echo "   $((i+1)). ${valid_options[$i]}"
+        done
+
+        # Find current index for default
+        local default_index=1
+        for i in "${!valid_options[@]}"; do
+            if [[ "${valid_options[$i]}" == "$STACK_MODE" ]]; then
+                default_index=$((i+1))
+                break
+            fi
+        done
+
+        while true; do
+            read -p "Select Stack Mode [1-${#valid_options[@]}] (Default: $default_index): " mode_index
+            mode_index=${mode_index:-$default_index}
+
+            if [[ "$mode_index" -ge 1 && "$mode_index" -le "${#valid_options[@]}" ]]; then
+                STACK_MODE="${valid_options[$((mode_index-1))]}"
                 break
             else
-                echo "Invalid selection. Please choose a valid option."
+                error_message "Invalid selection. Please enter a number between 1 and ${#valid_options[@]}."
             fi
         done
     }
 
     # Function to prompt user to input a valid PHP version
     choose_php_version() {
-        value_message "Available PHP versions:" "${phpVersions[*]}"
+        blue_message "Available PHP versions:" 
+        green_message "➤  ${phpVersions[*]}"
 
         while true; do
             read -p "Enter PHP version (Default: $PHPVERSION): " php_choice
@@ -260,11 +280,12 @@ tbs_config() {
         fi
 
         if $isAppleSilicon; then
+            blue_message "Available Databases versions:"
             yellow_message "Apple Silicon detected. Using MariaDB images for best compatibility."
             databaseOptions=("${mariadbOptions[@]}")
         else
             if $legacy_php; then
-                yellow_message "Available databases (MySQL 8+ excluded for PHP <= 7.4):"
+                blue_message "Available Databases versions (MySQL 8+ excluded for PHP <= 7.4):"
                 databaseOptions=()
                 for db in "${mysqlOptions[@]}"; do
                     if [[ "$db" == "mysql5.7" ]]; then
@@ -273,7 +294,7 @@ tbs_config() {
                 done
                 databaseOptions+=("${mariadbOptions[@]}")
             else
-                blue_message "Available databases:"
+                blue_message "Available Databases versions:"
                 databaseOptions=("${mysqlOptions[@]}" "${mariadbOptions[@]}")
             fi
         fi
@@ -283,7 +304,7 @@ tbs_config() {
             exit 1
         fi
 
-        green_message "${databaseOptions[*]}"
+        green_message "➤  ${databaseOptions[*]}"
 
         while true; do
             read -p "Enter Database (Default: $DATABASE): " db_choice
@@ -300,11 +321,26 @@ tbs_config() {
 
     set_app_env() {
         local valid_options=("development" "production")
-        echo "Select the APP_ENV value:"
-        select option in "${valid_options[@]}"; do
-            if [[ " ${valid_options[*]} " == *" $option "* ]]; then
-                export APP_ENV="$option"
-                echo "APP_ENV is set to '$APP_ENV'."
+        blue_message "Available Environments:"
+        for i in "${!valid_options[@]}"; do
+            echo "   $((i+1)). ${valid_options[$i]}"
+        done
+
+        # Find current index for default
+        local default_index=1
+        for i in "${!valid_options[@]}"; do
+            if [[ "${valid_options[$i]}" == "$APP_ENV" ]]; then
+                default_index=$((i+1))
+                break
+            fi
+        done
+
+        while true; do
+            read -p "Select Environment [1-${#valid_options[@]}] (Default: $default_index): " env_index
+            env_index=${env_index:-$default_index}
+
+            if [[ "$env_index" -ge 1 && "$env_index" -le "${#valid_options[@]}" ]]; then
+                export APP_ENV="${valid_options[$((env_index-1))]}"
                 
                 # Auto-configure based on environment
                 if [[ "$APP_ENV" == "development" ]]; then
@@ -321,7 +357,7 @@ tbs_config() {
                 
                 break
             else
-                echo "Invalid selection. Please choose a valid option."
+                error_message "Invalid selection. Please enter a number between 1 and ${#valid_options[@]}."
             fi
         done
     }
@@ -332,6 +368,8 @@ tbs_config() {
 
         for key in "${reqConfig[@]}"; do
             default_value=$(eval echo \$$key)
+
+            echo -e ""
 
             # Handle PHPVERSION and DATABASE separately for prompts
             if [[ "$key" == "PHPVERSION" ]]; then
@@ -460,7 +498,7 @@ tbs_start() {
     fi
 
     # Build and start containers
-    info_message "Starting PHP TBS Stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
+    info_message "Starting Turbo Stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
     
     PROFILES="--profile ${STACK_MODE:-hybrid}"
     if [[ "$APP_ENV" == "development" ]]; then
@@ -468,11 +506,11 @@ tbs_start() {
     fi
 
     if ! docker compose $PROFILES up -d --build; then
-        error_message "Failed to start the PHP TBS Stack."
+        error_message "Failed to start the Turbo Stack."
         exit 1
     fi
 
-    green_message "PHP TBS Stack is running"
+    green_message "Turbo Stack is running"
     
     # Show status
     print_line
@@ -486,6 +524,86 @@ tbs_start() {
     info_message "  • Redis: localhost:${HOST_MACHINE_REDIS_PORT:-6379}"
     info_message "  • Memcached: localhost:11211"
     print_line
+}
+
+interactive_menu() {
+    while true; do
+        clear
+        print_header
+        echo -e "${BOLD}Select an action:${NC}"
+        
+        echo -e "\n${BLUE}🚀 Stack Control${NC}"
+        echo "   1) Start Stack"
+        echo "   2) Stop Stack"
+        echo "   3) Restart Stack"
+        echo "   4) Rebuild Stack"
+        echo "   5) View Status"
+        echo "   6) View Logs"
+
+        echo -e "\n${BLUE}📦 Application${NC}"
+        echo "   7) Add New App"
+        echo "   8) Remove App"
+        echo "   9) Open App Code"
+
+        echo -e "\n${BLUE}⚙️ Configuration & Tools${NC}"
+        echo "   10) Configure Environment"
+        echo "   11) Backup Data"
+        echo "   12) Restore Data"
+        echo "   13) SSL Certificates"
+        echo "   14) Open Mailpit"
+        echo "   15) Open phpMyAdmin"
+        echo "   16) Redis CLI"
+        echo "   17) Shell Access (Bash)"
+
+        echo -e "\n   ${RED}0) Exit${NC}"
+        
+        echo ""
+        read -p "Enter your choice [0-17]: " choice
+
+        local wait_needed=true
+        case $choice in
+            1) tbs start ;;
+            2) tbs stop ;;
+            3) tbs restart ;;
+            4) tbs build ;;
+            5) tbs status ;;
+            6) tbs logs ;;
+            7) 
+                echo ""
+                read -p "Enter application name: " app_name
+                tbs addapp "$app_name"
+                ;;
+            8) 
+                echo ""
+                read -p "Enter application name: " app_name
+                tbs removeapp "$app_name"
+                ;;
+            9) 
+                echo ""
+                read -p "Enter application name (optional): " app_name
+                tbs code "$app_name"
+                ;;
+            10) tbs config ;;
+            11) tbs backup ;;
+            12) tbs restore ;;
+            13) 
+                echo ""
+                read -p "Enter domain name: " domain
+                tbs ssl "$domain"
+                ;;
+            14) tbs mail ;;
+            15) tbs pma ;;
+            16) tbs redis-cli ;;
+            17) tbs cmd ;;
+            0) echo "Bye!"; exit 0 ;;
+            *) red_message "Invalid choice. Please try again."; sleep 1; wait_needed=false ;;
+        esac
+
+        if $wait_needed; then
+            echo ""
+            read -p "Press Enter to return to menu..."
+        fi
+    done
 }
 
 tbs() {
@@ -508,34 +626,34 @@ tbs() {
         WEBSERVER_SERVICE="webserver-fpm"
     fi
 
-    # Check PHP TBS Stack status
-    if [[ $1 != "stop" && $1 != "config" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
-        yellow_message "PHP TBS Stack is not running. Starting PHP TBS Stack..."
+    # Check Turbo Stack status
+    if [[ "$1" =~ ^(start|addapp|removeapp|cmd|backup|restore|ssl|mail|pma|redis-cli)$ && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
+        yellow_message "Turbo Stack is not running. Starting Turbo Stack..."
         tbs_start
     fi
 
-    # Start the PHP TBS Stack using Docker
+    # Start the Turbo Stack using Docker
     if [[ $1 == "start" ]]; then
         # Open the domain in the default web browser
         open_browser "http://localhost"
 
-    # Stop the PHP TBS Stack
+    # Stop the Turbo Stack
     elif [[ $1 == "stop" ]]; then
         docker compose --profile "*" down
-        green_message "PHP TBS Stack is stopped"
+        green_message "Turbo Stack is stopped"
 
     # Open a bash shell inside the webserver container
     elif [[ $1 == "cmd" ]]; then
         docker compose exec $WEBSERVER_SERVICE bash
 
-    # Restart the PHP TBS Stack
+    # Restart the Turbo Stack
     elif [[ $1 == "restart" ]]; then
         PROFILES="--profile ${STACK_MODE:-hybrid}"
         if [[ "$APP_ENV" == "development" ]]; then
             PROFILES="$PROFILES --profile development"
         fi
         docker compose --profile "*" down && docker compose $PROFILES up -d
-        green_message "PHP TBS Stack restarted."
+        green_message "Turbo Stack restarted."
 
     # Rebuild & Start
     elif [[ $1 == "build" ]]; then
@@ -546,7 +664,7 @@ tbs() {
         docker compose --profile "*" down
         # docker compose build
         docker compose $PROFILES up -d --build
-        green_message "PHP TBS Stack rebuilt and running."
+        green_message "Turbo Stack rebuilt and running."
 
     # Add a new application and create a corresponding virtual host
     elif [[ $1 == "addapp" ]]; then
@@ -627,7 +745,7 @@ server {
     listen 80;
     server_name $domain www.$domain;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -641,7 +759,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -663,7 +781,7 @@ server {
     listen 80;
     server_name $domain www.$domain;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -677,7 +795,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 EOL
@@ -859,14 +977,14 @@ EOL
 
         tbs_config
 
-    # Backup the PHP TBS Stack
+    # Backup the Turbo Stack
     elif [[ $1 == "backup" ]]; then
         backup_dir="$tbsPath/data/backup"
         mkdir -p "$backup_dir"
         timestamp=$(date +"%Y%m%d%H%M%S")
         backup_file="$backup_dir/tbs_backup_$timestamp.tgz"
 
-        info_message "Backing up PHP TBS Stack to $backup_file..."
+        info_message "Backing up Turbo Stack to $backup_file..."
         databases=$(docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
 
         # Create temporary directories for SQL and app data
@@ -890,7 +1008,7 @@ EOL
 
         green_message "Backup completed: ${backup_file}"
 
-    # Restore the PHP TBS Stack
+    # Restore the Turbo Stack
     elif [[ $1 == "restore" ]]; then
         backup_dir="$tbsPath/data/backup"
         if [[ ! -d $backup_dir ]]; then
@@ -919,7 +1037,7 @@ EOL
             return 1
         fi
 
-        info_message "Restoring PHP TBS Stack from $selected_backup..."
+        info_message "Restoring Turbo Stack from $selected_backup..."
         
         # Create temp directory for extraction
         temp_restore_dir="$backup_dir/restore_temp"
@@ -996,27 +1114,36 @@ EOL
         docker compose exec redis redis-cli
 
     else
-        echo "Usage: tbs [command] [args]"
-        echo ""
-        echo "Commands:"
-        echo "  start       Start the PHP TBS Stack"
-        echo "  stop        Stop the PHP TBS Stack"
-        echo "  restart     Restart the PHP TBS Stack"
-        echo "  build       Rebuild and start the PHP TBS Stack"
-        echo "  cmd         Open a bash shell in the webserver container"
-        echo "  addapp      Add a new application (usage: tbs addapp <name> [domain])"
-        echo "  removeapp   Remove an application (usage: tbs removeapp <name> [domain])"
-        echo "  code        Open VS Code for an app (usage: tbs code [name])"
-        echo "  config      Configure the environment"
-        echo "  backup      Backup databases and applications"
-        echo "  restore     Restore from a backup"
-        echo "  ssl         Generate SSL certificates (usage: tbs ssl <domain>)"
-        echo "  logs        Show logs (usage: tbs logs [service])"
-        echo "  status      Show stack status"
-        echo "  mail        Open Mailpit"
-        echo "  pma         Open phpMyAdmin"
-        echo "  redis-cli   Open Redis CLI"
-        echo ""
+        if [[ -z "$1" ]]; then
+            interactive_menu
+        elif [[ "$1" == "help" || "$1" == "--help" || "$1" == "-h" ]]; then
+            print_header
+            echo "Usage: tbs [command] [args]"
+            echo ""
+            echo "Commands:"
+            echo "  start       Start the Turbo Stack"
+            echo "  stop        Stop the Turbo Stack"
+            echo "  restart     Restart the Turbo Stack"
+            echo "  build       Rebuild and start the Turbo Stack"
+            echo "  cmd         Open a bash shell in the webserver container"
+            echo "  addapp      Add a new application (usage: tbs addapp <name> [domain])"
+            echo "  removeapp   Remove an application (usage: tbs removeapp <name> [domain])"
+            echo "  code        Open VS Code for an app (usage: tbs code [name])"
+            echo "  config      Configure the environment"
+            echo "  backup      Backup databases and applications"
+            echo "  restore     Restore from a backup"
+            echo "  ssl         Generate SSL certificates (usage: tbs ssl <domain>)"
+            echo "  logs        Show logs (usage: tbs logs [service])"
+            echo "  status      Show stack status"
+            echo "  mail        Open Mailpit"
+            echo "  pma         Open phpMyAdmin"
+            echo "  redis-cli   Open Redis CLI"
+            echo ""
+        else
+            print_header
+            error_message "Unknown command: $1"
+            echo "Run 'tbs help' for usage or 'tbs' for the interactive menu."
+        fi
     fi
 }
 
@@ -1047,7 +1174,7 @@ add_tbs_to_shell() {
     if [ -n "$shell_rc" ] && ! grep -q "tbs()" "$shell_rc"; then
         cat >> "$shell_rc" << EOF
 
-# TBS Stack helper function
+# Turbo Stack helper function
 tbs() {
     bash "$tbsFile" "\$@"
 }

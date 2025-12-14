@@ -24,7 +24,7 @@ Stop wasting time configuring servers. This stack gives you everything you needâ
     *   **phpMyAdmin**: Database management.
     *   **Mailpit**: Catch-all SMTP server for email testing.
     *   **Xdebug**: Ready-to-go debugging.
-*   **ðŸ¤– Automation**: A powerful `tbs.sh` script to manage sites, certs, and configs.
+*   **ðŸ¤– Automation**: A powerful `tbs.sh` (Turbo Stack) script to manage sites, certs, and configs.
 
 ---
 
@@ -43,7 +43,7 @@ Stop wasting time configuring servers. This stack gives you everything you needâ
     ```
 
 2.  **Configure:**
-    Run the wizard to choose your PHP version, Database, and Stack Mode.
+    Run the **TBS (Turbo Stack)** wizard to choose your PHP version, Database, and Stack Mode.
     ```bash
     ./tbs.sh config
     ```
