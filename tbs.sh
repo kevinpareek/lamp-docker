@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Get lamp script directory
-lampFile=$(readlink -f "$0")
-lampPath=$(dirname "$lampFile")
-# echo $lampPath;
+# Get tbs script directory
+tbsFile=$(readlink -f "$0")
+tbsPath=$(dirname "$tbsFile")
+# echo $tbsPath;
 
 # Allowed TLDs for application domains
 ALLOWED_TLDS="\.localhost|\.com|\.org|\.net|\.info|\.biz|\.name|\.pro|\.aero|\.coop|\.museum|\.jobs|\.mobi|\.travel|\.asia|\.cat|\.tel|\.app|\.blog|\.shop|\.xyz|\.tech|\.online|\.site|\.web|\.store|\.club|\.media|\.news|\.agency|\.guru|\.in|\.co.in|\.ai.in|\.net.in|\.org.in|\.firm.in|\.gen.in|\.ind.in|\.com.au|\.co.uk|\.co.nz|\.co.za|\.com.br|\.co.jp|\.ca|\.de|\.fr|\.cn|\.ru|\.us"
@@ -114,7 +114,7 @@ generate_ssl_certificates() {
             # We need to copy them to our sites/ssl directory so Nginx can see them as expected
             # Note: In docker-compose, we mapped ./data/certbot/conf to /etc/letsencrypt
             
-            # The path inside the host machine (relative to lamp.sh)
+            # The path inside the host machine (relative to tbs.sh)
             cert_path="./data/certbot/conf/live/$domain"
             
             if [[ -f "$cert_path/fullchain.pem" ]]; then
@@ -175,7 +175,7 @@ open_browser() {
     esac
 }
 
-lamp_config() {
+tbs_config() {
     # Set required configuration keys
     reqConfig=("APP_ENV" "STACK_MODE" "DOCUMENT_ROOT" "APPLICATIONS_DIR_NAME" "COMPOSE_PROJECT_NAME" "PHPVERSION" "DATABASE")
 
@@ -187,7 +187,7 @@ lamp_config() {
 
     # Function to dynamically fetch PHP versions and databases from ./bin
     fetch_dynamic_versions() {
-        local bin_dir="$lampPath/bin"
+        local bin_dir="$tbsPath/bin"
         phpVersions=()
         mysqlOptions=()
         mariadbOptions=()
@@ -379,7 +379,7 @@ lamp_config() {
     }
 
     update_local_document_indexFile() {
-        local indexFilePath=$(readlink -f "$lampPath/$DOCUMENT_ROOT/config.php")
+        local indexFilePath=$(readlink -f "$tbsPath/$DOCUMENT_ROOT/config.php")
         local newLocalDocumentRoot=$(dirname "$indexFilePath")
 
         if [ -f "$indexFilePath" ]; then
@@ -422,7 +422,7 @@ lamp_config() {
     update_local_document_indexFile
 }
 
-lamp_start() {
+tbs_start() {
     # Check if Docker daemon is running
     if ! docker info >/dev/null 2>&1; then
         yellow_message "Docker daemon is not running. Starting Docker daemon..."
@@ -460,7 +460,7 @@ lamp_start() {
     fi
 
     # Build and start containers
-    info_message "Starting PHP Turbo Stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
+    info_message "Starting PHP TBS Stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
     
     PROFILES="--profile ${STACK_MODE:-hybrid}"
     if [[ "$APP_ENV" == "development" ]]; then
@@ -468,11 +468,11 @@ lamp_start() {
     fi
 
     if ! docker compose $PROFILES up -d --build; then
-        error_message "Failed to start the PHP Turbo Stack."
+        error_message "Failed to start the PHP TBS Stack."
         exit 1
     fi
 
-    green_message "PHP Turbo Stack is running"
+    green_message "PHP TBS Stack is running"
     
     # Show status
     print_line
@@ -488,18 +488,18 @@ lamp_start() {
     print_line
 }
 
-lamp() {
+tbs() {
 
-    # go to lamp path
-    cd "$lampPath"
+    # go to tbs path
+    cd "$tbsPath"
 
     # Load environment variables from .env file
     if [[ -f .env ]]; then
         # Load all variables while excluding comments
         export $(grep -v '^#' .env | xargs)
     elif [[ $1 != "config" ]]; then
-        info_message ".env file not found. running.'$ lamp config'"
-        lamp_config
+        info_message ".env file not found. running.'$ tbs config'"
+        tbs_config
     fi
 
     # Determine webserver service name based on stack mode
@@ -508,34 +508,34 @@ lamp() {
         WEBSERVER_SERVICE="webserver-fpm"
     fi
 
-    # Check PHP Turbo Stack status
+    # Check PHP TBS Stack status
     if [[ $1 != "stop" && $1 != "config" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
-        yellow_message "PHP Turbo Stack is not running. Starting PHP Turbo Stack..."
-        lamp_start
+        yellow_message "PHP TBS Stack is not running. Starting PHP TBS Stack..."
+        tbs_start
     fi
 
-    # Start the PHP Turbo Stack using Docker
+    # Start the PHP TBS Stack using Docker
     if [[ $1 == "start" ]]; then
         # Open the domain in the default web browser
         open_browser "http://localhost"
 
-    # Stop the PHP Turbo Stack
+    # Stop the PHP TBS Stack
     elif [[ $1 == "stop" ]]; then
         docker compose --profile "*" down
-        green_message "PHP Turbo Stack is stopped"
+        green_message "PHP TBS Stack is stopped"
 
     # Open a bash shell inside the webserver container
     elif [[ $1 == "cmd" ]]; then
         docker compose exec $WEBSERVER_SERVICE bash
 
-    # Restart the PHP Turbo Stack
+    # Restart the PHP TBS Stack
     elif [[ $1 == "restart" ]]; then
         PROFILES="--profile ${STACK_MODE:-hybrid}"
         if [[ "$APP_ENV" == "development" ]]; then
             PROFILES="$PROFILES --profile development"
         fi
         docker compose --profile "*" down && docker compose $PROFILES up -d
-        green_message "PHP Turbo Stack restarted."
+        green_message "PHP TBS Stack restarted."
 
     # Rebuild & Start
     elif [[ $1 == "build" ]]; then
@@ -546,7 +546,7 @@ lamp() {
         docker compose --profile "*" down
         # docker compose build
         docker compose $PROFILES up -d --build
-        green_message "PHP Turbo Stack rebuilt and running."
+        green_message "PHP TBS Stack rebuilt and running."
 
     # Add a new application and create a corresponding virtual host
     elif [[ $1 == "addapp" ]]; then
@@ -703,11 +703,11 @@ EOL
 
         # Create an index.php file in the app's document root
         index_file="${app_root}/index.php"
-        indexHtml="$lampPath/data/pages/site-created.html"
+        indexHtml="$tbsPath/data/pages/site-created.html"
         sed -e "s|example.com|$domain|g" \
             -e "s|index.html|index.php|g" \
             -e "s|/var/www/html|$app_root|g" \
-            -e "s|lamp code|lamp code $app_name|g" \
+            -e "s|tbs code|tbs code $app_name|g" \
             $indexHtml > $index_file
         info_message "index.php created at $index_file"
 
@@ -819,15 +819,15 @@ EOL
 
     # Handle 'code' command to open application directories
     elif [[ $1 == "code" ]]; then
-        if [[ $2 == "lamp" ]]; then
-            code "$lampPath"
+        if [[ $2 == "root" || $2 == "tbs" ]]; then
+            code "$tbsPath"
         else
             # If no argument is provided, list application directories and prompt for selection
             apps_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
             if [[ -z $2 ]]; then
                 if [[ -d $apps_dir ]]; then
                     echo "Available applications:"
-                    app_list=($(ls "$apps_dir" | grep -v '^lamp$')) # Exclude 'lamp' from listing
+                    app_list=($(ls "$apps_dir" | grep -v '^tbs$')) # Exclude 'tbs' from listing
                     if [[ ${#app_list[@]} -eq 0 ]]; then
                         error_message "No applications found."
                         return
@@ -857,16 +857,16 @@ EOL
         fi
     elif [[ $1 == "config" ]]; then
 
-        lamp_config
+        tbs_config
 
-    # Backup the PHP Turbo Stack
+    # Backup the PHP TBS Stack
     elif [[ $1 == "backup" ]]; then
-        backup_dir="$lampPath/data/backup"
+        backup_dir="$tbsPath/data/backup"
         mkdir -p "$backup_dir"
         timestamp=$(date +"%Y%m%d%H%M%S")
-        backup_file="$backup_dir/lamp_backup_$timestamp.tgz"
+        backup_file="$backup_dir/tbs_backup_$timestamp.tgz"
 
-        info_message "Backing up PHP Turbo Stack to $backup_file..."
+        info_message "Backing up PHP TBS Stack to $backup_file..."
         databases=$(docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
 
         # Create temporary directories for SQL and app data
@@ -890,9 +890,9 @@ EOL
 
         green_message "Backup completed: ${backup_file}"
 
-    # Restore the PHP Turbo Stack
+    # Restore the PHP TBS Stack
     elif [[ $1 == "restore" ]]; then
-        backup_dir="$lampPath/data/backup"
+        backup_dir="$tbsPath/data/backup"
         if [[ ! -d $backup_dir ]]; then
             error_message "Backup directory not found: $backup_dir"
             return 1
@@ -919,7 +919,7 @@ EOL
             return 1
         fi
 
-        info_message "Restoring PHP Turbo Stack from $selected_backup..."
+        info_message "Restoring PHP TBS Stack from $selected_backup..."
         
         # Create temp directory for extraction
         temp_restore_dir="$backup_dir/restore_temp"
@@ -996,22 +996,22 @@ EOL
         docker compose exec redis redis-cli
 
     else
-        echo "Usage: lamp [command] [args]"
+        echo "Usage: tbs [command] [args]"
         echo ""
         echo "Commands:"
-        echo "  start       Start the PHP Turbo Stack"
-        echo "  stop        Stop the PHP Turbo Stack"
-        echo "  restart     Restart the PHP Turbo Stack"
-        echo "  build       Rebuild and start the PHP Turbo Stack"
+        echo "  start       Start the PHP TBS Stack"
+        echo "  stop        Stop the PHP TBS Stack"
+        echo "  restart     Restart the PHP TBS Stack"
+        echo "  build       Rebuild and start the PHP TBS Stack"
         echo "  cmd         Open a bash shell in the webserver container"
-        echo "  addapp      Add a new application (usage: lamp addapp <name> [domain])"
-        echo "  removeapp   Remove an application (usage: lamp removeapp <name> [domain])"
-        echo "  code        Open VS Code for an app (usage: lamp code [name])"
+        echo "  addapp      Add a new application (usage: tbs addapp <name> [domain])"
+        echo "  removeapp   Remove an application (usage: tbs removeapp <name> [domain])"
+        echo "  code        Open VS Code for an app (usage: tbs code [name])"
         echo "  config      Configure the environment"
         echo "  backup      Backup databases and applications"
         echo "  restore     Restore from a backup"
-        echo "  ssl         Generate SSL certificates (usage: lamp ssl <domain>)"
-        echo "  logs        Show logs (usage: lamp logs [service])"
+        echo "  ssl         Generate SSL certificates (usage: tbs ssl <domain>)"
+        echo "  logs        Show logs (usage: tbs logs [service])"
         echo "  status      Show stack status"
         echo "  mail        Open Mailpit"
         echo "  pma         Open phpMyAdmin"
@@ -1035,8 +1035,8 @@ if ! docker compose version >/dev/null 2>&1; then
     exit 1
 fi
 
-# Add lamp function to shell config (zsh/bash)
-add_lamp_to_shell() {
+# Add tbs function to shell config (zsh/bash)
+add_tbs_to_shell() {
     local shell_rc=""
     if [ -f "$HOME/.zshrc" ]; then
         shell_rc="$HOME/.zshrc"
@@ -1044,19 +1044,19 @@ add_lamp_to_shell() {
         shell_rc="$HOME/.bashrc"
     fi
     
-    if [ -n "$shell_rc" ] && ! grep -q "lamp()" "$shell_rc"; then
+    if [ -n "$shell_rc" ] && ! grep -q "tbs()" "$shell_rc"; then
         cat >> "$shell_rc" << EOF
 
-# LAMP Docker helper function
-lamp() {
-    bash "$lampFile" "\$@"
+# TBS Stack helper function
+tbs() {
+    bash "$tbsFile" "\$@"
 }
 EOF
-        info_message "Function 'lamp' added to $(basename $shell_rc)"
+        info_message "Function 'tbs' added to $(basename $shell_rc)"
     fi
 }
 
-add_lamp_to_shell
+add_tbs_to_shell
 
-# Run lamp with all arguments
-lamp "$@"
+# Run tbs with all arguments
+tbs "$@"

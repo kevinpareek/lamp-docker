@@ -90,7 +90,7 @@ function getSubDir($currDir = null)
         <div class="hero-body">
             <div class="container has-text-centered">
                 <h1 class="title">
-                    LAMP STACK
+                    PHP Turbo Stack
                 </h1>
                 <h2 class="subtitle">
                     Your local development environment
@@ -197,7 +197,7 @@ function getSubDir($currDir = null)
     </section>
     <footer>
         <p>
-            <a href="https://github.com/kevinpareek/lamp-docker" target="_blank">LAMP Docker</a>
+            <a href="https://github.com/kevinpareek/turbo-stack" target="_blank">PHP Turbo Stack</a>
         </p>
         <p>Your local development environment</p>
     </footer>

@@ -3,7 +3,7 @@ vcl 4.0;
 # ============================================
 # Default Varnish Configuration Template
 # Copy and modify for custom setups
-# Use hybrid.vcl or thunder.vcl for LAMP stack
+# Use hybrid.vcl or thunder.vcl for Turbo Stack
 # ============================================
 
 backend default {
