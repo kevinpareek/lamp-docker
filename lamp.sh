@@ -96,64 +96,6 @@ yes_no_prompt() {
     done
 }
 
-install_mkcert() {
-    local os_name=$(uname -s)
-    
-    info_message "Installing mkcert for SSL certificate generation..."
-    
-    case "$os_name" in
-        Darwin)
-            # macOS installation
-            if command_exists brew; then
-                brew install mkcert nss
-            else
-                error_message "Homebrew not found. Please install Homebrew first: https://brew.sh"
-                return 1
-            fi
-            ;;
-        Linux)
-            # Linux installation
-            if command_exists apt; then
-                sudo apt update
-                sudo apt install -y libnss3-tools
-                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
-                chmod +x mkcert-v*-linux-amd64
-                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
-            elif command_exists yum; then
-                sudo yum install -y nss-tools
-                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
-                chmod +x mkcert-v*-linux-amd64
-                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
-            elif command_exists pacman; then
-                sudo pacman -S --noconfirm nss
-                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
-                chmod +x mkcert-v*-linux-amd64
-                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
-            else
-                error_message "Unsupported Linux package manager. Please install mkcert manually."
-                return 1
-            fi
-            ;;
-        CYGWIN*|MINGW32*|MSYS*|MINGW*)
-            # Windows installation
-            if command_exists choco; then
-                choco install mkcert
-            else
-                error_message "Chocolatey not found. Please install Chocolatey first: https://chocolatey.org/install"
-                return 1
-            fi
-            ;;
-        *)
-            error_message "Unsupported operating system: $os_name"
-            return 1
-            ;;
-    esac
-    
-    # Initialize mkcert and create local CA
-    mkcert -install
-    return $?
-}
-
 generate_ssl_certificates() {
     domain=$1
     vhost_file=$2
@@ -180,6 +122,16 @@ generate_ssl_certificates() {
                 cp "$cert_path/privkey.pem" "${SSL_DIR}/$domain-key.pem"
                 
                 green_message "Let's Encrypt certificates generated successfully."
+
+                # Update the vhost configuration file with the correct SSL certificate paths
+                sed_i "s|SSLCertificateFile /etc/apache2/ssl-default/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|" $vhost_file
+                sed_i "s|SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl-sites/$domain-key.pem|" $vhost_file
+
+                sed_i "s|ssl_certificate /etc/nginx/ssl-default/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|" $nginx_file
+                sed_i "s|ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" $nginx_file
+
+                info_message "SSL certificates configured for https://$domain"
+                return 0
             else
                 error_message "Certificates were generated but could not be found at $cert_path"
                 return 1
@@ -190,33 +142,11 @@ generate_ssl_certificates() {
         fi
 
     else
-        # Local Domain (mkcert)
-        info_message "Local domain detected. Using mkcert for $domain..."
-        
-        # Check if mkcert is installed
-        if ! command -v mkcert &>/dev/null; then
-            if yes_no_prompt "mkcert is not installed. Would you like to install it now?"; then
-                if ! install_mkcert; then
-                    error_message "Failed to install mkcert. SSL certificates cannot be generated."
-                    return 1
-                fi
-            else
-                yellow_message "SSL certificates not generated. Using http://$domain"
-                return 1
-            fi
-        fi
-
-        # Generate SSL certificates for the domain
-        mkdir -p "${SSL_DIR}"
-        mkcert -key-file "${SSL_DIR}/$domain-key.pem" -cert-file "${SSL_DIR}/$domain-cert.pem" $domain "*.$domain"
+        # Local Domain - No SSL Generation
+        info_message "Local domain detected. Skipping SSL generation (Using default localhost certs)."
+        return 1
     fi
-
-    # Update the vhost configuration file with the correct SSL certificate paths
-    sed_i "s|SSLCertificateFile /etc/apache2/ssl-default/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|" $vhost_file
-    sed_i "s|SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl-sites/$domain-key.pem|" $vhost_file
-
-    sed_i "s|ssl_certificate /etc/nginx/ssl-default/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|" $nginx_file
-    sed_i "s|ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" $nginx_file
+}
 
     info_message "SSL certificates configured for https://$domain"
     return 0
@@ -755,7 +685,7 @@ EOL
 
         green_message "Vhost configuration file created at: $vhost_file"
 
-        # Check if mkcert is installed
+        # Check if SSL generation is needed
         if ! generate_ssl_certificates $domain $vhost_file $nginx_file; then
             domainUrl="http://$domain"
         else

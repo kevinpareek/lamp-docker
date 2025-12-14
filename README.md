@@ -10,7 +10,7 @@ Whether you're a seasoned Docker pro or just getting started, this stack has you
 
 *   **Multiple PHP Versions**: Switch between PHP 5.4 to 8.4 easily.
 *   **Database Choice**: Choose between MySQL (5.7, 8.0) or MariaDB (10.3 - 11.4).
-*   **Automatic SSL**: Built-in `mkcert` integration for valid HTTPS on local domains.
+*   **Smart SSL**: Zero-config SSL for local development (using default certs) and automatic Let's Encrypt certificates for production domains.
 *   **VHost Management**: Create new sites with a single command.
 *   **Developer Tools**:
     *   **phpMyAdmin**: Database management.
@@ -76,7 +76,9 @@ lamp addapp <app_name> [domain]
 *   **Example:** `lamp addapp myproject myproject.test`
 *   Creates a new folder in `www/applications/myproject`.
 *   Sets up Apache Virtual Host and Nginx Proxy.
-*   Generates SSL certificates automatically.
+*   **SSL Handling**:
+    *   **Local Domains** (`.localhost`): Uses default self-signed certificates (No setup required).
+    *   **Public Domains** (`example.com`): Automatically generates valid Let's Encrypt certificates using Certbot.
 *   Reloads the servers.
 *   *Note: For custom domains like `.test`, make sure to add `127.0.0.1 myproject.test` to your machine's hosts file.*
 
@@ -93,7 +95,7 @@ lamp code <app_name>
 | `lamp pma` | Open phpMyAdmin in your browser. |
 | `lamp mail` | Open Mailpit (email catcher) in your browser. |
 | `lamp redis-cli` | Open the Redis command-line interface. |
-| `lamp ssl <domain>` | Manually generate SSL certs for a domain. |
+| `lamp ssl <domain>` | Manually trigger SSL generation (Certbot for public domains). |
 
 ### Data Management
 
@@ -194,9 +196,8 @@ Made with ❤️ for developers. Happy Coding!
     ./lamp.sh ssl <domain>
     ```
     - `<domain>`: The domain for which to generate SSL certificates.
-
-We use tool like [mkcert](https://github.com/FiloSottile/mkcert#installation) to create an SSL certificate. So need to 
-install mkcert first to generate SSL certificates.
+    - **Local Domains**: Skipped (uses default certs).
+    - **Public Domains**: Uses Certbot (Let's Encrypt).
 
 
 ## Configuration
