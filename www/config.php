@@ -1,8 +1,8 @@
 <?php
 
 /**
- * LAMP Docker Configuration
- * Updated by lamp config command
+ * PHP Turbo Stack Configuration
+ * Updated by tbs config command
  * 
  * SECURITY NOTE: Change these default credentials in production!
  */
@@ -13,7 +13,7 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === 'config.php') {
     exit('Direct access not allowed');
 }
 
-# config value data - updated by lamp config command
+# config value data - updated by tbs config command
 # Default values for development environment
 $MYSQL_HOST = 'database';
 $MYSQL_DATABASE = 'docker';

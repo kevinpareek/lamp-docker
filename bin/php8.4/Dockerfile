@@ -4,10 +4,10 @@
 # ============================================
 FROM php:8.4-apache-bookworm AS base
 
-LABEL maintainer="LAMP Docker <github.com/kevinpareek/lamp-docker>"
+LABEL maintainer="PHP Turbo Stack <github.com/kevinpareek/turbo-stack>"
 LABEL version="2.0"
 LABEL description="Production-ready PHP 8.4 with Apache, Redis, Imagick"
-LABEL org.opencontainers.image.source="https://github.com/kevinpareek/lamp-docker"
+LABEL org.opencontainers.image.source="https://github.com/kevinpareek/turbo-stack"
 
 # ============================================
 # Build Arguments

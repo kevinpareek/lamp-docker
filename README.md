@@ -24,7 +24,7 @@ Stop wasting time configuring servers. This stack gives you everything you need�
     *   **phpMyAdmin**: Database management.
     *   **Mailpit**: Catch-all SMTP server for email testing.
     *   **Xdebug**: Ready-to-go debugging.
-*   **🤖 Automation**: A powerful `lamp.sh` script to manage sites, certs, and configs.
+*   **🤖 Automation**: A powerful `tbs.sh` script to manage sites, certs, and configs.
 
 ---
 
@@ -45,12 +45,12 @@ Stop wasting time configuring servers. This stack gives you everything you need�
 2.  **Configure:**
     Run the wizard to choose your PHP version, Database, and Stack Mode.
     ```bash
-    ./lamp.sh config
+    ./tbs.sh config
     ```
 
 3.  **Launch:**
     ```bash
-    ./lamp.sh start
+    ./tbs.sh start
     ```
 
     ### 🌐 Accessing the Dashboard
@@ -65,35 +65,35 @@ Stop wasting time configuring servers. This stack gives you everything you need�
 
 ---
 
-## 🛠️ The `lamp` Helper Script
+## 🛠️ The `tbs` Helper Script
 
 Manage your entire stack with simple commands.
 
 | Command | Description |
 | :--- | :--- |
-| `lamp start` | Start all services. |
-| `lamp stop` | Stop services. |
-| `lamp restart` | Restart the stack. |
-| `lamp build` | Rebuild images (e.g., after adding PHP extensions). |
-| `lamp config` | Change PHP version, DB, or Stack Mode. |
-| `lamp addapp <name> <domain>` | Create a new site (e.g., `lamp addapp myapp myapp.test`). |
-| `lamp code <name>` | Open a project in VS Code. |
-| `lamp ssl <domain>` | Force SSL generation (Certbot). |
-| `lamp backup` / `restore` | Backup or restore all data. |
+| `tbs start` | Start all services. |
+| `tbs stop` | Stop services. |
+| `tbs restart` | Restart the stack. |
+| `tbs build` | Rebuild images (e.g., after adding PHP extensions). |
+| `tbs config` | Change PHP version, DB, or Stack Mode. |
+| `tbs addapp <name> <domain>` | Create a new site (e.g., `tbs addapp myapp myapp.test`). |
+| `tbs code <name>` | Open a project in VS Code. |
+| `tbs ssl <domain>` | Force SSL generation (Certbot). |
+| `tbs backup` / `restore` | Backup or restore all data. |
 
 ### Tool Shortcuts
 | Command | Description | URL |
 | :--- | :--- | :--- |
-| `lamp pma` | phpMyAdmin | [http://localhost:8080](http://localhost:8080) |
-| `lamp mail` | Mailpit | [http://localhost:8025](http://localhost:8025) |
-| `lamp redis-cli` | Redis CLI | - |
-| `lamp cmd` | PHP Shell | - |
+| `tbs pma` | phpMyAdmin | [http://localhost:8080](http://localhost:8080) |
+| `tbs mail` | Mailpit | [http://localhost:8025](http://localhost:8025) |
+| `tbs redis-cli` | Redis CLI | - |
+| `tbs cmd` | PHP Shell | - |
 
 ---
 
 ## ⚙️ Architecture & Modes
 
-You can switch modes in `.env` or via `lamp config`.
+You can switch modes in `.env` or via `tbs config`.
 
 ### 1. Hybrid Mode (Default)
 **Nginx (Proxy) ➡ Varnish ➡ Apache ➡ PHP**
@@ -145,7 +145,7 @@ You can switch modes in `.env` or via `lamp config`.
 ├── www/                 # Document Root
 │   ├── applications/    # Your Projects
 │   └── index.php        # Dashboard
-└── lamp.sh              # Automation Script
+└── tbs.sh              # Automation Script
 ```
 
 ---
@@ -169,7 +169,7 @@ You can switch modes in `.env` or via `lamp config`.
 | **Memcached** | 11211 | `11211` (Internal Only) |
 
 ### Adding PHP Extensions
-Edit `./bin/php<version>/Dockerfile` (e.g., `./bin/php8.2/Dockerfile`) and run `lamp build`.
+Edit `./bin/php<version>/Dockerfile` (e.g., `./bin/php8.2/Dockerfile`) and run `tbs build`.
 
 ### Xdebug Setup (VS Code)
 Add this to `.vscode/launch.json`:
