@@ -71,8 +71,6 @@ services:
   # ============================================
   certbot:
     image: certbot/certbot
-    profiles:
-      - production
     volumes:
       - "${DOCUMENT_ROOT}:/var/www/html:rw"
       - "./sites/ssl:/etc/letsencrypt/live:rw"

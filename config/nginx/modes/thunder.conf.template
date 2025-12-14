@@ -10,7 +10,7 @@ server {
     root ${APACHE_DOCUMENT_ROOT};
     index index.php index.html index.htm;
 
-    include /etc/nginx/includes/common.conf;
+    include /etc/nginx/partials/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -28,7 +28,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    include /etc/nginx/includes/common.conf;
+    include /etc/nginx/partials/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 

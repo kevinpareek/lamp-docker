@@ -165,9 +165,8 @@ generate_ssl_certificates() {
         
         # Ensure certbot service is running or run it as a one-off command
         # We use webroot mode because nginx is already running and serving /.well-known/acme-challenge/
-        # We add --profile production to ensure the service is accessible even if APP_ENV is development
         
-        if docker compose --profile production run --rm certbot certonly --webroot --webroot-path=/var/www/html -d "$domain" -d "www.$domain" --email "admin@$domain" --agree-tos --no-eff-email; then
+        if docker compose run --rm certbot certonly --webroot --webroot-path=/var/www/html -d "$domain" -d "www.$domain" --email "admin@$domain" --agree-tos --no-eff-email; then
             
             # Certbot saves certs in /etc/letsencrypt/live/$domain/
             # We need to copy them to our sites/ssl directory so Nginx can see them as expected
@@ -698,7 +697,7 @@ server {
     listen 80;
     server_name $domain www.$domain;
 
-    include /etc/nginx/includes/common.conf;
+    include /etc/nginx/partials/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -712,7 +711,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    include /etc/nginx/includes/common.conf;
+    include /etc/nginx/partials/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -734,7 +733,7 @@ server {
     listen 80;
     server_name $domain www.$domain;
 
-    include /etc/nginx/includes/common.conf;
+    include /etc/nginx/partials/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -748,7 +747,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    include /etc/nginx/includes/common.conf;
+    include /etc/nginx/partials/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 EOL
