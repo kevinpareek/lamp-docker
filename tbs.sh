@@ -571,7 +571,9 @@ interactive_menu() {
             7) 
                 echo ""
                 read -p "Enter application name: " app_name
-                tbs addapp "$app_name"
+                read -p "Enter domain name (Default: ${app_name}.localhost): " domain
+                domain=${domain:-"${app_name}.localhost"}
+                tbs addapp "$app_name" "$domain"
                 ;;
             8) 
                 echo ""
