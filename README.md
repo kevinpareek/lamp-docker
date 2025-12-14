@@ -1,281 +1,178 @@
-# 🐳 Ultimate Docker LAMP Stack
+# 🚀 PHP Turbo Stack (Docker LAMP & LEMP)
 
-Welcome to your new favorite local development environment! This project provides a robust, production-ready LAMP (Linux, Apache, MySQL/MariaDB, PHP) stack powered by Docker Compose. It's designed to be **easy to use**, **highly configurable**, and **developer-friendly**.
+**The most complete, flexible, and production-ready local development environment for PHP.**
 
-Whether you're a seasoned Docker pro or just getting started, this stack has you covered. We've included a powerful helper script, `lamp.sh`, to automate common tasks, but you can also use standard Docker commands if you prefer.
+Stop wasting time configuring servers. This stack gives you everything you need—**Apache, Nginx, MySQL/MariaDB, Redis, Varnish, Memcached, Mailpit, and more**—all in one powerful Docker setup.
+
+> **🔮 Future Roadmap:** We are actively working on adding support for **Node.js**, **MongoDB**, and **PostgreSQL**. Stay tuned!
 
 ---
 
-## ✨ Features
+## ✨ Why PHP Turbo Stack?
 
-*   **Multiple PHP Versions**: Switch between PHP 5.4 to 8.4 easily.
-*   **Database Choice**: Choose between MySQL (5.7, 8.0) or MariaDB (10.3 - 11.4).
-*   **Automatic SSL**: Built-in `mkcert` integration for valid HTTPS on local domains.
-*   **VHost Management**: Create new sites with a single command.
-*   **Developer Tools**:
+*   **🔥 Dual Modes**:
+    *   **Hybrid Mode**: Nginx (Proxy) → Varnish → Apache (Webserver). Best for compatibility.
+    *   **Thunder Mode**: Nginx (Webserver) → PHP-FPM. Best for performance.
+*   **🐘 Multiple PHP Versions**: Switch instantly between PHP 5.4 to 8.4.
+*   **💾 Database Freedom**: Choose MySQL (5.7 - 8.4) or MariaDB (10.3 - 11.4).
+    *   *Coming Soon: MongoDB & PostgreSQL support.*
+*   **⚡ Caching Suite**: Pre-configured **Redis**, **Memcached**, and **Varnish**.
+*   **🔒 Smart SSL**:
+    *   **Local**: Zero-config self-signed certs for `.localhost` domains.
+    *   **Public**: Automatic Let's Encrypt certificates via **Certbot**.
+*   **🛠 Developer Tools**:
     *   **phpMyAdmin**: Database management.
-    *   **Mailpit**: Catch-all SMTP server for testing emails.
-    *   **Redis**: In-memory data structure store.
-    *   **Xdebug**: Pre-configured for debugging.
-*   **Backup & Restore**: One-click backup and restore functionality.
+    *   **Mailpit**: Catch-all SMTP server for email testing.
+    *   **Xdebug**: Ready-to-go debugging.
+*   **🤖 Automation**: A powerful `lamp.sh` script to manage sites, certs, and configs.
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-
-*   **Docker Desktop** (or Docker Engine + Compose Plugin)
-*   **Git**
-*   **Bash** (for the helper script)
+*   Docker Desktop (or Engine + Compose)
+*   Git & Bash
 
 ### Installation
 
-1.  **Clone the repository:**
+1.  **Clone & Enter:**
     ```bash
-    git clone https://github.com/kevinpareek/lamp-docker.git
-    cd lamp-docker
+    git clone https://github.com/kevinpareek/turbo-stack.git
+    cd turbo-stack
     ```
 
-2.  **Configure your environment:**
-    Run the configuration wizard to set up your preferences (PHP version, Database type, etc.).
+2.  **Configure:**
+    Run the wizard to choose your PHP version, Database, and Stack Mode.
     ```bash
     ./lamp.sh config
     ```
 
-3.  **Start the stack:**
+3.  **Launch:**
     ```bash
     ./lamp.sh start
     ```
-    *This will build the images (if needed) and start the services. It also adds a `lamp` alias to your shell profile for easier access!*
+
+    ### 🌐 Accessing the Dashboard
+    You can access the dashboard via:
+    *   **http://localhost**
+    *   **http://127.0.0.1**
+    *   **http://turbostack.in** (Recommended)
+
+    **🔒 SSL/HTTPS:**
+    *   **Supported:** [https://turbostack.in](https://turbostack.in)
+    *   **Not Supported:** `https://localhost`
 
 ---
 
-## 🛠️ Using the `lamp` Helper Script
+## 🛠️ The `lamp` Helper Script
 
-The `lamp.sh` script is your command center. Once installed, you can just type `lamp` followed by a command.
-
-### Core Commands
+Manage your entire stack with simple commands.
 
 | Command | Description |
 | :--- | :--- |
-| `lamp start` | Start all services and open the dashboard. |
-| `lamp stop` | Stop all running services. |
+| `lamp start` | Start all services. |
+| `lamp stop` | Stop services. |
 | `lamp restart` | Restart the stack. |
-| `lamp build` | Rebuild the Docker images (useful after changing PHP extensions). |
-| `lamp config` | Re-run the configuration wizard. |
+| `lamp build` | Rebuild images (e.g., after adding PHP extensions). |
+| `lamp config` | Change PHP version, DB, or Stack Mode. |
+| `lamp addapp <name> <domain>` | Create a new site (e.g., `lamp addapp myapp myapp.test`). |
+| `lamp code <name>` | Open a project in VS Code. |
+| `lamp ssl <domain>` | Force SSL generation (Certbot). |
+| `lamp backup` / `restore` | Backup or restore all data. |
 
-### Application Management
-
-This is where the magic happens! Create new isolated environments for your projects instantly.
-
-**Create a new app:**
-```bash
-lamp addapp <app_name> [domain]
-```
-*   **Example:** `lamp addapp myproject myproject.test`
-*   Creates a new folder in `www/applications/myproject`.
-*   Sets up Apache Virtual Host and Nginx Proxy.
-*   Generates SSL certificates automatically.
-*   Reloads the servers.
-*   *Note: For custom domains like `.test`, make sure to add `127.0.0.1 myproject.test` to your machine's hosts file.*
-
-**Open in VS Code:**
-```bash
-lamp code <app_name>
-```
-
-### Tools & Utilities
-
-| Command | Description |
-| :--- | :--- |
-| `lamp cmd` | Open a Bash shell inside the PHP container. |
-| `lamp pma` | Open phpMyAdmin in your browser. |
-| `lamp mail` | Open Mailpit (email catcher) in your browser. |
-| `lamp redis-cli` | Open the Redis command-line interface. |
-| `lamp ssl <domain>` | Manually generate SSL certs for a domain. |
-
-### Data Management
-
-| Command | Description |
-| :--- | :--- |
-| `lamp backup` | Backup all databases and application files to `data/backup`. |
-| `lamp restore` | Restore the stack from a previous backup. |
+### Tool Shortcuts
+| Command | Description | URL |
+| :--- | :--- | :--- |
+| `lamp pma` | phpMyAdmin | [http://localhost:8080](http://localhost:8080) |
+| `lamp mail` | Mailpit | [http://localhost:8025](http://localhost:8025) |
+| `lamp redis-cli` | Redis CLI | - |
+| `lamp cmd` | PHP Shell | - |
 
 ---
 
-## 🐢 Using Without `lamp.sh` (Manual Mode)
+## ⚙️ Architecture & Modes
 
-Prefer standard Docker commands? No problem! Here is how to manage the stack manually.
+You can switch modes in `.env` or via `lamp config`.
 
-### Basic Control
+### 1. Hybrid Mode (Default)
+**Nginx (Proxy) ➡ Varnish ➡ Apache ➡ PHP**
+*   Combines Nginx's static file handling with Apache's `.htaccess` flexibility.
+*   Ideal for legacy apps, WordPress, or projects needing Apache-specific rules.
 
-*   **Start:** `docker compose up -d`
-*   **Stop:** `docker compose down`
-*   **Logs:** `docker compose logs -f`
+### 2. Thunder Mode (LEMP)
+**Nginx ➡ PHP-FPM**
+*   Pure Nginx performance.
+*   Ideal for Laravel, Symfony, and high-performance modern apps.
+*   *Note: `.htaccess` files are ignored in this mode.*
 
-### Accessing Containers
+### 3. Node.js Mode (Coming Soon)
+**Nginx ➡ Node.js**
+*   Full support for Node.js applications.
+*   Integrated with the rest of the stack (Redis, MySQL, etc.).
 
-*   **PHP Shell:** `docker compose exec webserver bash`
-*   **MySQL Shell:** `docker compose exec database mysql -u root -p`
-*   **Redis Shell:** `docker compose exec redis redis-cli`
+---
 
-### Adding a New App (The Hard Way)
+## 🧩 Stack Components & Roles
 
-Without the script, you'll need to do the following manually:
-1.  Create a folder: `mkdir -p www/applications/myapp`
-2.  Create an Apache VHost config in `config/vhosts/myapp.conf`.
-3.  Create an Nginx config in `config/nginx/myapp.conf`.
-4.  Generate SSL certs and place them in `config/ssl/`.
-5.  Restart containers: `docker compose restart`
+*   **Nginx (Reverse Proxy):** The entry point for all requests. Handles SSL termination and serves static files.
+*   **Varnish (HTTP Accelerator):** Caches dynamic content from the webserver to serve requests instantly (Hybrid Mode).
+*   **Apache / PHP-FPM:** The backend engines that execute your PHP code.
+*   **Redis:** Advanced key-value store. Perfect for caching, session management, and queues.
+*   **Memcached:** Simple, high-performance memory object caching system.
+*   **Mailpit:** Catches all emails sent by PHP. View them in the browser instead of spamming real users.
 
 ---
 
 ## 📂 Directory Structure
 
 ```text
-├── bin/                 # Dockerfiles for different PHP/DB versions
-├── config/              # Configuration files
-│   ├── apache/          # Global Apache config
-│   ├── nginx/           # Nginx proxy config
-│   ├── php/             # PHP.ini settings
-│   ├── vhosts/          # Apache Virtual Hosts (auto-generated)
-│   └── ssl/             # SSL Certificates (auto-generated)
-├── data/                # Persistent data
-│   ├── mysql/           # Database files
-│   └── backup/          # Backups created by lamp backup
-├── logs/                # Server logs (Apache, Nginx, MySQL)
+├── bin/                 # Dockerfiles (PHP, Nginx, DBs)
+├── config/              # Configuration Files
+│   ├── initdb/          # SQL scripts to run on DB init
+│   ├── mariadb/         # Custom my.cnf
+│   ├── nginx/           # Nginx sites & templates
+│   ├── php/             # php.ini, supervisord
+│   ├── ssl/             # Default SSL certs
+│   ├── varnish/         # VCL configurations
+│   └── vhosts/          # Apache VHosts
+├── data/                # Persistent Data (DB, Redis, Backups)
+├── logs/                # Logs (Apache, Nginx, MySQL)
+├── sites/               # Generated Configs (Do not edit manually)
+│   ├── apache/          # Active Apache VHosts
+│   ├── nginx/           # Active Nginx Configs
+│   └── ssl/             # Let's Encrypt Certs
 ├── www/                 # Document Root
-│   ├── applications/    # Your project folders go here
+│   ├── applications/    # Your Projects
 │   └── index.php        # Dashboard
-├── docker-compose.yml   # Main Docker service definition
-└── lamp.sh              # The magic helper script
+└── lamp.sh              # Automation Script
 ```
 
 ---
 
-## ❓ FAQ & Troubleshooting
+## 🔧 Technical Reference
 
-**Q: My custom domain isn't working!**
-A: Did you add it to your hosts file?
-*   **Windows:** `C:\Windows\System32\drivers\etc\hosts`
-*   **macOS/Linux:** `/etc/hosts`
-Add the line: `127.0.0.1 yourdomain.com`
+### Default Credentials
+*   **MySQL/MariaDB**: User: `root`, Pass: `root`, DB: `docker`
+*   **phpMyAdmin**: User: `root`, Pass: `root`
 
-**Q: How do I change the PHP version?**
-A: Run `lamp config` and select a different version, or edit the `.env` file directly and run `lamp build`.
+### Services & Ports
+| Service | Internal Port | Host Port (Default) |
+| :--- | :--- | :--- |
+| **Web (HTTP)** | 80 | `80` |
+| **Web (HTTPS)** | 443 | `443` |
+| **MySQL/MariaDB** | 3306 | `3306` |
+| **phpMyAdmin** | 80 | `8080` |
+| **Mailpit (UI)** | 8025 | `8025` |
+| **Mailpit (SMTP)** | 1025 | `1025` |
+| **Redis** | 6379 | `6379` |
+| **Memcached** | 11211 | `11211` (Internal Only) |
 
-**Q: Where are my database files?**
-A: They are persisted in `data/mysql`. They survive container restarts.
+### Adding PHP Extensions
+Edit `./bin/php<version>/Dockerfile` (e.g., `./bin/php8.2/Dockerfile`) and run `lamp build`.
 
-**Q: I see "File already exists" errors.**
-A: The `lamp.sh` script tries to be safe. If you're trying to overwrite something, you might need to delete the old one manually or check permissions.
-
----
-
-Made with ❤️ for developers. Happy Coding!
-
-- **phpMyAdmin:**
-    ```sh
-    ./lamp.sh pma
-    ```
-    Opens phpMyAdmin at `http://localhost:8080`.
-
-- **Redis CLI:**
-    ```sh
-    ./lamp.sh redis-cli
-    ```
-    Opens Redis CLI inside the container.
-
-## SSL Certificates
-
-- **Generate SSL certificates for a domain:**
-    ```sh
-    ./lamp.sh ssl <domain>
-    ```
-    - `<domain>`: The domain for which to generate SSL certificates.
-
-We use tool like [mkcert](https://github.com/FiloSottile/mkcert#installation) to create an SSL certificate. So need to 
-install mkcert first to generate SSL certificates.
-
-
-## Configuration
-
-- This package comes with default configuration options. You can modify them by creating a `.env` file in your root directory. 
-To make it easy, just copy the content from the `sample.env` file and update the environment variable values as per your need.
-
-- The installed version of PHP and MYSQL depends on your `.env` file.
-
-
-### Apache Modules
-
-By default, the following modules are enabled:
-- rewrite
-- headers
-
-> If you want to enable more modules, update `./bin/phpX/Dockerfile`. Rebuild the Docker image by running `docker compose 
-build` and restart the Docker containers.
-
-
-### Extensions
-
-By default, the following extensions are installed (may differ for PHP versions <7.x.x):
-- mysqli
-- pdo_sqlite
-- pdo_mysql
-- mbstring
-- zip
-- intl
-- mcrypt
-- curl
-- json
-- iconv
-- xml
-- xmlrpc
-- gd
-
-> If you want to install more extensions, update `./bin/webserver/Dockerfile`. Rebuild the Docker image by running `docker 
-compose build` and restart the Docker containers.
-
-## phpMyAdmin
-
-phpMyAdmin is configured to run on port 8080. Use the following default credentials:
-- URL: `http://localhost:8080/`
-- Username: `root`
-- Password: `root` (or as configured in your `.env` file)
-
-## Xdebug
-
-Xdebug comes installed by default, and its version depends on the PHP version chosen in the `.env` file.
-
-**Xdebug versions:**
-- PHP <= 7.3: Xdebug 2.X.X
-- PHP >= 7.4: Xdebug 3.X.X
-
-To use Xdebug, enable the settings in the `./config/php/php.ini` file according to the chosen PHP version.
-
-Example:
-```ini
-# Xdebug 2
-#xdebug.remote_enable=1
-#xdebug.remote_autostart=1
-#xdebug.remote_connect_back=1
-#xdebug.remote_host = host.docker.internal
-#xdebug.remote_port=9000
-
-# Xdebug 3
-#xdebug.mode=debug
-#xdebug.start_with_request=yes
-#xdebug.client_host=host.docker.internal
-#xdebug.client_port=9003
-#xdebug.idekey=VSCODE
-```
-
-### Xdebug VS Code
-
-Install the Xdebug extension "PHP Debug" in VS Code. Create the launch file so that your IDE can listen and work properly.
-
-Example:
+### Xdebug Setup (VS Code)
+Add this to `.vscode/launch.json`:
 ```json
 {
     "version": "0.2.0",
@@ -284,39 +181,25 @@ Example:
             "name": "Listen for Xdebug",
             "type": "php",
             "request": "launch",
-            // "port": 9000, // Xdebug 2
-            "port": 9003, // Xdebug 3
-            "pathMappings": {
-                // "/var/www/html": "${workspaceFolder}/www" // if you have opened VSCODE in root folder
-                "/var/www/html": "${workspaceFolder}" // if you have opened VSCODE in ./www folder
-            }
+            "port": 9003,
+            "pathMappings": { "/var/www/html": "${workspaceFolder}" }
         }
     ]
 }
 ```
 
-Make a breakpoint and run debug. After these configurations, you may need to restart the container.
+---
 
-## Redis
+## ⚠️ Production Usage
+1.  Set `APP_ENV=production` in `.env`.
+2.  **Change all passwords** in `.env`.
+3.  Disable `INSTALL_XDEBUG`.
+4.  Ensure `STACK_MODE` is set correctly for your needs.
 
-Redis runs on the default port `6379`.
+---
 
+## 🤝 Contributing
+Pull Requests are welcome!
 
-## Contributing
-
-We welcome contributions! If you want to create a pull request, please remember that this stack is not built for production 
-usage, and changes should be good for general purposes and not overspecialized.
-
-> Please note that we simplified the project structure from several branches for each PHP version to one centralized master 
-branch. Please create your PR against the master branch.
-
-## Why You Shouldn't Use This Stack Unmodified in Production
-
-This stack is designed for local development to quickly create creative applications. In production, you should modify at a 
-minimum the following subjects:
-- PHP handler: mod_php => php-fpm
-- Secure MySQL users with proper source IP limitations
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+## 📄 License
+MIT License.

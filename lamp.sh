@@ -96,94 +96,59 @@ yes_no_prompt() {
     done
 }
 
-install_mkcert() {
-    local os_name=$(uname -s)
-    
-    info_message "Installing mkcert for SSL certificate generation..."
-    
-    case "$os_name" in
-        Darwin)
-            # macOS installation
-            if command_exists brew; then
-                brew install mkcert nss
-            else
-                error_message "Homebrew not found. Please install Homebrew first: https://brew.sh"
-                return 1
-            fi
-            ;;
-        Linux)
-            # Linux installation
-            if command_exists apt; then
-                sudo apt update
-                sudo apt install -y libnss3-tools
-                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
-                chmod +x mkcert-v*-linux-amd64
-                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
-            elif command_exists yum; then
-                sudo yum install -y nss-tools
-                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
-                chmod +x mkcert-v*-linux-amd64
-                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
-            elif command_exists pacman; then
-                sudo pacman -S --noconfirm nss
-                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
-                chmod +x mkcert-v*-linux-amd64
-                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
-            else
-                error_message "Unsupported Linux package manager. Please install mkcert manually."
-                return 1
-            fi
-            ;;
-        CYGWIN*|MINGW32*|MSYS*|MINGW*)
-            # Windows installation
-            if command_exists choco; then
-                choco install mkcert
-            else
-                error_message "Chocolatey not found. Please install Chocolatey first: https://chocolatey.org/install"
-                return 1
-            fi
-            ;;
-        *)
-            error_message "Unsupported operating system: $os_name"
-            return 1
-            ;;
-    esac
-    
-    # Initialize mkcert and create local CA
-    mkcert -install
-    return $?
-}
-
 generate_ssl_certificates() {
     domain=$1
     vhost_file=$2
     nginx_file=$3
 
-    # Check if mkcert is installed
-    if ! command -v mkcert &>/dev/null; then
-        if yes_no_prompt "mkcert is not installed. Would you like to install it now?"; then
-            if ! install_mkcert; then
-                error_message "Failed to install mkcert. SSL certificates cannot be generated."
+    # Check if domain is NOT localhost or .localhost (Public Domain)
+    if [[ "$domain" != "localhost" && "$domain" != *".localhost" ]]; then
+        info_message "Public domain detected. Generating Let's Encrypt SSL certificates for $domain..."
+        
+        # Ensure certbot service is running or run it as a one-off command
+        # We use webroot mode because nginx is already running and serving /.well-known/acme-challenge/
+        
+        if docker compose run --rm certbot certonly --webroot --webroot-path=/var/www/html -d "$domain" -d "www.$domain" --email "admin@$domain" --agree-tos --no-eff-email; then
+            
+            # Certbot saves certs in /etc/letsencrypt/live/$domain/
+            # We need to copy them to our sites/ssl directory so Nginx can see them as expected
+            # Note: In docker-compose, we mapped ./data/certbot/conf to /etc/letsencrypt
+            
+            # The path inside the host machine (relative to lamp.sh)
+            cert_path="./data/certbot/conf/live/$domain"
+            
+            if [[ -f "$cert_path/fullchain.pem" ]]; then
+                cp "$cert_path/fullchain.pem" "${SSL_DIR}/$domain-cert.pem"
+                cp "$cert_path/privkey.pem" "${SSL_DIR}/$domain-key.pem"
+                
+                green_message "Let's Encrypt certificates generated successfully."
+
+                # Update the vhost configuration file with the correct SSL certificate paths
+                sed_i "s|SSLCertificateFile /etc/apache2/ssl-default/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|" $vhost_file
+                sed_i "s|SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl-sites/$domain-key.pem|" $vhost_file
+
+                sed_i "s|ssl_certificate /etc/nginx/ssl-default/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|" $nginx_file
+                sed_i "s|ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" $nginx_file
+
+                info_message "SSL certificates configured for https://$domain"
+                return 0
+            else
+                error_message "Certificates were generated but could not be found at $cert_path"
                 return 1
             fi
         else
-            yellow_message "SSL certificates not generated. Using http://$domain"
+            error_message "Failed to generate Let's Encrypt certificates."
             return 1
         fi
+
+    else
+        # Local Domain - No SSL Generation
+        info_message "Local domain detected. Skipping SSL generation (Using default localhost certs)."
+        return 1
     fi
+}
 
-    # Generate SSL certificates for the domain
-    mkdir -p "$lampPath/config/ssl"
-    mkcert -key-file "$lampPath/config/ssl/$domain-key.pem" -cert-file "$lampPath/config/ssl/$domain-cert.pem" $domain "*.$domain"
-
-    # Update the vhost configuration file with the correct SSL certificate paths
-    sed_i "s|SSLCertificateFile /etc/apache2/ssl/cert.pem|SSLCertificateFile /etc/apache2/ssl/$domain-cert.pem|" $vhost_file
-    sed_i "s|SSLCertificateKeyFile /etc/apache2/ssl/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl/$domain-key.pem|" $vhost_file
-
-    sed_i "s|ssl_certificate /etc/nginx/ssl/cert.pem|ssl_certificate /etc/nginx/ssl/$domain-cert.pem|" $nginx_file
-    sed_i "s|ssl_certificate_key /etc/nginx/ssl/cert-key.pem|ssl_certificate_key /etc/nginx/ssl/$domain-key.pem|" $nginx_file
-
-    info_message "SSL certificates generated for https://$domain"
+    info_message "SSL certificates configured for https://$domain"
     return 0
 }
 
@@ -495,7 +460,7 @@ lamp_start() {
     fi
 
     # Build and start containers
-    info_message "Starting LAMP stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
+    info_message "Starting PHP Turbo Stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
     
     PROFILES="--profile ${STACK_MODE:-hybrid}"
     if [[ "$APP_ENV" == "development" ]]; then
@@ -503,11 +468,11 @@ lamp_start() {
     fi
 
     if ! docker compose $PROFILES up -d --build; then
-        error_message "Failed to start the LAMP stack."
+        error_message "Failed to start the PHP Turbo Stack."
         exit 1
     fi
 
-    green_message "LAMP stack is running"
+    green_message "PHP Turbo Stack is running"
     
     # Show status
     print_line
@@ -543,34 +508,34 @@ lamp() {
         WEBSERVER_SERVICE="webserver-fpm"
     fi
 
-    # Check LAMP stack status
+    # Check PHP Turbo Stack status
     if [[ $1 != "stop" && $1 != "config" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
-        yellow_message "LAMP stack is not running. Starting LAMP stack..."
+        yellow_message "PHP Turbo Stack is not running. Starting PHP Turbo Stack..."
         lamp_start
     fi
 
-    # Start the LAMP stack using Docker
+    # Start the PHP Turbo Stack using Docker
     if [[ $1 == "start" ]]; then
         # Open the domain in the default web browser
         open_browser "http://localhost"
 
-    # Stop the LAMP stack
+    # Stop the PHP Turbo Stack
     elif [[ $1 == "stop" ]]; then
         docker compose --profile "*" down
-        green_message "LAMP stack is stopped"
+        green_message "PHP Turbo Stack is stopped"
 
     # Open a bash shell inside the webserver container
     elif [[ $1 == "cmd" ]]; then
         docker compose exec $WEBSERVER_SERVICE bash
 
-    # Restart the LAMP stack
+    # Restart the PHP Turbo Stack
     elif [[ $1 == "restart" ]]; then
         PROFILES="--profile ${STACK_MODE:-hybrid}"
         if [[ "$APP_ENV" == "development" ]]; then
             PROFILES="$PROFILES --profile development"
         fi
         docker compose --profile "*" down && docker compose $PROFILES up -d
-        green_message "LAMP stack restarted."
+        green_message "PHP Turbo Stack restarted."
 
     # Rebuild & Start
     elif [[ $1 == "build" ]]; then
@@ -581,7 +546,7 @@ lamp() {
         docker compose --profile "*" down
         # docker compose build
         docker compose $PROFILES up -d --build
-        green_message "LAMP stack rebuilt and running."
+        green_message "PHP Turbo Stack rebuilt and running."
 
     # Add a new application and create a corresponding virtual host
     elif [[ $1 == "addapp" ]]; then
@@ -634,11 +599,8 @@ lamp() {
 
     DocumentRoot $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name
 
-    <Directory $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name>
-        Options Indexes FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
+    Define APP_NAME $app_name
+    Include /etc/apache2/sites-enabled/partials/app-common.inc
 </VirtualHost>
 
 <VirtualHost *:443>
@@ -648,119 +610,82 @@ lamp() {
 
     DocumentRoot $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name
 
-    <Directory $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name>
-        Options Indexes FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
+    Define APP_NAME $app_name
+    Include /etc/apache2/sites-enabled/partials/app-common.inc
 
     SSLEngine on
-    SSLCertificateFile /etc/apache2/ssl/cert.pem
-    SSLCertificateKeyFile /etc/apache2/ssl/cert-key.pem
+    SSLCertificateFile /etc/apache2/ssl-default/cert.pem
+    SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem
 </VirtualHost>
 EOL
 
         if [[ "${STACK_MODE:-hybrid}" == "thunder" ]]; then
             # Thunder Mode (FPM)
             cat >$nginx_file <<EOL
-# HTTP server configuration
+# HTTP server configuration (Frontend -> Varnish)
 server {
     listen 80;
     server_name $domain www.$domain;
-    root $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name;
-    index index.php index.html index.htm;
 
-    location / {
-        try_files \$uri \$uri/ /index.php?\$query_string;
-    }
-
-    location ~ \.php$ {
-        try_files \$uri =404;
-        fastcgi_split_path_info ^(.+\.php)(/.+)$;
-        fastcgi_pass webserver:9000;
-        fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-        fastcgi_param PATH_INFO \$fastcgi_path_info;
-    }
+    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/partials/varnish-proxy.conf;
 }
 
-# HTTPS server configuration
+# HTTPS server configuration (Frontend -> Varnish)
 server {
     listen 443 ssl;
+    server_name $domain www.$domain;
+
+    # SSL/TLS certificate configuration
+    ssl_certificate /etc/nginx/ssl-default/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/partials/varnish-proxy.conf;
+}
+
+# Internal Backend for Varnish (Port 8080)
+server {
+    listen 8080;
     server_name $domain www.$domain;
     root $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name;
     index index.php index.html index.htm;
 
-    # SSL/TLS certificate configuration
-    ssl_certificate /etc/nginx/ssl/cert.pem;
-    ssl_certificate_key /etc/nginx/ssl/cert-key.pem;
-
-    # Enforce secure protocols and ciphers
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    location / {
-        try_files \$uri \$uri/ /index.php?\$query_string;
-    }
-
-    location ~ \.php$ {
-        try_files \$uri =404;
-        fastcgi_split_path_info ^(.+\.php)(/.+)$;
-        fastcgi_pass webserver:9000;
-        fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-        fastcgi_param PATH_INFO \$fastcgi_path_info;
-    }
+    include /etc/nginx/partials/php-fpm.conf;
 }
 EOL
         else
             # Hybrid Mode (Apache)
             cat >$nginx_file <<EOL
-# HTTP server configuration
+# HTTP server configuration (Frontend -> Varnish)
 server {
     listen 80;
     server_name $domain www.$domain;
 
-    # Proxy all requests to the backend web server
-    location / {
-        proxy_pass http://webserver:80;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
+    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/partials/varnish-proxy.conf;
 }
 
-# HTTPS server configuration
+# HTTPS server configuration (Frontend -> Varnish)
 server {
     listen 443 ssl;
     server_name $domain www.$domain;
 
     # SSL/TLS certificate configuration
-    ssl_certificate /etc/nginx/ssl/cert.pem;
-    ssl_certificate_key /etc/nginx/ssl/cert-key.pem;
-
-    # Enforce secure protocols and ciphers
+    ssl_certificate /etc/nginx/ssl-default/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
 
-    # Proxy all requests to the backend web server
-    location / {
-        proxy_pass http://webserver:80;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
+    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/partials/varnish-proxy.conf;
 }
 EOL
         fi
 
         green_message "Vhost configuration file created at: $vhost_file"
 
-        # Check if mkcert is installed
+        # Check if SSL generation is needed
         if ! generate_ssl_certificates $domain $vhost_file $nginx_file; then
             domainUrl="http://$domain"
         else
@@ -850,9 +775,9 @@ EOL
             fi
             
             # Remove SSL certs if they exist
-            if [[ -f "$lampPath/config/ssl/$domain-key.pem" ]]; then
-                rm "$lampPath/config/ssl/$domain-key.pem"
-                rm "$lampPath/config/ssl/$domain-cert.pem"
+            if [[ -f "${SSL_DIR}/$domain-key.pem" ]]; then
+                rm "${SSL_DIR}/$domain-key.pem"
+                rm "${SSL_DIR}/$domain-cert.pem"
                 green_message "Removed SSL certificates for $domain"
             fi
 
@@ -934,14 +859,14 @@ EOL
 
         lamp_config
 
-    # Backup the LAMP stack
+    # Backup the PHP Turbo Stack
     elif [[ $1 == "backup" ]]; then
         backup_dir="$lampPath/data/backup"
         mkdir -p "$backup_dir"
         timestamp=$(date +"%Y%m%d%H%M%S")
         backup_file="$backup_dir/lamp_backup_$timestamp.tgz"
 
-        info_message "Backing up LAMP stack to $backup_file..."
+        info_message "Backing up PHP Turbo Stack to $backup_file..."
         databases=$(docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
 
         # Create temporary directories for SQL and app data
@@ -965,7 +890,7 @@ EOL
 
         green_message "Backup completed: ${backup_file}"
 
-    # Restore the LAMP stack
+    # Restore the PHP Turbo Stack
     elif [[ $1 == "restore" ]]; then
         backup_dir="$lampPath/data/backup"
         if [[ ! -d $backup_dir ]]; then
@@ -994,7 +919,7 @@ EOL
             return 1
         fi
 
-        info_message "Restoring LAMP stack from $selected_backup..."
+        info_message "Restoring PHP Turbo Stack from $selected_backup..."
         
         # Create temp directory for extraction
         temp_restore_dir="$backup_dir/restore_temp"
@@ -1015,10 +940,14 @@ EOL
                     # The backup command used: mysqldump ... --databases $db
                     # So it should contain CREATE DATABASE statement.
                     
-                    # Copy sql file to container to avoid pipe issues with large files or special chars
-                    docker compose cp "$sql_file" "$WEBSERVER_SERVICE:/tmp/restore.sql"
-                    docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database < /tmp/restore.sql"
-                    docker compose exec "$WEBSERVER_SERVICE" bash -c "rm /tmp/restore.sql"
+                    # Pipe content directly to mysql client
+                    # We use -T to disable pseudo-tty allocation which allows piping
+                    cat "$sql_file" | docker compose exec -T "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database"
+                    
+                    # Old method (copying file) - kept for reference but commented out
+                    # docker compose cp "$sql_file" "$WEBSERVER_SERVICE:/tmp/restore.sql"
+                    # docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database < /tmp/restore.sql"
+                    # docker compose exec "$WEBSERVER_SERVICE" bash -c "rm /tmp/restore.sql"
                 fi
             done
         fi
@@ -1070,10 +999,10 @@ EOL
         echo "Usage: lamp [command] [args]"
         echo ""
         echo "Commands:"
-        echo "  start       Start the LAMP stack"
-        echo "  stop        Stop the LAMP stack"
-        echo "  restart     Restart the LAMP stack"
-        echo "  build       Rebuild and start the LAMP stack"
+        echo "  start       Start the PHP Turbo Stack"
+        echo "  stop        Stop the PHP Turbo Stack"
+        echo "  restart     Restart the PHP Turbo Stack"
+        echo "  build       Rebuild and start the PHP Turbo Stack"
         echo "  cmd         Open a bash shell in the webserver container"
         echo "  addapp      Add a new application (usage: lamp addapp <name> [domain])"
         echo "  removeapp   Remove an application (usage: lamp removeapp <name> [domain])"

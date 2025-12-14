@@ -43,9 +43,11 @@ services:
       - "${HOST_MACHINE_SECURE_HOST_PORT:-443}:443"
     volumes:
       - "./config/nginx/modes/${STACK_MODE:-hybrid}.conf.template:/etc/nginx/templates/00-default.conf.template:ro"
-      - "./config/nginx/sites:/etc/nginx/extra-conf.d:ro"
+      - "${NGINX_CONF_DIR}:/etc/nginx/extra-conf.d:ro"
+      - "./config/nginx/partials:/etc/nginx/partials:ro"
       - "${DOCUMENT_ROOT}:/var/www/html:ro"
-      - "${SSL_DIR}:/etc/nginx/ssl:ro"
+      - "./config/ssl:/etc/nginx/ssl-default:ro"
+      - "${SSL_DIR}:/etc/nginx/ssl-sites:ro"
       - "${NGINX_LOG_DIR}:/var/log/nginx"
     environment:
       APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
@@ -65,6 +67,18 @@ services:
     logging: *default-logging
 
   # ============================================
+  # Certbot (SSL Generation)
+  # ============================================
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - "${DOCUMENT_ROOT}:/var/www/html:rw"
+      - "./sites/ssl:/etc/letsencrypt/live:rw"
+      - "./data/certbot/www:/var/www/certbot:rw"
+      - "./data/certbot/conf:/etc/letsencrypt:rw"
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+  # ============================================
   # PHP-Apache Webserver (Hybrid Mode)
   # ============================================
   webserver-apache:
@@ -78,14 +92,18 @@ services:
     container_name: "${COMPOSE_PROJECT_NAME}-php-apache"
     volumes:
       - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:rw"
-      - "${VHOSTS_DIR}:/etc/apache2/sites-enabled:ro"
+      - "${VHOSTS_DIR}:/etc/apache2/custom-sites:rw"
+      - "./config/vhosts/include-custom.conf:/etc/apache2/conf-enabled/custom-sites.conf:ro"
+      - "./config/vhosts/default.conf:/etc/apache2/sites-enabled/000-default.conf:ro"
+      - "./config/vhosts/partials:/etc/apache2/sites-enabled/partials:ro"
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
       - "./config/php/supervisord.conf:/etc/supervisor/supervisord.conf:ro"
       - "${APACHE_LOG_DIR}:/var/log/apache2"
-      - "${SSL_DIR}:/etc/apache2/ssl:ro"
+      - "./config/ssl:/etc/apache2/ssl-default:ro"
+      - "${SSL_DIR}:/etc/apache2/ssl-sites:ro"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost/"]
+      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 30s
