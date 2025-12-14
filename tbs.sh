@@ -148,10 +148,6 @@ generate_ssl_certificates() {
     fi
 }
 
-    info_message "SSL certificates configured for https://$domain"
-    return 0
-}
-
 open_browser() {
     local domain=$1
     local os_name=$(uname -s)
@@ -509,7 +505,7 @@ tbs() {
     fi
 
     # Check PHP TBS Stack status
-    if [[ $1 != "stop" && $1 != "config" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
+    if [[ -n "$1" && $1 != "stop" && $1 != "config" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
         yellow_message "PHP TBS Stack is not running. Starting PHP TBS Stack..."
         tbs_start
     fi
