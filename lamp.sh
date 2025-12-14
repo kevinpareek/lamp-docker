@@ -460,7 +460,7 @@ lamp_start() {
     fi
 
     # Build and start containers
-    info_message "Starting LAMP stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
+    info_message "Starting PHP Turbo Stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
     
     PROFILES="--profile ${STACK_MODE:-hybrid}"
     if [[ "$APP_ENV" == "development" ]]; then
@@ -468,11 +468,11 @@ lamp_start() {
     fi
 
     if ! docker compose $PROFILES up -d --build; then
-        error_message "Failed to start the LAMP stack."
+        error_message "Failed to start the PHP Turbo Stack."
         exit 1
     fi
 
-    green_message "LAMP stack is running"
+    green_message "PHP Turbo Stack is running"
     
     # Show status
     print_line
@@ -508,34 +508,34 @@ lamp() {
         WEBSERVER_SERVICE="webserver-fpm"
     fi
 
-    # Check LAMP stack status
+    # Check PHP Turbo Stack status
     if [[ $1 != "stop" && $1 != "config" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
-        yellow_message "LAMP stack is not running. Starting LAMP stack..."
+        yellow_message "PHP Turbo Stack is not running. Starting PHP Turbo Stack..."
         lamp_start
     fi
 
-    # Start the LAMP stack using Docker
+    # Start the PHP Turbo Stack using Docker
     if [[ $1 == "start" ]]; then
         # Open the domain in the default web browser
         open_browser "http://localhost"
 
-    # Stop the LAMP stack
+    # Stop the PHP Turbo Stack
     elif [[ $1 == "stop" ]]; then
         docker compose --profile "*" down
-        green_message "LAMP stack is stopped"
+        green_message "PHP Turbo Stack is stopped"
 
     # Open a bash shell inside the webserver container
     elif [[ $1 == "cmd" ]]; then
         docker compose exec $WEBSERVER_SERVICE bash
 
-    # Restart the LAMP stack
+    # Restart the PHP Turbo Stack
     elif [[ $1 == "restart" ]]; then
         PROFILES="--profile ${STACK_MODE:-hybrid}"
         if [[ "$APP_ENV" == "development" ]]; then
             PROFILES="$PROFILES --profile development"
         fi
         docker compose --profile "*" down && docker compose $PROFILES up -d
-        green_message "LAMP stack restarted."
+        green_message "PHP Turbo Stack restarted."
 
     # Rebuild & Start
     elif [[ $1 == "build" ]]; then
@@ -546,7 +546,7 @@ lamp() {
         docker compose --profile "*" down
         # docker compose build
         docker compose $PROFILES up -d --build
-        green_message "LAMP stack rebuilt and running."
+        green_message "PHP Turbo Stack rebuilt and running."
 
     # Add a new application and create a corresponding virtual host
     elif [[ $1 == "addapp" ]]; then
@@ -859,14 +859,14 @@ EOL
 
         lamp_config
 
-    # Backup the LAMP stack
+    # Backup the PHP Turbo Stack
     elif [[ $1 == "backup" ]]; then
         backup_dir="$lampPath/data/backup"
         mkdir -p "$backup_dir"
         timestamp=$(date +"%Y%m%d%H%M%S")
         backup_file="$backup_dir/lamp_backup_$timestamp.tgz"
 
-        info_message "Backing up LAMP stack to $backup_file..."
+        info_message "Backing up PHP Turbo Stack to $backup_file..."
         databases=$(docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
 
         # Create temporary directories for SQL and app data
@@ -890,7 +890,7 @@ EOL
 
         green_message "Backup completed: ${backup_file}"
 
-    # Restore the LAMP stack
+    # Restore the PHP Turbo Stack
     elif [[ $1 == "restore" ]]; then
         backup_dir="$lampPath/data/backup"
         if [[ ! -d $backup_dir ]]; then
@@ -919,7 +919,7 @@ EOL
             return 1
         fi
 
-        info_message "Restoring LAMP stack from $selected_backup..."
+        info_message "Restoring PHP Turbo Stack from $selected_backup..."
         
         # Create temp directory for extraction
         temp_restore_dir="$backup_dir/restore_temp"
@@ -999,10 +999,10 @@ EOL
         echo "Usage: lamp [command] [args]"
         echo ""
         echo "Commands:"
-        echo "  start       Start the LAMP stack"
-        echo "  stop        Stop the LAMP stack"
-        echo "  restart     Restart the LAMP stack"
-        echo "  build       Rebuild and start the LAMP stack"
+        echo "  start       Start the PHP Turbo Stack"
+        echo "  stop        Stop the PHP Turbo Stack"
+        echo "  restart     Restart the PHP Turbo Stack"
+        echo "  build       Rebuild and start the PHP Turbo Stack"
         echo "  cmd         Open a bash shell in the webserver container"
         echo "  addapp      Add a new application (usage: lamp addapp <name> [domain])"
         echo "  removeapp   Remove an application (usage: lamp removeapp <name> [domain])"

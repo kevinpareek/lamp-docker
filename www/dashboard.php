@@ -79,7 +79,7 @@ function getSubDir($currDir = null)
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>LAMP STACK</title>
+    <title>PHP Turbo Stack</title>
     <link rel="shortcut icon" href="/assets/images/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/assets/css/bulma.min.css">
     <link rel="stylesheet" href="/style.css">

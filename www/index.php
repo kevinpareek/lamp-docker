@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Welcome to LAMP Stack!</title>
+<title>Welcome to PHP Turbo Stack!</title>
 <style>
     body {
         width: 35em;
@@ -44,8 +44,8 @@
 </style>
 </head>
 <body>
-    <h1>Welcome to LAMP Stack!</h1>
-    <p>If you see this page, the LAMP stack is successfully installed and working.</p>
+    <h1>Welcome to PHP Turbo Stack!</h1>
+    <p>If you see this page, the PHP Turbo Stack is successfully installed and working.</p>
 
     <div class="info">
         <h2>Stack Information</h2>
