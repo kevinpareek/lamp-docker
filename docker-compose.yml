@@ -67,6 +67,20 @@ services:
     logging: *default-logging
 
   # ============================================
+  # Certbot (SSL Generation)
+  # ============================================
+  certbot:
+    image: certbot/certbot
+    profiles:
+      - production
+    volumes:
+      - "${DOCUMENT_ROOT}:/var/www/html:rw"
+      - "./sites/ssl:/etc/letsencrypt/live:rw"
+      - "./data/certbot/www:/var/www/certbot:rw"
+      - "./data/certbot/conf:/etc/letsencrypt:rw"
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+  # ============================================
   # PHP-Apache Webserver (Hybrid Mode)
   # ============================================
   webserver-apache:

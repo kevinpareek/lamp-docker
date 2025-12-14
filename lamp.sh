@@ -159,22 +159,58 @@ generate_ssl_certificates() {
     vhost_file=$2
     nginx_file=$3
 
-    # Check if mkcert is installed
-    if ! command -v mkcert &>/dev/null; then
-        if yes_no_prompt "mkcert is not installed. Would you like to install it now?"; then
-            if ! install_mkcert; then
-                error_message "Failed to install mkcert. SSL certificates cannot be generated."
+    # Check if domain is NOT localhost or .localhost (Public Domain)
+    if [[ "$domain" != "localhost" && "$domain" != *".localhost" ]]; then
+        info_message "Public domain detected. Generating Let's Encrypt SSL certificates for $domain..."
+        
+        # Ensure certbot service is running or run it as a one-off command
+        # We use webroot mode because nginx is already running and serving /.well-known/acme-challenge/
+        # We add --profile production to ensure the service is accessible even if APP_ENV is development
+        
+        if docker compose --profile production run --rm certbot certonly --webroot --webroot-path=/var/www/html -d "$domain" -d "www.$domain" --email "admin@$domain" --agree-tos --no-eff-email; then
+            
+            # Certbot saves certs in /etc/letsencrypt/live/$domain/
+            # We need to copy them to our sites/ssl directory so Nginx can see them as expected
+            # Note: In docker-compose, we mapped ./data/certbot/conf to /etc/letsencrypt
+            
+            # The path inside the host machine (relative to lamp.sh)
+            cert_path="./data/certbot/conf/live/$domain"
+            
+            if [[ -f "$cert_path/fullchain.pem" ]]; then
+                cp "$cert_path/fullchain.pem" "${SSL_DIR}/$domain-cert.pem"
+                cp "$cert_path/privkey.pem" "${SSL_DIR}/$domain-key.pem"
+                
+                green_message "Let's Encrypt certificates generated successfully."
+            else
+                error_message "Certificates were generated but could not be found at $cert_path"
                 return 1
             fi
         else
-            yellow_message "SSL certificates not generated. Using http://$domain"
+            error_message "Failed to generate Let's Encrypt certificates."
             return 1
         fi
-    fi
 
-    # Generate SSL certificates for the domain
-    mkdir -p "${SSL_DIR}"
-    mkcert -key-file "${SSL_DIR}/$domain-key.pem" -cert-file "${SSL_DIR}/$domain-cert.pem" $domain "*.$domain"
+    else
+        # Local Domain (mkcert)
+        info_message "Local domain detected. Using mkcert for $domain..."
+        
+        # Check if mkcert is installed
+        if ! command -v mkcert &>/dev/null; then
+            if yes_no_prompt "mkcert is not installed. Would you like to install it now?"; then
+                if ! install_mkcert; then
+                    error_message "Failed to install mkcert. SSL certificates cannot be generated."
+                    return 1
+                fi
+            else
+                yellow_message "SSL certificates not generated. Using http://$domain"
+                return 1
+            fi
+        fi
+
+        # Generate SSL certificates for the domain
+        mkdir -p "${SSL_DIR}"
+        mkcert -key-file "${SSL_DIR}/$domain-key.pem" -cert-file "${SSL_DIR}/$domain-cert.pem" $domain "*.$domain"
+    fi
 
     # Update the vhost configuration file with the correct SSL certificate paths
     sed_i "s|SSLCertificateFile /etc/apache2/ssl-default/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|" $vhost_file
@@ -183,7 +219,7 @@ generate_ssl_certificates() {
     sed_i "s|ssl_certificate /etc/nginx/ssl-default/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|" $nginx_file
     sed_i "s|ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" $nginx_file
 
-    info_message "SSL certificates generated for https://$domain"
+    info_message "SSL certificates configured for https://$domain"
     return 0
 }
 
