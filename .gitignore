@@ -3,17 +3,8 @@
 /.vscode
 *.DS_Store
 
-/config/ssl/*
-/config/vhosts/*
-/config/nginx/*
-!/config/ssl/cert.pem
-!/config/ssl/cert-key.pem
-!/config/vhosts/default.conf
-!/config/nginx/modes/
-!/config/nginx/sites/
-!/config/nginx/sites/.gitkeep
-
 /data/backup/*
 /data/mysql/*
 /data/redis/*
 /logs/*
+/sites/*

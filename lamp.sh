@@ -173,15 +173,15 @@ generate_ssl_certificates() {
     fi
 
     # Generate SSL certificates for the domain
-    mkdir -p "$lampPath/config/ssl"
-    mkcert -key-file "$lampPath/config/ssl/$domain-key.pem" -cert-file "$lampPath/config/ssl/$domain-cert.pem" $domain "*.$domain"
+    mkdir -p "${SSL_DIR}"
+    mkcert -key-file "${SSL_DIR}/$domain-key.pem" -cert-file "${SSL_DIR}/$domain-cert.pem" $domain "*.$domain"
 
     # Update the vhost configuration file with the correct SSL certificate paths
-    sed_i "s|SSLCertificateFile /etc/apache2/ssl/cert.pem|SSLCertificateFile /etc/apache2/ssl/$domain-cert.pem|" $vhost_file
-    sed_i "s|SSLCertificateKeyFile /etc/apache2/ssl/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl/$domain-key.pem|" $vhost_file
+    sed_i "s|SSLCertificateFile /etc/apache2/ssl-default/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|" $vhost_file
+    sed_i "s|SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl-sites/$domain-key.pem|" $vhost_file
 
-    sed_i "s|ssl_certificate /etc/nginx/ssl/cert.pem|ssl_certificate /etc/nginx/ssl/$domain-cert.pem|" $nginx_file
-    sed_i "s|ssl_certificate_key /etc/nginx/ssl/cert-key.pem|ssl_certificate_key /etc/nginx/ssl/$domain-key.pem|" $nginx_file
+    sed_i "s|ssl_certificate /etc/nginx/ssl-default/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|" $nginx_file
+    sed_i "s|ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" $nginx_file
 
     info_message "SSL certificates generated for https://$domain"
     return 0
@@ -634,11 +634,8 @@ lamp() {
 
     DocumentRoot $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name
 
-    <Directory $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name>
-        Options Indexes FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
+    Define APP_NAME $app_name
+    Include /etc/apache2/sites-enabled/partials/app-common.inc
 </VirtualHost>
 
 <VirtualHost *:443>
@@ -648,112 +645,75 @@ lamp() {
 
     DocumentRoot $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name
 
-    <Directory $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name>
-        Options Indexes FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
+    Define APP_NAME $app_name
+    Include /etc/apache2/sites-enabled/partials/app-common.inc
 
     SSLEngine on
-    SSLCertificateFile /etc/apache2/ssl/cert.pem
-    SSLCertificateKeyFile /etc/apache2/ssl/cert-key.pem
+    SSLCertificateFile /etc/apache2/ssl-default/cert.pem
+    SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem
 </VirtualHost>
 EOL
 
         if [[ "${STACK_MODE:-hybrid}" == "thunder" ]]; then
             # Thunder Mode (FPM)
             cat >$nginx_file <<EOL
-# HTTP server configuration
+# HTTP server configuration (Frontend -> Varnish)
 server {
     listen 80;
     server_name $domain www.$domain;
-    root $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name;
-    index index.php index.html index.htm;
 
-    location / {
-        try_files \$uri \$uri/ /index.php?\$query_string;
-    }
-
-    location ~ \.php$ {
-        try_files \$uri =404;
-        fastcgi_split_path_info ^(.+\.php)(/.+)$;
-        fastcgi_pass webserver:9000;
-        fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-        fastcgi_param PATH_INFO \$fastcgi_path_info;
-    }
+    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/partials/varnish-proxy.conf;
 }
 
-# HTTPS server configuration
+# HTTPS server configuration (Frontend -> Varnish)
 server {
     listen 443 ssl;
+    server_name $domain www.$domain;
+
+    # SSL/TLS certificate configuration
+    ssl_certificate /etc/nginx/ssl-default/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/partials/varnish-proxy.conf;
+}
+
+# Internal Backend for Varnish (Port 8080)
+server {
+    listen 8080;
     server_name $domain www.$domain;
     root $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name;
     index index.php index.html index.htm;
 
-    # SSL/TLS certificate configuration
-    ssl_certificate /etc/nginx/ssl/cert.pem;
-    ssl_certificate_key /etc/nginx/ssl/cert-key.pem;
-
-    # Enforce secure protocols and ciphers
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    location / {
-        try_files \$uri \$uri/ /index.php?\$query_string;
-    }
-
-    location ~ \.php$ {
-        try_files \$uri =404;
-        fastcgi_split_path_info ^(.+\.php)(/.+)$;
-        fastcgi_pass webserver:9000;
-        fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-        fastcgi_param PATH_INFO \$fastcgi_path_info;
-    }
+    include /etc/nginx/partials/php-fpm.conf;
 }
 EOL
         else
             # Hybrid Mode (Apache)
             cat >$nginx_file <<EOL
-# HTTP server configuration
+# HTTP server configuration (Frontend -> Varnish)
 server {
     listen 80;
     server_name $domain www.$domain;
 
-    # Proxy all requests to the backend web server
-    location / {
-        proxy_pass http://webserver:80;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
+    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/partials/varnish-proxy.conf;
 }
 
-# HTTPS server configuration
+# HTTPS server configuration (Frontend -> Varnish)
 server {
     listen 443 ssl;
     server_name $domain www.$domain;
 
     # SSL/TLS certificate configuration
-    ssl_certificate /etc/nginx/ssl/cert.pem;
-    ssl_certificate_key /etc/nginx/ssl/cert-key.pem;
-
-    # Enforce secure protocols and ciphers
+    ssl_certificate /etc/nginx/ssl-default/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
 
-    # Proxy all requests to the backend web server
-    location / {
-        proxy_pass http://webserver:80;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
+    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/partials/varnish-proxy.conf;
 }
 EOL
         fi
@@ -850,9 +810,9 @@ EOL
             fi
             
             # Remove SSL certs if they exist
-            if [[ -f "$lampPath/config/ssl/$domain-key.pem" ]]; then
-                rm "$lampPath/config/ssl/$domain-key.pem"
-                rm "$lampPath/config/ssl/$domain-cert.pem"
+            if [[ -f "${SSL_DIR}/$domain-key.pem" ]]; then
+                rm "${SSL_DIR}/$domain-key.pem"
+                rm "${SSL_DIR}/$domain-cert.pem"
                 green_message "Removed SSL certificates for $domain"
             fi
 
