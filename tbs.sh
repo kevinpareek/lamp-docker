@@ -456,7 +456,7 @@ tbs_start() {
     fi
 
     # Build and start containers
-    info_message "Starting PHP TBS Stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
+    info_message "Starting Turbo Stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
     
     PROFILES="--profile ${STACK_MODE:-hybrid}"
     if [[ "$APP_ENV" == "development" ]]; then
@@ -464,11 +464,11 @@ tbs_start() {
     fi
 
     if ! docker compose $PROFILES up -d --build; then
-        error_message "Failed to start the PHP TBS Stack."
+        error_message "Failed to start the Turbo Stack."
         exit 1
     fi
 
-    green_message "PHP TBS Stack is running"
+    green_message "Turbo Stack is running"
     
     # Show status
     print_line
@@ -504,34 +504,34 @@ tbs() {
         WEBSERVER_SERVICE="webserver-fpm"
     fi
 
-    # Check PHP TBS Stack status
-    if [[ -n "$1" && $1 != "stop" && $1 != "config" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
-        yellow_message "PHP TBS Stack is not running. Starting PHP TBS Stack..."
+    # Check Turbo Stack status
+    if [[ -n "$1" && $1 != "stop" && $1 != "config" && $1 != "build" && $1 != "status" && $1 != "logs" && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
+        yellow_message "Turbo Stack is not running. Starting Turbo Stack..."
         tbs_start
     fi
 
-    # Start the PHP TBS Stack using Docker
+    # Start the Turbo Stack using Docker
     if [[ $1 == "start" ]]; then
         # Open the domain in the default web browser
         open_browser "http://localhost"
 
-    # Stop the PHP TBS Stack
+    # Stop the Turbo Stack
     elif [[ $1 == "stop" ]]; then
         docker compose --profile "*" down
-        green_message "PHP TBS Stack is stopped"
+        green_message "Turbo Stack is stopped"
 
     # Open a bash shell inside the webserver container
     elif [[ $1 == "cmd" ]]; then
         docker compose exec $WEBSERVER_SERVICE bash
 
-    # Restart the PHP TBS Stack
+    # Restart the Turbo Stack
     elif [[ $1 == "restart" ]]; then
         PROFILES="--profile ${STACK_MODE:-hybrid}"
         if [[ "$APP_ENV" == "development" ]]; then
             PROFILES="$PROFILES --profile development"
         fi
         docker compose --profile "*" down && docker compose $PROFILES up -d
-        green_message "PHP TBS Stack restarted."
+        green_message "Turbo Stack restarted."
 
     # Rebuild & Start
     elif [[ $1 == "build" ]]; then
@@ -542,7 +542,7 @@ tbs() {
         docker compose --profile "*" down
         # docker compose build
         docker compose $PROFILES up -d --build
-        green_message "PHP TBS Stack rebuilt and running."
+        green_message "Turbo Stack rebuilt and running."
 
     # Add a new application and create a corresponding virtual host
     elif [[ $1 == "addapp" ]]; then
@@ -623,7 +623,7 @@ server {
     listen 80;
     server_name $domain www.$domain;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -637,7 +637,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -659,7 +659,7 @@ server {
     listen 80;
     server_name $domain www.$domain;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -673,7 +673,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 EOL
@@ -855,14 +855,14 @@ EOL
 
         tbs_config
 
-    # Backup the PHP TBS Stack
+    # Backup the Turbo Stack
     elif [[ $1 == "backup" ]]; then
         backup_dir="$tbsPath/data/backup"
         mkdir -p "$backup_dir"
         timestamp=$(date +"%Y%m%d%H%M%S")
         backup_file="$backup_dir/tbs_backup_$timestamp.tgz"
 
-        info_message "Backing up PHP TBS Stack to $backup_file..."
+        info_message "Backing up Turbo Stack to $backup_file..."
         databases=$(docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database -e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)")
 
         # Create temporary directories for SQL and app data
@@ -886,7 +886,7 @@ EOL
 
         green_message "Backup completed: ${backup_file}"
 
-    # Restore the PHP TBS Stack
+    # Restore the Turbo Stack
     elif [[ $1 == "restore" ]]; then
         backup_dir="$tbsPath/data/backup"
         if [[ ! -d $backup_dir ]]; then
@@ -915,7 +915,7 @@ EOL
             return 1
         fi
 
-        info_message "Restoring PHP TBS Stack from $selected_backup..."
+        info_message "Restoring Turbo Stack from $selected_backup..."
         
         # Create temp directory for extraction
         temp_restore_dir="$backup_dir/restore_temp"
@@ -994,11 +994,13 @@ EOL
     else
         echo "Usage: tbs [command] [args]"
         echo ""
+        echo "TBS (Turbo Stack) Manager"
+        echo ""
         echo "Commands:"
-        echo "  start       Start the PHP TBS Stack"
-        echo "  stop        Stop the PHP TBS Stack"
-        echo "  restart     Restart the PHP TBS Stack"
-        echo "  build       Rebuild and start the PHP TBS Stack"
+        echo "  start       Start the Turbo Stack"
+        echo "  stop        Stop the Turbo Stack"
+        echo "  restart     Restart the Turbo Stack"
+        echo "  build       Rebuild and start the Turbo Stack"
         echo "  cmd         Open a bash shell in the webserver container"
         echo "  addapp      Add a new application (usage: tbs addapp <name> [domain])"
         echo "  removeapp   Remove an application (usage: tbs removeapp <name> [domain])"
@@ -1043,7 +1045,7 @@ add_tbs_to_shell() {
     if [ -n "$shell_rc" ] && ! grep -q "tbs()" "$shell_rc"; then
         cat >> "$shell_rc" << EOF
 
-# TBS Stack helper function
+# Turbo Stack helper function
 tbs() {
     bash "$tbsFile" "\$@"
 }
