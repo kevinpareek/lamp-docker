@@ -8,7 +8,7 @@ server {
     listen [::]:80 default_server;
     server_name localhost _;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -24,7 +24,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 

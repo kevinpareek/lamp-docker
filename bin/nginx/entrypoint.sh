@@ -34,6 +34,14 @@ fi
 # We only substitute specific variables to avoid breaking Nginx variables like $host
 # The list of variables must match what is used in docker-compose.yml and templates
 echo "Generating Nginx configuration..."
+
+# Create directory for processed includes
+mkdir -p /etc/nginx/includes
+
+# Process common.conf
+envsubst '${APACHE_DOCUMENT_ROOT} ${NGINX_STATIC_EXPIRES}' < /etc/nginx/partials/common.conf > /etc/nginx/includes/common.conf
+
+# Process main template
 envsubst '${APACHE_DOCUMENT_ROOT} ${APPLICATIONS_DIR_NAME} ${NGINX_STATIC_EXPIRES}' < /etc/nginx/templates/00-default.conf.template > /etc/nginx/http.d/default.conf
 
 # Start Nginx

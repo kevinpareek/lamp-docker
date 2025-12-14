@@ -1,0 +1,7 @@
+.git
+.vscode
+data
+logs
+www/applications
+node_modules
+**/.DS_Store

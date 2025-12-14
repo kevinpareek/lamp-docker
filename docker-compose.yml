@@ -94,7 +94,8 @@ services:
     container_name: "${COMPOSE_PROJECT_NAME}-php-apache"
     volumes:
       - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:rw"
-      - "${VHOSTS_DIR}:/etc/apache2/sites-enabled:ro"
+      - "${VHOSTS_DIR}:/etc/apache2/custom-sites:rw"
+      - "./config/vhosts/include-custom.conf:/etc/apache2/conf-enabled/custom-sites.conf:ro"
       - "./config/vhosts/default.conf:/etc/apache2/sites-enabled/000-default.conf:ro"
       - "./config/vhosts/partials:/etc/apache2/sites-enabled/partials:ro"
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
@@ -104,7 +105,7 @@ services:
       - "${SSL_DIR}:/etc/apache2/ssl-sites:ro"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost/"]
+      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 30s

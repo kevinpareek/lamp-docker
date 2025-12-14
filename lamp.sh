@@ -698,7 +698,7 @@ server {
     listen 80;
     server_name $domain www.$domain;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -712,7 +712,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -734,7 +734,7 @@ server {
     listen 80;
     server_name $domain www.$domain;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
@@ -748,7 +748,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    include /etc/nginx/partials/common.conf;
+    include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 EOL
@@ -1011,10 +1011,14 @@ EOL
                     # The backup command used: mysqldump ... --databases $db
                     # So it should contain CREATE DATABASE statement.
                     
-                    # Copy sql file to container to avoid pipe issues with large files or special chars
-                    docker compose cp "$sql_file" "$WEBSERVER_SERVICE:/tmp/restore.sql"
-                    docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database < /tmp/restore.sql"
-                    docker compose exec "$WEBSERVER_SERVICE" bash -c "rm /tmp/restore.sql"
+                    # Pipe content directly to mysql client
+                    # We use -T to disable pseudo-tty allocation which allows piping
+                    cat "$sql_file" | docker compose exec -T "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database"
+                    
+                    # Old method (copying file) - kept for reference but commented out
+                    # docker compose cp "$sql_file" "$WEBSERVER_SERVICE:/tmp/restore.sql"
+                    # docker compose exec "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database < /tmp/restore.sql"
+                    # docker compose exec "$WEBSERVER_SERVICE" bash -c "rm /tmp/restore.sql"
                 fi
             done
         fi
