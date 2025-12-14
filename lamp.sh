@@ -290,7 +290,7 @@ lamp_config() {
     # Function to prompt user to input a valid database
     choose_database() {
         local legacy_php=false
-        if [[ "$PHPVERSION" =~ php5[4-6] || "$PHPVERSION" == "php71" || "$PHPVERSION" == "php72" || "$PHPVERSION" == "php73" || "$PHPVERSION" == "php74" ]]; then
+        if [[ "$PHPVERSION" =~ php5\.[4-6] || "$PHPVERSION" == "php7.1" || "$PHPVERSION" == "php7.2" || "$PHPVERSION" == "php7.3" || "$PHPVERSION" == "php7.4" ]]; then
             legacy_php=true
         fi
 
@@ -302,7 +302,7 @@ lamp_config() {
                 yellow_message "Available databases (MySQL 8+ excluded for PHP <= 7.4):"
                 databaseOptions=()
                 for db in "${mysqlOptions[@]}"; do
-                    if [[ "$db" == "mysql57" ]]; then
+                    if [[ "$db" == "mysql5.7" ]]; then
                         databaseOptions+=("$db")
                     fi
                 done
