@@ -36,7 +36,7 @@ server {
 # Internal Backend for Varnish (Port 8080)
 # ============================================
 server {
-    listen 8080;
+    listen 8080 default_server;
     server_name localhost;
     root ${APACHE_DOCUMENT_ROOT};
     index index.php index.html index.htm;

@@ -1,8 +1,19 @@
 #!/bin/bash
 
 # Get tbs script directory
-tbsFile=$(readlink -f "$0")
-tbsPath=$(dirname "$tbsFile")
+# Cross-platform readlink -f implementation
+get_script_dir() {
+    local source="${BASH_SOURCE[0]}"
+    while [ -h "$source" ]; do # resolve $source until the file is no longer a symlink
+        local dir="$( cd -P "$( dirname "$source" )" >/dev/null 2>&1 && pwd )"
+        source="$(readlink "$source")"
+        [[ $source != /* ]] && source="$dir/$source" # if $source was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+    done
+    echo "$( cd -P "$( dirname "$source" )" >/dev/null 2>&1 && pwd )"
+}
+
+tbsPath=$(get_script_dir)
+tbsFile="$tbsPath/$(basename "${BASH_SOURCE[0]}")"
 # echo $tbsPath;
 
 # Allowed TLDs for application domains
@@ -97,19 +108,127 @@ yes_no_prompt() {
     done
 }
 
+install_mkcert() {
+    local os_name=$(uname -s)
+
+    info_message "Installing mkcert for SSL certificate generation..."
+
+    case "$os_name" in
+        Darwin)
+            # macOS installation
+            if command_exists brew; then
+                brew install mkcert nss
+            else
+                error_message "Homebrew not found. Please install Homebrew first: https://brew.sh"
+                return 1
+            fi
+            ;;
+        Linux)
+            # Linux installation
+            if command_exists apt; then
+                sudo apt update
+                sudo apt install -y libnss3-tools
+                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
+                chmod +x mkcert-v*-linux-amd64
+                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
+            elif command_exists yum; then
+                sudo yum install -y nss-tools
+                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
+                chmod +x mkcert-v*-linux-amd64
+                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
+            elif command_exists pacman; then
+                sudo pacman -S --noconfirm nss
+                curl -JLO "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
+                chmod +x mkcert-v*-linux-amd64
+                sudo mv mkcert-v*-linux-amd64 /usr/local/bin/mkcert
+            else
+                error_message "Unsupported Linux package manager. Please install mkcert manually."
+                return 1
+            fi
+            ;;
+        CYGWIN*|MINGW32*|MSYS*|MINGW*)
+            # Windows installation
+            if command_exists choco; then
+                choco install mkcert
+            else
+                error_message "Chocolatey not found. Please install Chocolatey first: https://chocolatey.org/install"
+                return 1
+            fi
+            ;;
+        *)
+            error_message "Unsupported operating system: $os_name"
+            return 1
+            ;;
+    esac
+
+    # Initialize mkcert and create local CA
+    mkcert -install
+    return $?
+}
+
+generate_default_ssl() {
+    info_message "Generating default SSL certificates for localhost..."
+    
+    # Check mkcert
+    if ! command -v mkcert &>/dev/null; then
+         if yes_no_prompt "mkcert is not installed. Install now?"; then
+             if ! install_mkcert; then
+                 return 1
+             fi
+         else
+             return 1
+         fi
+    fi
+
+    local ssl_config_dir="$tbsPath/config/ssl"
+    mkdir -p "$ssl_config_dir"
+
+    if mkcert -key-file "$ssl_config_dir/cert-key.pem" -cert-file "$ssl_config_dir/cert.pem" "localhost" "www.localhost" "127.0.0.1" "::1"; then
+        green_message "Default SSL certificates (localhost) generated in config/ssl/"
+        
+        # Reload if running
+        if command -v docker >/dev/null && docker compose ps -q "$WEBSERVER_SERVICE" >/dev/null 2>&1; then
+             yellow_message "Reloading web servers to apply new default certs..."
+             if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
+             fi
+             docker compose exec reverse-proxy nginx -s reload
+             green_message "Web servers reloaded."
+        fi
+    else
+        error_message "Failed to generate default SSL certificates."
+    fi
+}
+
 generate_ssl_certificates() {
     domain=$1
     vhost_file=$2
     nginx_file=$3
 
-    # Check if domain is NOT localhost or .localhost (Public Domain)
-    if [[ "$domain" != "localhost" && "$domain" != *".localhost" ]]; then
-        info_message "Public domain detected. Generating Let's Encrypt SSL certificates for $domain..."
+    local use_mkcert=false
+
+    # Determine SSL method based on INSTALLATION_TYPE
+    if [[ "${INSTALLATION_TYPE:-local}" == "local" ]]; then
+        # Local Mode: Always use mkcert
+        use_mkcert=true
+        info_message "Local Environment detected. Using mkcert for $domain..."
+    else
+        # Live Mode: Always use Let's Encrypt (unless it's a .localhost domain)
+        if [[ "$domain" == "localhost" || "$domain" == *".localhost" ]]; then
+             yellow_message "Warning: Local domain '$domain' detected in LIVE mode. SSL generation skipped."
+             return 1
+        fi
+        use_mkcert=false
+        info_message "Live Environment detected. Using Let's Encrypt for $domain..."
+    fi
+
+    if [[ "$use_mkcert" == "false" ]]; then
         
         # Ensure certbot service is running or run it as a one-off command
         # We use webroot mode because nginx is already running and serving /.well-known/acme-challenge/
+        # We override the entrypoint because the default entrypoint in docker-compose.yml is a renewal loop that ignores arguments
         
-        if docker compose run --rm certbot certonly --webroot --webroot-path=/var/www/html -d "$domain" -d "www.$domain" --email "admin@$domain" --agree-tos --no-eff-email; then
+        if docker compose run --rm --entrypoint certbot certbot certonly --webroot --webroot-path=/var/www/html -d "$domain" -d "www.$domain" --email "admin@$domain" --agree-tos --no-eff-email; then
             
             # Certbot saves certs in /etc/letsencrypt/live/$domain/
             # We need to copy them to our sites/ssl directory so Nginx can see them as expected
@@ -123,16 +242,9 @@ generate_ssl_certificates() {
                 cp "$cert_path/privkey.pem" "${SSL_DIR}/$domain-key.pem"
                 
                 green_message "Let's Encrypt certificates generated successfully."
-
-                # Update the vhost configuration file with the correct SSL certificate paths
-                sed_i "s|SSLCertificateFile /etc/apache2/ssl-default/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|" $vhost_file
-                sed_i "s|SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl-sites/$domain-key.pem|" $vhost_file
-
-                sed_i "s|ssl_certificate /etc/nginx/ssl-default/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|" $nginx_file
-                sed_i "s|ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" $nginx_file
-
-                info_message "SSL certificates configured for https://$domain"
-                return 0
+                
+                # Set flag for successful generation
+                ssl_generated=true
             else
                 error_message "Certificates were generated but could not be found at $cert_path"
                 return 1
@@ -143,9 +255,43 @@ generate_ssl_certificates() {
         fi
 
     else
-        # Local Domain - No SSL Generation
-        info_message "Local domain detected. Skipping SSL generation (Using default localhost certs)."
-        return 1
+        # Local Domain (mkcert)
+
+        # Check if mkcert is installed
+        if ! command -v mkcert &>/dev/null; then
+            if yes_no_prompt "mkcert is not installed. Would you like to install it now?"; then
+                if ! install_mkcert; then
+                    error_message "Failed to install mkcert. SSL certificates cannot be generated."
+                    return 1
+                fi
+            else
+                yellow_message "SSL certificates not generated. Using http://$domain"
+                return 1
+            fi
+        fi
+
+        # Generate SSL certificates for the domain
+        mkdir -p "${SSL_DIR}"
+        if mkcert -key-file "${SSL_DIR}/$domain-key.pem" -cert-file "${SSL_DIR}/$domain-cert.pem" $domain "www.$domain"; then
+            green_message "mkcert certificates generated successfully."
+            ssl_generated=true
+        else
+            error_message "Failed to generate mkcert certificates."
+            return 1
+        fi
+    fi
+
+    # Common configuration update logic
+    if [[ "$ssl_generated" == "true" ]]; then
+        # Update the vhost configuration file with the correct SSL certificate paths
+        sed_i "s|SSLCertificateFile /etc/apache2/ssl-default/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|" $vhost_file
+        sed_i "s|SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl-sites/$domain-key.pem|" $vhost_file
+
+        sed_i "s|ssl_certificate /etc/nginx/ssl-default/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|" $nginx_file
+        sed_i "s|ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" $nginx_file
+
+        info_message "SSL certificates configured for https://$domain"
+        return 0
     fi
 }
 
@@ -175,7 +321,7 @@ open_browser() {
 tbs_config() {
     print_header
     # Set required configuration keys
-    reqConfig=("APP_ENV" "STACK_MODE" "PHPVERSION" "DATABASE")
+    reqConfig=("INSTALLATION_TYPE" "APP_ENV" "STACK_MODE" "PHPVERSION" "DATABASE")
 
     # Detect if Apple Silicon
     isAppleSilicon=false
@@ -222,6 +368,41 @@ tbs_config() {
                 eval "$key='$value'"
             fi
         done <"$env_file"
+    }
+
+    # Function to prompt user to input a valid installation type
+    choose_installation_type() {
+        local valid_options=("local" "live")
+        blue_message "Installation Type:"
+        info_message "   1. local (Uses mkcert for trusted local SSL on all domains)"
+        info_message "   2. live  (Uses Let's Encrypt for public domains)"
+
+        # Auto-detect default
+        local default_index=1
+        if [[ "$(uname -s)" != "Darwin" && "$(uname -s)" != *"MINGW"* && "$(uname -s)" != *"CYGWIN"* ]]; then
+             # Likely Linux, could be live
+             # But let's check if INSTALLATION_TYPE is already set
+             if [[ "$INSTALLATION_TYPE" == "live" ]]; then
+                 default_index=2
+             fi
+        else
+             # Mac/Windows -> Local
+             if [[ "$INSTALLATION_TYPE" == "live" ]]; then
+                 default_index=2
+             fi
+        fi
+
+        while true; do
+            read -p "Select Installation Type [1-2] (Default: $default_index): " type_index
+            type_index=${type_index:-$default_index}
+
+            if [[ "$type_index" -ge 1 && "$type_index" -le 2 ]]; then
+                INSTALLATION_TYPE="${valid_options[$((type_index-1))]}"
+                break
+            else
+                error_message "Invalid selection. Please enter 1 or 2."
+            fi
+        done
     }
 
     # Function to prompt user to input a valid stack mode
@@ -352,8 +533,17 @@ tbs_config() {
                 fi
                 
                 # Update these in .env file
-                sed_i "s|^INSTALL_XDEBUG=.*|INSTALL_XDEBUG=${INSTALL_XDEBUG}|" .env 2>/dev/null || echo "INSTALL_XDEBUG=${INSTALL_XDEBUG}" >>.env
-                sed_i "s|^APP_DEBUG=.*|APP_DEBUG=${APP_DEBUG}|" .env 2>/dev/null || echo "APP_DEBUG=${APP_DEBUG}" >>.env
+                if grep -q "^INSTALL_XDEBUG=" .env; then
+                    sed_i "s|^INSTALL_XDEBUG=.*|INSTALL_XDEBUG=${INSTALL_XDEBUG}|" .env
+                else
+                    echo "INSTALL_XDEBUG=${INSTALL_XDEBUG}" >> .env
+                fi
+
+                if grep -q "^APP_DEBUG=" .env; then
+                    sed_i "s|^APP_DEBUG=.*|APP_DEBUG=${APP_DEBUG}|" .env
+                else
+                    echo "APP_DEBUG=${APP_DEBUG}" >> .env
+                fi
                 
                 break
             else
@@ -380,6 +570,8 @@ tbs_config() {
                 set_app_env
             elif [[ "$key" == "STACK_MODE" ]]; then
                 choose_stack_mode
+            elif [[ "$key" == "INSTALLATION_TYPE" ]]; then
+                choose_installation_type
             else
                 read -p "$key (Default: $default_value): " new_value
                 if [[ ! -z $new_value ]]; then
@@ -388,7 +580,11 @@ tbs_config() {
             fi
 
             # Update the .env file
-            sed_i "s|^$key=.*|$key=${!key}|" .env 2>/dev/null || echo "$key=${!key}" >>.env
+            if grep -q "^$key=" .env; then
+                sed_i "s|^$key=.*|$key=${!key}|" .env
+            else
+                echo "$key=${!key}" >> .env
+            fi
         done
 
         # Show environment summary
@@ -417,7 +613,7 @@ tbs_config() {
     }
 
     update_local_document_indexFile() {
-        local indexFilePath=$(readlink -f "$tbsPath/$DOCUMENT_ROOT/config.php")
+        local indexFilePath="$tbsPath/$DOCUMENT_ROOT/config.php"
         local newLocalDocumentRoot=$(dirname "$indexFilePath")
 
         if [ -f "$indexFilePath" ]; then
@@ -805,6 +1001,12 @@ EOL
 
         green_message "Vhost configuration file created at: $vhost_file"
 
+        # Reload Nginx to ensure it serves the new domain (required for Let's Encrypt validation)
+        if command -v docker >/dev/null && docker compose ps -q reverse-proxy >/dev/null 2>&1; then
+             info_message "Reloading Nginx to apply new configuration..."
+             docker compose exec reverse-proxy nginx -s reload
+        fi
+
         # Check if SSL generation is needed
         if ! generate_ssl_certificates $domain $vhost_file $nginx_file; then
             domainUrl="http://$domain"
@@ -837,6 +1039,8 @@ EOL
             if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
                 docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
             fi
+            # Nginx was already reloaded by generate_ssl_certificates if successful, 
+            # but we reload again here to be sure if SSL generation was skipped or failed but we still want HTTP.
             docker compose exec reverse-proxy nginx -s reload
 
             green_message "Virtual host $domain activated and web servers reloaded."
@@ -1101,7 +1305,21 @@ EOL
             return 1
         fi
 
-        generate_ssl_certificates $domain $vhost_file $nginx_file
+        if generate_ssl_certificates $domain $vhost_file $nginx_file; then
+            # Reload web servers to apply changes
+            if command -v docker >/dev/null; then
+                yellow_message "Reloading web servers..."
+                if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
+                    docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
+                fi
+                docker compose exec reverse-proxy nginx -s reload
+                green_message "Web servers reloaded."
+            fi
+        fi
+
+    # Generate Default SSL (localhost)
+    elif [[ $1 == "ssl-default" ]]; then
+        generate_default_ssl
 
     # Open Mailpit
     elif [[ $1 == "mail" ]]; then
@@ -1135,6 +1353,7 @@ EOL
             echo "  backup      Backup databases and applications"
             echo "  restore     Restore from a backup"
             echo "  ssl         Generate SSL certificates (usage: tbs ssl <domain>)"
+            echo "  ssl-default Generate default localhost SSL certificates"
             echo "  logs        Show logs (usage: tbs logs [service])"
             echo "  status      Show stack status"
             echo "  mail        Open Mailpit"

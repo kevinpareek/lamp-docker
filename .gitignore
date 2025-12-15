@@ -6,7 +6,9 @@
 /data/backup/*
 /data/mysql/*
 /data/redis/*
+/data/certbot/*
 /logs/*
+/www/applications/*
 
 /sites/apache/*
 !/sites/apache/.gitkeep

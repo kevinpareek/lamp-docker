@@ -18,7 +18,7 @@ Stop wasting time configuring servers. This stack gives you everything you need�
     *   *Coming Soon: MongoDB & PostgreSQL support.*
 *   **⚡ Caching Suite**: Pre-configured **Redis**, **Memcached**, and **Varnish**.
 *   **🔒 Smart SSL**:
-    *   **Local**: Zero-config self-signed certs for `.localhost` domains.
+    *   **Local**: Zero-config trusted certificates for `.localhost` domains via **mkcert**.
     *   **Public**: Automatic Let's Encrypt certificates via **Certbot**.
 *   **🛠 Developer Tools**:
     *   **phpMyAdmin**: Database management.
@@ -31,8 +31,12 @@ Stop wasting time configuring servers. This stack gives you everything you need�
 ## 🚀 Getting Started
 
 ### Prerequisites
-*   Docker Desktop (or Engine + Compose)
-*   Git & Bash
+The stack is designed to work on **macOS, Linux, and Windows**. Ensure you have the following installed:
+
+*   **Docker Desktop** (or Engine + Compose)
+*   **Git** & **Bash** (Git Bash recommended for Windows)
+*   **Required Utilities**: `curl`, `sed` (Standard on macOS/Linux; included with Git Bash on Windows)
+*   **mkcert** (For trusted local SSL) - *The script can automatically install this for you!*
 
 ### Installation
 
@@ -57,11 +61,6 @@ Stop wasting time configuring servers. This stack gives you everything you need�
     You can access the dashboard via:
     *   **http://localhost**
     *   **http://127.0.0.1**
-    *   **http://turbostack.in** (Recommended)
-
-    **🔒 SSL/HTTPS:**
-    *   **Supported:** [https://turbostack.in](https://turbostack.in)
-    *   **Not Supported:** `https://localhost`
 
 ---
 
@@ -78,7 +77,8 @@ Manage your entire stack with simple commands.
 | `tbs config` | Change PHP version, DB, or Stack Mode. |
 | `tbs addapp <name> <domain>` | Create a new site (e.g., `tbs addapp myapp myapp.test`). |
 | `tbs code <name>` | Open a project in VS Code. |
-| `tbs ssl <domain>` | Force SSL generation (Certbot). |
+| `tbs ssl <domain>` | Force SSL generation (Certbot or mkcert). |
+| `tbs ssl-default` | Generate trusted SSL for `localhost`. |
 | `tbs backup` / `restore` | Backup or restore all data. |
 
 ### Tool Shortcuts
@@ -96,13 +96,23 @@ Manage your entire stack with simple commands.
 You can switch modes in `.env` or via `tbs config`.
 
 ### 1. Hybrid Mode (Default)
-**Nginx (Proxy) ➡ Varnish ➡ Apache ➡ PHP**
-*   Combines Nginx's static file handling with Apache's `.htaccess` flexibility.
-*   Ideal for legacy apps, WordPress, or projects needing Apache-specific rules.
+**Flow:** `User` ➡ `Nginx (Proxy)` ➡ `Varnish (Cache)` ➡ `Apache (Webserver)` ➡ `PHP`
 
-### 2. Thunder Mode (LEMP)
-**Nginx ➡ PHP-FPM**
-*   Pure Nginx performance.
+*   **Best for:** Compatibility, Legacy Apps, WordPress.
+*   **How it works:**
+    *   **Nginx** handles SSL and static files.
+    *   **Varnish** caches dynamic content.
+    *   **Apache** executes PHP and supports `.htaccess` files.
+
+### 2. Thunder Mode (High Performance)
+**Flow:** `User` ➡ `Nginx (Frontend)` ➡ `Varnish (Cache)` ➡ `Nginx (Backend)` ➡ `PHP-FPM`
+
+*   **Best for:** High Traffic, Modern Frameworks (Laravel, Symfony), APIs.
+*   **How it works:**
+    *   **Apache is completely removed** from the request path.
+    *   **Nginx** acts as both the frontend (SSL) and backend (FastCGI manager).
+    *   **PHP-FPM** handles code execution directly for maximum speed.
+    *   *Note: `.htaccess` files are NOT supported in this mode.*
 *   Ideal for Laravel, Symfony, and high-performance modern apps.
 *   *Note: `.htaccess` files are ignored in this mode.*
 
