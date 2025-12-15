@@ -297,6 +297,7 @@ generate_ssl_certificates() {
     nginx_file=$3
 
     local use_mkcert=false
+    local ssl_generated=false
 
     # Determine SSL method based on INSTALLATION_TYPE
     if [[ "${INSTALLATION_TYPE:-local}" == "local" ]]; then
@@ -410,6 +411,9 @@ tbs_config() {
     print_header
     # Set required configuration keys
     reqConfig=("INSTALLATION_TYPE" "APP_ENV" "STACK_MODE" "PHPVERSION" "DATABASE")
+
+    # Track whether we already had a .env (only prompt INSTALLATION_TYPE on first run)
+    local existing_env_file=true
 
     # Detect if Apple Silicon
     isAppleSilicon=false
@@ -664,7 +668,11 @@ tbs_config() {
             elif [[ "$key" == "STACK_MODE" ]]; then
                 choose_stack_mode
             elif [[ "$key" == "INSTALLATION_TYPE" ]]; then
-                choose_installation_type
+                if [[ "$existing_env_file" == "false" ]]; then
+                    choose_installation_type
+                else
+                    INSTALLATION_TYPE=${INSTALLATION_TYPE:-local}
+                fi
             else
                 echo -ne "$key (${YELLOW}Default: $default_value${NC}): "
                 read new_value
@@ -727,6 +735,7 @@ tbs_config() {
         yellow_message "No .env file found, using sample.env..."
         cp sample.env .env
         read_env_file "sample.env"
+        existing_env_file=false
     else
         error_message "No .env or sample.env file found."
         exit 1
@@ -890,7 +899,12 @@ tbs() {
 
     # Stop the Turbo Stack
     stop)
-        docker compose --profile "*" down
+        PROFILES="--profile ${STACK_MODE:-hybrid}"
+        if [[ "$APP_ENV" == "development" ]]; then
+            PROFILES="$PROFILES --profile development"
+        fi
+
+        docker compose $PROFILES down --remove-orphans
         green_message "Turbo Stack is stopped"
         ;;
 
@@ -905,7 +919,7 @@ tbs() {
         if [[ "$APP_ENV" == "development" ]]; then
             PROFILES="$PROFILES --profile development"
         fi
-        docker compose --profile "*" down && docker compose $PROFILES up -d
+        docker compose down --remove-orphans && docker compose $PROFILES up -d
         green_message "Turbo Stack restarted."
         ;;
 
@@ -915,8 +929,7 @@ tbs() {
         if [[ "$APP_ENV" == "development" ]]; then
             PROFILES="$PROFILES --profile development"
         fi
-        docker compose --profile "*" down
-        # docker compose build
+        docker compose down --remove-orphans
         docker compose $PROFILES up -d --build
         green_message "Turbo Stack rebuilt and running."
         ;;
