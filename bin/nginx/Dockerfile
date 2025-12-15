@@ -1,7 +1,7 @@
 FROM alpine:3.20
 
 # Install Nginx, Brotli module, Zstd module, gettext (for envsubst), and netcat
-RUN apk add --no-cache nginx nginx-mod-http-brotli nginx-mod-http-zstd nginx-mod-http-zstd gettext curl netcat-openbsd
+RUN apk add --no-cache nginx nginx-mod-http-brotli nginx-mod-http-zstd gettext curl netcat-openbsd
 
 # Forward logs to Docker
 RUN ln -sf /dev/stdout /var/log/nginx/access.log && \

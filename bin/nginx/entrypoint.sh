@@ -14,7 +14,13 @@ if [ "$STACK_MODE" = "thunder" ]; then
     done
 else
     # Check for Apache on port 80
-    until curl -s "http://webserver" > /dev/null 2>&1 || [ $? -eq 52 ] || [ $? -eq 7 ]; do
+    # curl exit code 52 (empty reply) still means the TCP connection is working.
+    while :; do
+        curl_rc=0
+        curl -s -o /dev/null "http://webserver" || curl_rc=$?
+        if [ "$curl_rc" -eq 0 ] || [ "$curl_rc" -eq 52 ]; then
+            break
+        fi
         echo "Waiting for Apache..."
         sleep 2
     done

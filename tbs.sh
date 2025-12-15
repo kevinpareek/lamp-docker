@@ -80,6 +80,49 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Load KEY=VALUE pairs from an env file.
+# - Ignores blank lines and comments.
+# - Supports optional surrounding single/double quotes.
+# - Does NOT evaluate shell (no command substitution / expansions).
+load_env_file() {
+    local env_file="$1"
+    local export_vars="${2:-false}"
+
+    [[ -f "$env_file" ]] || return 1
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Trim leading whitespace
+        line="${line#"${line%%[![:space:]]*}"}"
+
+        # Skip blanks/comments
+        [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+
+        # Allow optional 'export '
+        [[ "$line" == export\ * ]] && line="${line#export }"
+
+        # Only accept KEY=VALUE
+        if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]}"
+            local value="${BASH_REMATCH[2]}"
+
+            # Trim trailing whitespace
+            value="${value%"${value##*[![:space:]]}"}"
+
+            # Strip surrounding quotes
+            if [[ "$value" =~ ^\"(.*)\"$ ]]; then
+                value="${BASH_REMATCH[1]}"
+            elif [[ "$value" =~ ^'(.*)'$ ]]; then
+                value="${BASH_REMATCH[1]}"
+            fi
+
+            printf -v "$key" '%s' "$value"
+            if [[ "$export_vars" == "true" ]]; then
+                export "$key"
+            fi
+        fi
+    done < "$env_file"
+}
+
 # Cross-platform sed in-place editing
 sed_i() {
     local expression=$1
@@ -408,11 +451,7 @@ tbs_config() {
     # Function to read environment variables from a file (either .env or sample.env)
     read_env_file() {
         local env_file=$1
-        while IFS='=' read -r key value; do
-            if [[ ! -z $key && ! $key =~ ^# ]]; then
-                eval "$key='$value'"
-            fi
-        done <"$env_file"
+        load_env_file "$env_file" false
     }
 
     # Function to prompt user to input a valid installation type
@@ -824,10 +863,9 @@ tbs() {
 
     # Load environment variables from .env file
     if [[ -f .env ]]; then
-        # Load all variables while excluding comments
-        export $(grep -v '^#' .env | xargs)
+        load_env_file ".env" true
     elif [[ $1 != "config" ]]; then
-        info_message ".env file not found. running.'$ tbs config'"
+        info_message ".env file not found. Running 'tbs config'..."
         tbs_config
     fi
 
@@ -838,7 +876,7 @@ tbs() {
     fi
 
     # Check Turbo Stack status
-    if [[ "$1" =~ ^(start|addapp|removeapp|cmd|backup|restore|ssl|mail|pma|redis-cli)$ && ! $(docker compose ps -q $WEBSERVER_SERVICE) ]]; then
+    if [[ "$1" =~ ^(start|addapp|removeapp|cmd|backup|restore|ssl|mail|pma|redis-cli)$ && -z "$(docker compose ps -q "$WEBSERVER_SERVICE")" ]]; then
         yellow_message "Turbo Stack is not running. Starting Turbo Stack..."
         tbs_start
     fi
@@ -858,7 +896,7 @@ tbs() {
 
     # Open a bash shell inside the webserver container
     cmd)
-        docker compose exec $WEBSERVER_SERVICE bash
+        docker compose exec "$WEBSERVER_SERVICE" bash
         ;;
 
     # Restart the Turbo Stack
