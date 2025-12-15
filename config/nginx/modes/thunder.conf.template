@@ -24,8 +24,8 @@ server {
     index index.php index.html index.htm;
 
     # SSL Configuration
-    ssl_certificate /etc/nginx/ssl-default/cert.pem;
-    ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
+    ssl_certificate /etc/nginx/ssl-sites/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
     include /etc/nginx/includes/common.conf;

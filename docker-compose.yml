@@ -46,8 +46,7 @@ services:
       - "${NGINX_CONF_DIR}:/etc/nginx/extra-conf.d:ro"
       - "./config/nginx/partials:/etc/nginx/partials:ro"
       - "${DOCUMENT_ROOT}:/var/www/html:ro"
-      - "./config/ssl:/etc/nginx/ssl-default:ro"
-      - "${SSL_DIR}:/etc/nginx/ssl-sites:ro"
+      - "${SSL_DIR}:/etc/nginx/ssl-sites:rw"
       - "${NGINX_LOG_DIR}:/var/log/nginx"
     environment:
       APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
@@ -100,8 +99,7 @@ services:
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
       - "./config/php/supervisord.conf:/etc/supervisor/supervisord.conf:ro"
       - "${APACHE_LOG_DIR}:/var/log/apache2"
-      - "./config/ssl:/etc/apache2/ssl-default:ro"
-      - "${SSL_DIR}:/etc/apache2/ssl-sites:ro"
+      - "${SSL_DIR}:/etc/apache2/ssl-sites:rw"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]

@@ -278,11 +278,11 @@ generate_default_ssl() {
          fi
     fi
 
-    local ssl_config_dir="$tbsPath/config/ssl"
+    local ssl_config_dir="${SSL_DIR:-$tbsPath/sites/ssl}"
     mkdir -p "$ssl_config_dir"
 
     if mkcert -key-file "$ssl_config_dir/cert-key.pem" -cert-file "$ssl_config_dir/cert.pem" "localhost" "www.localhost" "127.0.0.1" "::1"; then
-        green_message "Default SSL certificates (localhost) generated in config/ssl/"
+        green_message "Default SSL certificates (localhost) generated in sites/ssl/"
         
         # Reload if running
         reload_webservers
@@ -376,9 +376,9 @@ generate_ssl_certificates() {
     # Common configuration update logic
     if [[ "$ssl_generated" == "true" ]]; then
         # Update the vhost configuration file with the correct SSL certificate paths
-        sed_i "s|SSLCertificateFile /etc/apache2/ssl-default/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|; s|SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl-sites/$domain-key.pem|" "$vhost_file"
+        sed_i "s|SSLCertificateFile /etc/apache2/ssl-sites/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|; s|SSLCertificateKeyFile /etc/apache2/ssl-sites/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl-sites/$domain-key.pem|" "$vhost_file"
 
-        sed_i "s|ssl_certificate /etc/nginx/ssl-default/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|; s|ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" "$nginx_file"
+        sed_i "s|ssl_certificate /etc/nginx/ssl-sites/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|; s|ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" "$nginx_file"
 
         info_message "SSL certificates configured for https://$domain"
         return 0
@@ -747,7 +747,7 @@ tbs_config() {
     # Display current configuration and prompt for updates
     update_env_file
 
-    update_local_document_indexFile
+    # update_local_document_indexFile
 }
 
 tbs_start() {
@@ -1000,8 +1000,8 @@ tbs() {
     Include /etc/apache2/sites-enabled/partials/app-common.inc
 
     SSLEngine on
-    SSLCertificateFile /etc/apache2/ssl-default/cert.pem
-    SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem
+    SSLCertificateFile /etc/apache2/ssl-sites/cert.pem
+    SSLCertificateKeyFile /etc/apache2/ssl-sites/cert-key.pem
 </VirtualHost>
 EOL
 
@@ -1022,8 +1022,8 @@ server {
     server_name $domain www.$domain;
 
     # SSL/TLS certificate configuration
-    ssl_certificate /etc/nginx/ssl-default/cert.pem;
-    ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
+    ssl_certificate /etc/nginx/ssl-sites/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
     include /etc/nginx/includes/common.conf;
@@ -1350,7 +1350,7 @@ server {
         ;;
 
     # Generate Default SSL (localhost)
-    ssl-default)
+    ssl-localhost)
         generate_default_ssl
         ;;
 
@@ -1389,7 +1389,7 @@ server {
             echo "  backup      Backup databases and applications"
             echo "  restore     Restore from a backup"
             echo "  ssl         Generate SSL certificates (usage: tbs ssl <domain>)"
-            echo "  ssl-default Generate default localhost SSL certificates"
+            echo "  ssl-localhost Generate default localhost SSL certificates"
             echo "  logs        Show logs (usage: tbs logs [service])"
             echo "  status      Show stack status"
             echo "  mail        Open Mailpit"

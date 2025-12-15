@@ -70,16 +70,21 @@ Manage your entire stack with simple commands.
 
 | Command | Description |
 | :--- | :--- |
-| `tbs start` | Start all services. |
-| `tbs stop` | Stop services. |
-| `tbs restart` | Restart the stack. |
-| `tbs build` | Rebuild images (e.g., after adding PHP extensions). |
-| `tbs config` | Change PHP version, DB, or Stack Mode. |
-| `tbs addapp <name> <domain>` | Create a new site (e.g., `tbs addapp myapp myapp.test`). |
-| `tbs code <name>` | Open a project in VS Code. |
-| `tbs ssl <domain>` | Force SSL generation (Certbot or mkcert). |
-| `tbs ssl-default` | Generate trusted SSL for `localhost`. |
-| `tbs backup` / `restore` | Backup or restore all data. |
+| `tbs` | Open the interactive Turbo Stack menu. |
+| `tbs start` | Start all services (Docker Compose profiles based on `STACK_MODE` and `APP_ENV`). |
+| `tbs stop` | Stop services and remove orphans. |
+| `tbs restart` | Restart the stack with the current profiles. |
+| `tbs build` | Rebuild images (e.g., after adding PHP extensions) and start the stack. |
+| `tbs status` | Show running containers (`docker compose ps`). |
+| `tbs logs [service]` | Stream logs for all services or for a specific service. |
+| `tbs config` | Wizard to change PHP version, DB, environment, or Stack Mode and update `.env` |
+| `tbs addapp <name> [domain]` | Create a new site (Apache + Nginx vhost, SSL, document root under `www/applications`). Default domain: `<name>.localhost`. |
+| `tbs removeapp <name> [domain]` | Remove app vhost(s), optional app files, and related SSL certs. |
+| `tbs code <name>` | Open a project folder in VS Code. `tbs code` (without name) lets you pick an app. |
+| `tbs ssl <domain>` | Force SSL generation for an existing domain (Certbot for live, mkcert for local). |
+| `tbs ssl-localhost` | Generate trusted SSL certs for `localhost` and reload Nginx/Apache. |
+| `tbs backup` | Backup all user databases and `www/applications` to `data/backup`. |
+| `tbs restore` | Restore databases and app files from a backup archive. |
 
 ### Tool Shortcuts
 | Command | Description | URL |
@@ -88,6 +93,30 @@ Manage your entire stack with simple commands.
 | `tbs mail` | Mailpit | [http://localhost:8025](http://localhost:8025) |
 | `tbs redis-cli` | Redis CLI | - |
 | `tbs cmd` | PHP Shell | - |
+
+---
+
+## ⚙️ Configuration via `.env`
+
+Most behavior is controlled through `.env` (created from `sample.env` and maintained by `tbs config`):
+
+- **Core settings**
+  - `INSTALLATION_TYPE` — `local` (mkcert for `.localhost`) or `live` (Let's Encrypt via Certbot).
+  - `APP_ENV` — `development` or `production` (controls PHP INI, debug tools, profiles).
+  - `STACK_MODE` — `hybrid` (Apache + Nginx) or `thunder` (Nginx + PHP-FPM).
+  - `PHPVERSION` — one of the PHP Docker images under `bin/` (e.g. `php8.3`).
+  - `DATABASE` — one of the MySQL/MariaDB images under `bin/` (e.g. `mysql5.7`, `mariadb10.11`).
+- **Paths & volumes**
+  - `DOCUMENT_ROOT` (default `./www`), `APPLICATIONS_DIR_NAME` (default `applications`).
+  - `VHOSTS_DIR` (`./sites/apache`), `NGINX_CONF_DIR` (`./sites/nginx`), `SSL_DIR` (`./sites/ssl`).
+  - Data & logs: `MYSQL_DATA_DIR`, `MYSQL_LOG_DIR`, `REDIS_DATA_DIR`, `BACKUP_DIR`, etc.
+- **Ports**
+  - HTTP/HTTPS: `HOST_MACHINE_UNSECURE_HOST_PORT`, `HOST_MACHINE_SECURE_HOST_PORT`.
+  - DB & tools: `HOST_MACHINE_MYSQL_PORT`, `HOST_MACHINE_PMA_PORT`, `HOST_MACHINE_REDIS_PORT`.
+- **Database credentials**
+  - `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` (change for production!).
+
+Run `./tbs.sh config` anytime to re-run the wizard and safely update `.env`.
 
 ---
 
@@ -137,26 +166,27 @@ You can switch modes in `.env` or via `tbs config`.
 ## 📂 Directory Structure
 
 ```text
-├── bin/                 # Dockerfiles (PHP, Nginx, DBs)
-├── config/              # Configuration Files
-│   ├── initdb/          # SQL scripts to run on DB init
-│   ├── mariadb/         # Custom my.cnf
-│   ├── nginx/           # Nginx sites & templates
-│   ├── php/             # php.ini, supervisord
-│   ├── ssl/             # Default SSL certs
-│   ├── varnish/         # VCL configurations
-│   └── vhosts/          # Apache VHosts
-├── data/                # Persistent Data (DB, Redis, Backups)
-├── logs/                # Logs (Apache, Nginx, MySQL)
-├── sites/               # Generated Configs (Do not edit manually)
-│   ├── apache/          # Active Apache VHosts
-│   ├── nginx/           # Active Nginx Configs
-│   └── ssl/             # Let's Encrypt Certs
-├── www/                 # Document Root
-│   ├── applications/    # Your Projects
-│   └── index.php        # Dashboard
-└── tbs.sh              # Automation Script
+├── bin/                 # Docker build context for PHP, Nginx, MySQL/MariaDB images
+├── config/              # Source-of-truth configuration (mounted into containers)
+│   ├── initdb/          # Put .sql/.sql.gz files here → auto-run on first DB container start
+│   ├── mariadb/         # Custom MySQL/MariaDB configs (e.g. my.cnf)
+│   ├── nginx/           # Nginx templates, partials, and mode configs
+│   ├── php/             # php.ini variants, FPM pool, supervisord configs
+│   ├── varnish/         # VCL configurations for Hybrid / Thunder modes
+│   └── vhosts/          # Base Apache vhost templates used by tbs.sh
+├── data/                # Persistent data volumes (DB, Redis, backups)
+├── logs/                # Logs for web, DB, and services (Apache, Nginx, MySQL, etc.)
+├── sites/               # Generated configs (managed by tbs.sh – do NOT edit manually)
+│   ├── apache/          # Active Apache vhosts for your apps
+│   ├── nginx/           # Active Nginx configs per app / mode
+│   └── ssl/             # Generated SSL certs (mkcert / Let's Encrypt)
+├── www/                 # Web root inside containers
+│   ├── applications/    # Your project folders (created via `tbs addapp`)
+│   └── index.php        # Landing page
+└── tbs.sh               # Turbo Stack helper/automation script
 ```
+
+**Database auto-init:** Any `.sql` (or compressed `.sql.gz`) file you drop into `config/initdb` will be picked up and executed automatically when the database container starts for the first time—perfect for seeding schemas, users, and sample data.
 
 ---
 

@@ -1,4 +1,0 @@
-RewriteEngine On
-
-ErrorDocument 404 /404redirect.php
-RewriteRule ^404$ 404.php

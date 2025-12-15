@@ -1,7 +1,7 @@
 FROM alpine:3.20
 
 # Install Nginx, Brotli module, Zstd module, gettext (for envsubst), and netcat
-RUN apk add --no-cache nginx nginx-mod-http-brotli nginx-mod-http-zstd gettext curl netcat-openbsd
+RUN apk add --no-cache nginx nginx-mod-http-brotli nginx-mod-http-zstd gettext curl netcat-openbsd openssl
 
 # Forward logs to Docker
 RUN ln -sf /dev/stdout /var/log/nginx/access.log && \
@@ -11,7 +11,7 @@ RUN ln -sf /dev/stdout /var/log/nginx/access.log && \
 COPY nginx.conf /etc/nginx/nginx.conf
 
 # Create directory for extra configs and templates
-RUN mkdir -p /etc/nginx/extra-conf.d /etc/nginx/templates /var/www/html
+RUN mkdir -p /etc/nginx/extra-conf.d /etc/nginx/templates /var/www/html /etc/nginx/ssl-sites
 
 # Copy entrypoint
 COPY entrypoint.sh /entrypoint.sh
