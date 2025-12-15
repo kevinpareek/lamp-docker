@@ -374,8 +374,12 @@ tbs_config() {
     choose_installation_type() {
         local valid_options=("local" "live")
         blue_message "Installation Type:"
-        info_message "   1. local (Uses mkcert for trusted local SSL on all domains)"
-        info_message "   2. live  (Uses Let's Encrypt for public domains)"
+        info_message "   1. local (Select for Local PC/System)"
+        info_message "      • Best for local development. Enables .localhost domains with trusted SSL (mkcert)."
+        
+        info_message "   2. live  (Select for Live/Production Server)"
+        info_message "      • Best for public servers. Uses Let's Encrypt for valid SSL on custom domains."
+        yellow_message "      • NOTE: For custom domains, you MUST point the domain's DNS to this server's IP first."
 
         # Auto-detect default
         local default_index=1
@@ -393,7 +397,8 @@ tbs_config() {
         fi
 
         while true; do
-            read -p "Select Installation Type [1-2] (Default: $default_index): " type_index
+            echo -ne "Select Installation Type [1-2] (${YELLOW}Default: $default_index${NC}): "
+            read type_index
             type_index=${type_index:-$default_index}
 
             if [[ "$type_index" -ge 1 && "$type_index" -le 2 ]]; then
@@ -423,7 +428,8 @@ tbs_config() {
         done
 
         while true; do
-            read -p "Select Stack Mode [1-${#valid_options[@]}] (Default: $default_index): " mode_index
+            echo -ne "Select Stack Mode [1-${#valid_options[@]}] (${YELLOW}Default: $default_index${NC}): "
+            read mode_index
             mode_index=${mode_index:-$default_index}
 
             if [[ "$mode_index" -ge 1 && "$mode_index" -le "${#valid_options[@]}" ]]; then
@@ -441,7 +447,8 @@ tbs_config() {
         green_message "➤  ${phpVersions[*]}"
 
         while true; do
-            read -p "Enter PHP version (Default: $PHPVERSION): " php_choice
+            echo -ne "Enter PHP version (${YELLOW}Default: $PHPVERSION${NC}): "
+            read php_choice
             php_choice=${php_choice:-$PHPVERSION}
 
             if [[ " ${phpVersions[*]} " == *" $php_choice "* ]]; then
@@ -488,7 +495,8 @@ tbs_config() {
         green_message "➤  ${databaseOptions[*]}"
 
         while true; do
-            read -p "Enter Database (Default: $DATABASE): " db_choice
+            echo -ne "Enter Database (${YELLOW}Default: $DATABASE${NC}): "
+            read db_choice
             db_choice=${db_choice:-$DATABASE}
 
             if [[ " ${databaseOptions[*]} " == *" $db_choice "* ]]; then
@@ -517,7 +525,8 @@ tbs_config() {
         done
 
         while true; do
-            read -p "Select Environment [1-${#valid_options[@]}] (Default: $default_index): " env_index
+            echo -ne "Select Environment [1-${#valid_options[@]}] (${YELLOW}Default: $default_index${NC}): "
+            read env_index
             env_index=${env_index:-$default_index}
 
             if [[ "$env_index" -ge 1 && "$env_index" -le "${#valid_options[@]}" ]]; then
@@ -573,7 +582,8 @@ tbs_config() {
             elif [[ "$key" == "INSTALLATION_TYPE" ]]; then
                 choose_installation_type
             else
-                read -p "$key (Default: $default_value): " new_value
+                echo -ne "$key (${YELLOW}Default: $default_value${NC}): "
+                read new_value
                 if [[ ! -z $new_value ]]; then
                     eval "$key=$new_value"
                 fi
