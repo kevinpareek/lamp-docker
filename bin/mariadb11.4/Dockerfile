@@ -16,11 +16,6 @@ ENV MARIADB_AUTO_UPGRADE=1 \
     TZ=Asia/Kolkata
 
 # ============================================
-# Copy Custom Configuration
-# ============================================
-
-
-# ============================================
 # Create Log Directory
 # ============================================
 RUN mkdir -p /var/log/mysql \

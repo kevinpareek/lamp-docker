@@ -225,7 +225,7 @@ generate_default_ssl() {
     info_message "Generating default SSL certificates for localhost..."
     
     # Check mkcert
-    if ! command -v mkcert &>/dev/null; then
+    if ! command_exists mkcert; then
          if yes_no_prompt "mkcert is not installed. Install now?"; then
              if ! install_mkcert; then
                  return 1
@@ -306,7 +306,7 @@ generate_ssl_certificates() {
         # Local Domain (mkcert)
 
         # Check if mkcert is installed
-        if ! command -v mkcert &>/dev/null; then
+        if ! command_exists mkcert; then
             if yes_no_prompt "mkcert is not installed. Would you like to install it now?"; then
                 if ! install_mkcert; then
                     error_message "Failed to install mkcert. SSL certificates cannot be generated."
@@ -332,11 +332,9 @@ generate_ssl_certificates() {
     # Common configuration update logic
     if [[ "$ssl_generated" == "true" ]]; then
         # Update the vhost configuration file with the correct SSL certificate paths
-        sed_i "s|SSLCertificateFile /etc/apache2/ssl-default/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|" $vhost_file
-        sed_i "s|SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl-sites/$domain-key.pem|" $vhost_file
+        sed_i "s|SSLCertificateFile /etc/apache2/ssl-default/cert.pem|SSLCertificateFile /etc/apache2/ssl-sites/$domain-cert.pem|; s|SSLCertificateKeyFile /etc/apache2/ssl-default/cert-key.pem|SSLCertificateKeyFile /etc/apache2/ssl-sites/$domain-key.pem|" "$vhost_file"
 
-        sed_i "s|ssl_certificate /etc/nginx/ssl-default/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|" $nginx_file
-        sed_i "s|ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" $nginx_file
+        sed_i "s|ssl_certificate /etc/nginx/ssl-default/cert.pem|ssl_certificate /etc/nginx/ssl-sites/$domain-cert.pem|; s|ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem|ssl_certificate_key /etc/nginx/ssl-sites/$domain-key.pem|" "$nginx_file"
 
         info_message "SSL certificates configured for https://$domain"
         return 0
@@ -674,16 +672,7 @@ tbs_config() {
         local newLocalDocumentRoot=$(dirname "$indexFilePath")
 
         if [ -f "$indexFilePath" ]; then
-            sed_i "s|\$LOCAL_DOCUMENT_ROOT = '.*';|\$LOCAL_DOCUMENT_ROOT = '$newLocalDocumentRoot';|" "$indexFilePath"
-            sed_i "s|\$APACHE_DOCUMENT_ROOT = '.*';|\$APACHE_DOCUMENT_ROOT = '$APACHE_DOCUMENT_ROOT';|" "$indexFilePath"
-            sed_i "s|\$APPLICATIONS_DIR_NAME = '.*';|\$APPLICATIONS_DIR_NAME = '$APPLICATIONS_DIR_NAME';|" "$indexFilePath"
-
-            sed_i "s|\$MYSQL_HOST = '.*';|\$MYSQL_HOST = 'database';|" "$indexFilePath"
-            sed_i "s|\$MYSQL_DATABASE = '.*';|\$MYSQL_DATABASE = '$MYSQL_DATABASE';|" "$indexFilePath"
-            sed_i "s|\$MYSQL_USER = '.*';|\$MYSQL_USER = '$MYSQL_USER';|" "$indexFilePath"
-            sed_i "s|\$MYSQL_PASSWORD = '.*';|\$MYSQL_PASSWORD = '$MYSQL_PASSWORD';|" "$indexFilePath"
-
-            sed_i "s|\$PMA_PORT = '.*';|\$PMA_PORT = '$HOST_MACHINE_PMA_PORT';|" "$indexFilePath"
+            sed_i "s|\$LOCAL_DOCUMENT_ROOT = '.*';|\$LOCAL_DOCUMENT_ROOT = '$newLocalDocumentRoot';|; s|\$APACHE_DOCUMENT_ROOT = '.*';|\$APACHE_DOCUMENT_ROOT = '$APACHE_DOCUMENT_ROOT';|; s|\$APPLICATIONS_DIR_NAME = '.*';|\$APPLICATIONS_DIR_NAME = '$APPLICATIONS_DIR_NAME';|; s|\$MYSQL_HOST = '.*';|\$MYSQL_HOST = 'database';|; s|\$MYSQL_DATABASE = '.*';|\$MYSQL_DATABASE = '$MYSQL_DATABASE';|; s|\$MYSQL_USER = '.*';|\$MYSQL_USER = '$MYSQL_USER';|; s|\$MYSQL_PASSWORD = '.*';|\$MYSQL_PASSWORD = '$MYSQL_PASSWORD';|; s|\$PMA_PORT = '.*';|\$PMA_PORT = '$HOST_MACHINE_PMA_PORT';|" "$indexFilePath"
 
             green_message "Config DATA updated in $indexFilePath"
         else
@@ -725,7 +714,7 @@ tbs_start() {
         PROFILES="$PROFILES --profile development"
     fi
 
-    if ! docker compose $PROFILES up -d --build; then
+    if ! docker compose $PROFILES up -d; then
         error_message "Failed to start the Turbo Stack."
         exit 1
     fi
@@ -965,10 +954,9 @@ tbs() {
 </VirtualHost>
 EOL
 
-        if [[ "${STACK_MODE:-hybrid}" == "thunder" ]]; then
-            # Thunder Mode (FPM)
-            cat >$nginx_file <<EOL
-# HTTP server configuration (Frontend -> Varnish)
+        # Generate Nginx Configuration
+        # Common configuration for both modes (Frontend -> Varnish)
+        nginx_config="# HTTP server configuration (Frontend -> Varnish)
 server {
     listen 80;
     server_name $domain www.$domain;
@@ -989,7 +977,11 @@ server {
 
     include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
-}
+}"
+
+        # Add PHP-FPM backend for Thunder mode
+        if [[ "${STACK_MODE:-hybrid}" == "thunder" ]]; then
+            nginx_config="$nginx_config
 
 # Internal Backend for Varnish (Port 8080)
 server {
@@ -999,35 +991,11 @@ server {
     index index.php index.html index.htm;
 
     include /etc/nginx/partials/php-fpm.conf;
-}
-EOL
-        else
-            # Hybrid Mode (Apache)
-            cat >$nginx_file <<EOL
-# HTTP server configuration (Frontend -> Varnish)
-server {
-    listen 80;
-    server_name $domain www.$domain;
-
-    include /etc/nginx/includes/common.conf;
-    include /etc/nginx/partials/varnish-proxy.conf;
-}
-
-# HTTPS server configuration (Frontend -> Varnish)
-server {
-    listen 443 ssl;
-    server_name $domain www.$domain;
-
-    # SSL/TLS certificate configuration
-    ssl_certificate /etc/nginx/ssl-default/cert.pem;
-    ssl_certificate_key /etc/nginx/ssl-default/cert-key.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-
-    include /etc/nginx/includes/common.conf;
-    include /etc/nginx/partials/varnish-proxy.conf;
-}
-EOL
+}"
         fi
+
+        # Write Nginx configuration to file
+        echo "$nginx_config" > "$nginx_file"
 
         green_message "Vhost configuration file created at: $vhost_file"
 
