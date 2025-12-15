@@ -236,6 +236,8 @@ Add this to `.vscode/launch.json`:
 3.  Disable `INSTALL_XDEBUG`.
 4.  Ensure `STACK_MODE` is set correctly for your needs.
 
+For more details, see `SECURITY.md`. For release notes, see `CHANGELOG.md`.
+
 ---
 
 ## 🤝 Contributing
