@@ -91,6 +91,63 @@ sed_i() {
     fi
 }
 
+# Detect OS
+get_os_type() {
+    case "$(uname -s)" in
+        Darwin) echo "mac" ;;
+        Linux) echo "linux" ;;
+        CYGWIN*|MINGW32*|MSYS*|MINGW*) echo "windows" ;;
+        *) echo "unknown" ;;
+    esac
+}
+
+# Reload Web Servers
+reload_webservers() {
+    # Ensure WEBSERVER_SERVICE is set if not already
+    if [[ -z "$WEBSERVER_SERVICE" ]]; then
+        WEBSERVER_SERVICE="webserver-apache"
+        if [[ "${STACK_MODE:-hybrid}" == "thunder" ]]; then
+            WEBSERVER_SERVICE="webserver-fpm"
+        fi
+    fi
+
+    if command -v docker >/dev/null && docker compose ps -q "$WEBSERVER_SERVICE" >/dev/null 2>&1; then
+        yellow_message "Reloading web servers..."
+        if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
+            docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
+        fi
+        docker compose exec reverse-proxy nginx -s reload
+        green_message "Web servers reloaded."
+    fi
+}
+
+# Ensure Docker is running
+ensure_docker_running() {
+    if ! docker info >/dev/null 2>&1; then
+        yellow_message "Docker daemon is not running. Starting Docker daemon..."
+        
+        case "$(get_os_type)" in
+            mac) open -a Docker ;;
+            linux) sudo systemctl start docker ;;
+            windows) start "" "C:\Program Files\Docker\Docker\Docker Desktop.exe" ;;
+            *) error_message "Unsupported OS. Please start Docker manually."; exit 1 ;;
+        esac
+
+        local timeout=60
+        local elapsed=0
+        while ! docker info >/dev/null 2>&1; do
+            if [ $elapsed -ge $timeout ]; then
+                error_message "Docker failed to start within ${timeout} seconds."
+                exit 1
+            fi
+            yellow_message "Waiting for Docker to start... (${elapsed}s)"
+            sleep 2
+            elapsed=$((elapsed + 2))
+        done
+        info_message "Docker is running."
+    fi
+}
+
 print_line() {
     echo ""
     echo -e "${BLUE}$(printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' -)${NC}"
@@ -109,12 +166,10 @@ yes_no_prompt() {
 }
 
 install_mkcert() {
-    local os_name=$(uname -s)
-
     info_message "Installing mkcert for SSL certificate generation..."
 
-    case "$os_name" in
-        Darwin)
+    case "$(get_os_type)" in
+        mac)
             # macOS installation
             if command_exists brew; then
                 brew install mkcert nss
@@ -123,7 +178,7 @@ install_mkcert() {
                 return 1
             fi
             ;;
-        Linux)
+        linux)
             # Linux installation
             if command_exists apt; then
                 sudo apt update
@@ -146,7 +201,7 @@ install_mkcert() {
                 return 1
             fi
             ;;
-        CYGWIN*|MINGW32*|MSYS*|MINGW*)
+        windows)
             # Windows installation
             if command_exists choco; then
                 choco install mkcert
@@ -156,7 +211,7 @@ install_mkcert() {
             fi
             ;;
         *)
-            error_message "Unsupported operating system: $os_name"
+            error_message "Unsupported operating system."
             return 1
             ;;
     esac
@@ -187,14 +242,7 @@ generate_default_ssl() {
         green_message "Default SSL certificates (localhost) generated in config/ssl/"
         
         # Reload if running
-        if command -v docker >/dev/null && docker compose ps -q "$WEBSERVER_SERVICE" >/dev/null 2>&1; then
-             yellow_message "Reloading web servers to apply new default certs..."
-             if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
-                docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
-             fi
-             docker compose exec reverse-proxy nginx -s reload
-             green_message "Web servers reloaded."
-        fi
+        reload_webservers
     else
         error_message "Failed to generate default SSL certificates."
     fi
@@ -297,23 +345,22 @@ generate_ssl_certificates() {
 
 open_browser() {
     local domain=$1
-    local os_name=$(uname -s)
 
     # Open the domain in the default web browser
     info_message "Opening $domain in the default web browser..."
 
-    case "$os_name" in
-        Darwin)
+    case "$(get_os_type)" in
+        mac)
             open "$domain"
             ;;
-        Linux)
+        linux)
             xdg-open "$domain"
             ;;
-        CYGWIN* | MINGW32* | MSYS* | MINGW*)
+        windows)
             start "$domain"
             ;;
         *)
-            error_message "Unsupported OS: $os_name. Please open $domain manually."
+            error_message "Unsupported OS. Please open $domain manually."
             ;;
     esac
 }
@@ -383,7 +430,7 @@ tbs_config() {
 
         # Auto-detect default
         local default_index=1
-        if [[ "$(uname -s)" != "Darwin" && "$(uname -s)" != *"MINGW"* && "$(uname -s)" != *"CYGWIN"* ]]; then
+        if [[ "$(get_os_type)" == "linux" ]]; then
              # Likely Linux, could be live
              # But let's check if INSTALLATION_TYPE is already set
              if [[ "$INSTALLATION_TYPE" == "live" ]]; then
@@ -668,40 +715,7 @@ tbs_config() {
 
 tbs_start() {
     # Check if Docker daemon is running
-    if ! docker info >/dev/null 2>&1; then
-        yellow_message "Docker daemon is not running. Starting Docker daemon..."
-
-        # Check the OS and start Docker accordingly
-        case "$(uname -s)" in
-        Darwin)
-            open -a Docker
-            ;;
-        Linux)
-            sudo systemctl start docker
-            ;;
-        CYGWIN* | MINGW32* | MSYS* | MINGW*)
-            start "" "C:\Program Files\Docker\Docker\Docker Desktop.exe"
-            ;;
-        *)
-            error_message "Unsupported OS. Please start Docker manually."
-            exit 1
-            ;;
-        esac
-
-        # Wait for Docker to start (max 60 seconds)
-        local timeout=60
-        local elapsed=0
-        while ! docker info >/dev/null 2>&1; do
-            if [ $elapsed -ge $timeout ]; then
-                error_message "Docker failed to start within ${timeout} seconds."
-                exit 1
-            fi
-            yellow_message "Waiting for Docker to start... (${elapsed}s)"
-            sleep 2
-            elapsed=$((elapsed + 2))
-        done
-        info_message "Docker is running."
-    fi
+    ensure_docker_running
 
     # Build and start containers
     info_message "Starting Turbo Stack (${APP_ENV} mode, ${STACK_MODE:-hybrid} stack)..."
@@ -841,30 +855,35 @@ tbs() {
     fi
 
     # Start the Turbo Stack using Docker
-    if [[ $1 == "start" ]]; then
+    case "$1" in
+    start)
         # Open the domain in the default web browser
         open_browser "http://localhost"
+        ;;
 
     # Stop the Turbo Stack
-    elif [[ $1 == "stop" ]]; then
+    stop)
         docker compose --profile "*" down
         green_message "Turbo Stack is stopped"
+        ;;
 
     # Open a bash shell inside the webserver container
-    elif [[ $1 == "cmd" ]]; then
+    cmd)
         docker compose exec $WEBSERVER_SERVICE bash
+        ;;
 
     # Restart the Turbo Stack
-    elif [[ $1 == "restart" ]]; then
+    restart)
         PROFILES="--profile ${STACK_MODE:-hybrid}"
         if [[ "$APP_ENV" == "development" ]]; then
             PROFILES="$PROFILES --profile development"
         fi
         docker compose --profile "*" down && docker compose $PROFILES up -d
         green_message "Turbo Stack restarted."
+        ;;
 
     # Rebuild & Start
-    elif [[ $1 == "build" ]]; then
+    build)
         PROFILES="--profile ${STACK_MODE:-hybrid}"
         if [[ "$APP_ENV" == "development" ]]; then
             PROFILES="$PROFILES --profile development"
@@ -873,9 +892,10 @@ tbs() {
         # docker compose build
         docker compose $PROFILES up -d --build
         green_message "Turbo Stack rebuilt and running."
+        ;;
 
     # Add a new application and create a corresponding virtual host
-    elif [[ $1 == "addapp" ]]; then
+    addapp)
         # Validate if the application name is provided
         if [[ -z $2 ]]; then
             error_message "Application name is required."
@@ -1012,10 +1032,7 @@ EOL
         green_message "Vhost configuration file created at: $vhost_file"
 
         # Reload Nginx to ensure it serves the new domain (required for Let's Encrypt validation)
-        if command -v docker >/dev/null && docker compose ps -q reverse-proxy >/dev/null 2>&1; then
-             info_message "Reloading Nginx to apply new configuration..."
-             docker compose exec reverse-proxy nginx -s reload
-        fi
+        reload_webservers
 
         # Check if SSL generation is needed
         if ! generate_ssl_certificates $domain $vhost_file $nginx_file; then
@@ -1045,24 +1062,16 @@ EOL
 
         # Enable the new virtual host and reload Apache
         yellow_message "Activating the virtual host..."
-        if command -v docker >/dev/null; then
-            if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
-                docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
-            fi
-            # Nginx was already reloaded by generate_ssl_certificates if successful, 
-            # but we reload again here to be sure if SSL generation was skipped or failed but we still want HTTP.
-            docker compose exec reverse-proxy nginx -s reload
-
-            green_message "Virtual host $domain activated and web servers reloaded."
-        fi
+        reload_webservers
 
         # Open the domain in the default web browser
         open_browser "$domainUrl"
 
         green_message "App setup complete: $app_name with domain $domain"
+        ;;
 
     # Remove an application
-    elif [[ $1 == "removeapp" ]]; then
+    removeapp)
         if [[ -z $2 ]]; then
             error_message "Application name is required."
             return 1
@@ -1126,33 +1135,29 @@ EOL
             fi
 
             # Reload servers
-            yellow_message "Reloading web servers..."
-            if command -v docker >/dev/null; then
-                if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
-                    docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
-                fi
-                docker compose exec reverse-proxy nginx -s reload
-                green_message "Web servers reloaded."
-            fi
+            reload_webservers
         else
             info_message "Operation cancelled."
         fi
+        ;;
 
     # Show logs
-    elif [[ $1 == "logs" ]]; then
+    logs)
         service=$2
         if [[ -z $service ]]; then
             docker compose logs -f
         else
             docker compose logs -f "$service"
         fi
+        ;;
 
     # Show status
-    elif [[ $1 == "status" ]]; then
+    status)
         docker compose ps
+        ;;
 
     # Handle 'code' command to open application directories
-    elif [[ $1 == "code" ]]; then
+    code)
         if [[ $2 == "root" || $2 == "tbs" ]]; then
             code "$tbsPath"
         else
@@ -1189,12 +1194,14 @@ EOL
                 fi
             fi
         fi
-    elif [[ $1 == "config" ]]; then
+        ;;
+    config)
 
         tbs_config
+        ;;
 
     # Backup the Turbo Stack
-    elif [[ $1 == "backup" ]]; then
+    backup)
         backup_dir="$tbsPath/data/backup"
         mkdir -p "$backup_dir"
         timestamp=$(date +"%Y%m%d%H%M%S")
@@ -1223,9 +1230,10 @@ EOL
         rm -rf "$temp_sql_dir" "$temp_app_dir"
 
         green_message "Backup completed: ${backup_file}"
+        ;;
 
     # Restore the Turbo Stack
-    elif [[ $1 == "restore" ]]; then
+    restore)
         backup_dir="$tbsPath/data/backup"
         if [[ ! -d $backup_dir ]]; then
             error_message "Backup directory not found: $backup_dir"
@@ -1298,9 +1306,10 @@ EOL
         rm -rf "$temp_restore_dir"
         
         green_message "Restore completed from $selected_backup"
+        ;;
 
     # Generate SSL certificates for a domain
-    elif [[ $1 == "ssl" ]]; then
+    ssl)
         domain=$2
         if [[ -z $domain ]]; then
             error_message "Domain name is required."
@@ -1317,36 +1326,34 @@ EOL
 
         if generate_ssl_certificates $domain $vhost_file $nginx_file; then
             # Reload web servers to apply changes
-            if command -v docker >/dev/null; then
-                yellow_message "Reloading web servers..."
-                if [[ "${STACK_MODE:-hybrid}" == "hybrid" ]]; then
-                    docker compose exec "$WEBSERVER_SERVICE" bash -c "service apache2 reload"
-                fi
-                docker compose exec reverse-proxy nginx -s reload
-                green_message "Web servers reloaded."
-            fi
+            reload_webservers
         fi
+        ;;
 
     # Generate Default SSL (localhost)
-    elif [[ $1 == "ssl-default" ]]; then
+    ssl-default)
         generate_default_ssl
+        ;;
 
     # Open Mailpit
-    elif [[ $1 == "mail" ]]; then
+    mail)
         open_browser "http://localhost:8025"
+        ;;
 
     # Open phpMyAdmin
-    elif [[ $1 == "pma" ]]; then
+    pma)
         open_browser "http://localhost:${HOST_MACHINE_PMA_PORT}"
+        ;;
 
     # Open Redis CLI
-    elif [[ $1 == "redis-cli" ]]; then
+    redis-cli)
         docker compose exec redis redis-cli
+        ;;
 
-    else
-        if [[ -z "$1" ]]; then
-            interactive_menu
-        elif [[ "$1" == "help" || "$1" == "--help" || "$1" == "-h" ]]; then
+    "")
+        interactive_menu
+        ;;
+    help|--help|-h)
             print_header
             echo "Usage: tbs [command] [args]"
             echo ""
@@ -1370,12 +1377,13 @@ EOL
             echo "  pma         Open phpMyAdmin"
             echo "  redis-cli   Open Redis CLI"
             echo ""
-        else
+            ;;
+        *)
             print_header
             error_message "Unknown command: $1"
             echo "Run 'tbs help' for usage or 'tbs' for the interactive menu."
-        fi
-    fi
+            ;;
+    esac
 }
 
 # Check if required commands are available
@@ -1411,6 +1419,7 @@ tbs() {
 }
 EOF
         info_message "Function 'tbs' added to $(basename $shell_rc)"
+        yellow_message "Please run 'source $shell_rc' or restart your terminal to use the 'tbs' command."
     fi
 }
 
