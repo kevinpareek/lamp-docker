@@ -31,12 +31,57 @@ Stop wasting time configuring servers. This stack gives you everything you needâ
 ## ðŸš€ Getting Started
 
 ### Prerequisites
-The stack is designed to work on **macOS, Linux, and Windows**. Ensure you have the following installed:
 
-*   **Docker Desktop** (or Engine + Compose)
-*   **Git** & **Bash** (Git Bash recommended for Windows)
-*   **Required Utilities**: `curl`, `sed` (Standard on macOS/Linux; included with Git Bash on Windows)
-*   **mkcert** (For trusted local SSL) - *The script can automatically install this for you!*
+The stack is designed to work on **macOS, Linux, Windows, and other Unix-like systems**. Requirements vary based on your installation type (local development vs. live/production).
+
+#### Common Requirements (All Environments)
+
+*   **Docker**:
+    *   **macOS**: [Docker Desktop](https://www.docker.com/products/docker-desktop/) (recommended) or Docker Engine + Compose
+    *   **Linux**: Docker Engine + Docker Compose v2 plugin (or Docker Desktop)
+    *   **Windows**: [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes WSL 2)
+    *   **Other OS**: Docker Engine + Docker Compose v2 plugin
+*   **Docker Compose v2**: Required (included with Docker Desktop; install separately for Docker Engine)
+*   **Git**: For cloning the repository
+*   **Bash Shell**:
+    *   **macOS/Linux**: Built-in (bash 4.0+)
+    *   **Windows**: [Git Bash](https://git-scm.com/downloads) (recommended) or WSL 2
+    *   **Other OS**: bash 4.0+ or compatible shell
+*   **System Utilities**:
+    *   `curl` - HTTP client (standard on macOS/Linux; included with Git Bash on Windows)
+    *   `sed` - Text stream editor (standard on macOS/Linux; included with Git Bash on Windows)
+*   **Ports Available**: Ensure ports `80` (HTTP) and `443` (HTTPS) are not in use by other services
+*   **System Resources**: Minimum 2GB RAM, 10GB free disk space (more recommended for production)
+
+#### Local Development Requirements
+
+*   **mkcert**: For generating trusted SSL certificates for `.localhost` domains
+    *   *The script can automatically install mkcert for you!*
+    *   **macOS**: Requires Homebrew (`brew install mkcert nss`)
+    *   **Linux**: Requires `libnss3-tools` (via apt/yum/pacman package managers)
+    *   **Windows**: Requires Chocolatey (`choco install mkcert`) or manual installation
+
+#### Live/Production Requirements
+
+*   **Domain & DNS**: Your domain(s) must point to the server's IP address before SSL generation
+*   **Ports**: Ports `80` and `443` must be publicly accessible (firewall configured)
+*   **Server Access**: SSH access with sudo/root privileges (for initial setup)
+*   **Security**: Change all default passwords in `.env` before deployment (see [SECURITY.md](SECURITY.md))
+
+#### OS-Specific Notes
+
+*   **macOS**: 
+    *   Apple Silicon (M1/M2/M3): Fully supported; MariaDB recommended for best compatibility
+    *   Intel Macs: All database options available
+*   **Linux**: 
+    *   Works on most distributions (Ubuntu, Debian, CentOS, Fedora, Arch, etc.)
+    *   May require `sudo` for Docker commands (add user to `docker` group)
+*   **Windows**: 
+    *   Requires WSL 2 (Windows Subsystem for Linux) for Docker Desktop
+    *   Use Git Bash or WSL terminal for running `tbs.sh` script
+*   **Other Unix-like Systems** (FreeBSD, OpenBSD, etc.):
+    *   Docker Engine support varies; check Docker documentation for your OS
+    *   Bash compatibility required for `tbs.sh` script
 
 ### Installation
 
