@@ -54,8 +54,12 @@ services:
       APP_ENV: "${APP_ENV:-development}"
       STACK_MODE: "${STACK_MODE:-hybrid}"
     networks:
-      - frontend
-      - backend
+      frontend:
+        aliases:
+          - reverse-proxy
+      backend:
+        aliases:
+          - reverse-proxy
     depends_on:
       - varnish
     healthcheck:

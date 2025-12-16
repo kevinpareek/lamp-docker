@@ -139,6 +139,31 @@ Manage your entire stack with simple commands.
 | `tbs redis-cli` | Redis CLI | - |
 | `tbs cmd` | PHP Shell | - |
 
+#### If `tbs` is not found (manual install)
+The script auto-installs a shim, but if your shell still cannot find `tbs`, set it up once:
+- Linux/mac/WSL/Git Bash:
+  ```bash
+  mkdir -p ~/.local/bin
+  cat > ~/.local/bin/tbs <<'EOF'
+  #!/bin/bash
+  exec "/path/to/your/clone/tbs.sh" "$@"
+  EOF
+  chmod +x ~/.local/bin/tbs
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+  source ~/.bashrc
+  ```
+- Windows PowerShell (User PATH):
+  ```powershell
+  $bin="$HOME\.local\bin"; New-Item -ItemType Directory -Force -Path $bin | Out-Null
+  Set-Content -Path "$bin\tbs.cmd" -Value "@echo off`n\"%ProgramFiles%\Git\bin\bash.exe\" \"D:/path/to/your/clone/tbs.sh\" %*"
+  [Environment]::SetEnvironmentVariable("Path", "$bin;" + $env:Path, "User")
+  ```
+- Windows CMD (per-session):
+  ```cmd
+  set "PATH=%UserProfile%\.local\bin;%PATH%"
+  ```
+Then open a new shell and run `tbs status`.
+
 ---
 
 ## ⚙️ Configuration via `.env`
