@@ -1,4 +1,12 @@
+# ============================================
+# MariaDB 10.3 Production Ready Docker Image
+# ============================================
 FROM mariadb:10.3
+
+LABEL maintainer="PHP Turbo Stack <github.com/kevinpareek/turbo-stack>"
+LABEL version="2.0"
+LABEL description="Production-ready MariaDB 10.3 with optimized settings"
+LABEL org.opencontainers.image.source="https://github.com/kevinpareek/turbo-stack"
 
 # ============================================
 # Create Log Directory

@@ -1,126 +1,155 @@
-FROM php:8.2-apache-bookworm
+# ============================================
+# PHP 8.2 Production Ready Docker Image
+# Optimized for Performance & Security
+# ============================================
+FROM php:8.2-apache-bookworm AS base
 
-# Suppresses debconf complaints of trying to install apt packages interactively
-# https://github.com/moby/moby/issues/4032#issuecomment-192327844
- 
+LABEL maintainer="PHP Turbo Stack <github.com/kevinpareek/turbo-stack>"
+LABEL version="2.0"
+LABEL description="Production-ready PHP 8.2 with Apache, Redis, Imagick"
+LABEL org.opencontainers.image.source="https://github.com/kevinpareek/turbo-stack"
+
+# ============================================
+# Build Arguments
+# ============================================
 ARG DEBIAN_FRONTEND=noninteractive
-
-# Update
-RUN apt-get -y update --fix-missing && \
-    apt-get upgrade -y && \
-    apt-get --no-install-recommends install -y apt-utils && \
-    rm -rf /var/lib/apt/lists/*
-
-
-# Install useful tools and install important libraries
-RUN apt-get -y update && \
-    apt-get -y --no-install-recommends install nano wget \
-dialog \
-libsqlite3-dev \
-libsqlite3-0 && \
-    apt-get -y --no-install-recommends install default-mysql-client \
-zlib1g-dev \
-libzip-dev \
-libicu-dev && \
-    apt-get -y --no-install-recommends install --fix-missing apt-utils \
-build-essential \
-git \
-curl \
-libonig-dev && \ 
-    apt-get install -y iputils-ping && \
-    apt-get -y --no-install-recommends install --fix-missing libcurl4 \
-libcurl4-openssl-dev \
-libmemcached-dev \
-libssl-dev \
-pkg-config \
-zip \
-unzip \
-openssl && \
-    rm -rf /var/lib/apt/lists/* && \
-    curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-
-# Install xdebug
 ARG INSTALL_XDEBUG=false
-RUN if [ "${INSTALL_XDEBUG}" = "true" ]; then \
-    pecl install xdebug-3.2.1 && \
-    docker-php-ext-enable xdebug && \
-    mkdir /var/log/xdebug; \
+
+# ============================================
+# Environment Variables
+# ============================================
+ENV COMPOSER_ALLOW_SUPERUSER=1 \
+    COMPOSER_HOME=/tmp/composer \
+    COMPOSER_NO_INTERACTION=1
+
+# ============================================
+# Install System Dependencies (Single Layer)
+# ============================================
+RUN set -eux; \
+    apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        # Essential
+        cron \
+        supervisor \
+        curl \
+        wget \
+        git \
+        unzip \
+        zip \
+        ca-certificates \
+        # Database
+        default-mysql-client \
+        # PHP Dependencies
+        libsqlite3-dev \
+        zlib1g-dev \
+        libzip-dev \
+        libicu-dev \
+        libonig-dev \
+        libcurl4-openssl-dev \
+        libssl-dev \
+        libmemcached-dev \
+        # Image Processing
+        libmagickwand-dev \
+        libfreetype6-dev \
+        libjpeg62-turbo-dev \
+        libpng-dev \
+        libwebp-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/cache/apt/*
+
+# ============================================
+# Install PHP Extensions (Optimized)
+# ============================================
+RUN set -eux; \
+    # Configure GD with all formats
+    docker-php-ext-configure gd \
+        --enable-gd \
+        --with-freetype \
+        --with-jpeg \
+        --with-webp \
+    # Install all extensions in parallel
+    && docker-php-ext-install -j"$(nproc)" \
+        pdo_mysql \
+        pdo_sqlite \
+        mysqli \
+        bcmath \
+        zip \
+        intl \
+        mbstring \
+        gettext \
+        calendar \
+        exif \
+        opcache \
+        pcntl \
+        sockets \
+        gd \
+    # PECL Extensions
+    && pecl channel-update pecl.php.net \
+    && pecl install -o -f redis apcu imagick memcached \
+    && docker-php-ext-enable redis apcu imagick memcached \
+    && pecl clear-cache \
+    && rm -rf /tmp/pear
+
+# ============================================
+# Install Xdebug (Conditional)
+# ============================================
+RUN set -eux; \
+    if [ "${INSTALL_XDEBUG}" = "true" ]; then \
+        pecl install xdebug \
+        && docker-php-ext-enable xdebug \
+        && pecl clear-cache; \
     fi
 
-# Install redis
-RUN pecl install redis-5.3.7 && \
-    docker-php-ext-enable redis
+# ============================================
+# Install Composer (Latest Stable)
+# ============================================
+COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
 
-# Install memcached
-RUN pecl install memcached && \
-    docker-php-ext-enable memcached
+# ============================================
+# Install mhsendmail
+# ============================================
+RUN curl -fsSL 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' \
+        -o /usr/local/bin/mhsendmail \
+    && chmod +x /usr/local/bin/mhsendmail
 
-# Install imagick
-RUN apt-get update && \
-    apt-get -y --no-install-recommends install --fix-missing libmagickwand-dev && \
-    rm -rf /var/lib/apt/lists/*
+# ============================================
+# Apache Configuration
+# ============================================
+RUN set -eux; \
+    echo "ServerName localhost" >> /etc/apache2/apache2.conf \
+    && a2enmod ssl rewrite headers expires deflate proxy proxy_http \
+    && { \
+        echo 'ServerTokens Prod'; \
+        echo 'ServerSignature Off'; \
+        echo 'TraceEnable Off'; \
+        echo 'Header always set X-Content-Type-Options "nosniff"'; \
+        echo 'Header always set X-Frame-Options "SAMEORIGIN"'; \
+        echo 'Header always set X-XSS-Protection "1; mode=block"'; \
+    } >> /etc/apache2/conf-available/security.conf \
+    && a2enconf security
 
-# Workaround until imagick is available in pecl with php8 support
-# Imagick Commit to install
-# https://github.com/Imagick/imagick
-ARG IMAGICK_COMMIT="661405abe21d12003207bc8eb0963fafc2c02ee4"
-
-RUN cd /usr/local/src && \
-    git clone https://github.com/Imagick/imagick && \
-    cd imagick && \
-    git checkout ${IMAGICK_COMMIT} && \
-    phpize && \
-    ./configure && \
-    make && \
-    make install && \
-    cd .. && \
-    rm -rf imagick && \
-    docker-php-ext-enable imagick
-
-# Other PHP8 Extensions
-
-RUN docker-php-ext-install pdo_mysql && \
-    docker-php-ext-install pdo_sqlite && \
-    docker-php-ext-install bcmath && \
-    docker-php-ext-install mysqli && \
-    docker-php-ext-install curl && \
-    docker-php-ext-install zip && \
-    docker-php-ext-install -j$(nproc) intl && \
-    docker-php-ext-install mbstring && \
-    docker-php-ext-install gettext && \
-    docker-php-ext-install calendar && \
-    docker-php-ext-install exif
-
-
-# Install Freetype 
-RUN apt-get -y update && \
-    apt-get --no-install-recommends install -y libfreetype6-dev \
-libjpeg62-turbo-dev \
-libpng-dev && \
-    rm -rf /var/lib/apt/lists/* && \
-    docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg && \
-    docker-php-ext-install gd
-
-# Install mhsendmail for Mailpit
-RUN curl -Lsf 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' -o /usr/local/bin/mhsendmail && \
-    chmod +x /usr/local/bin/mhsendmail
-
-# Install Supervisor and Cron
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends supervisor cron && \
-    rm -rf /var/lib/apt/lists/*
-
+# ============================================
 # Setup Directories & Permissions
-RUN mkdir -p /etc/apache2/ssl /var/log/supervisor /var/www/html && \
-    touch /var/log/cron.log /var/log/supervisor/supervisord.log && \
-    chown -R www-data:www-data /var/www/html && \
-    chmod -R 755 /var/www/html
+# ============================================
+RUN set -eux; \
+    mkdir -p /etc/apache2/ssl /var/log/{cron,supervisor} /var/www/html \
+    && touch /var/log/cron.log /var/log/supervisor/supervisord.log \
+    && chown -R www-data:www-data /var/www/html \
+    && chmod -R 755 /var/www/html
 
-# Enable SSL support and Apache modules
-RUN a2enmod ssl rewrite headers
+# ============================================
+# Health Check
+# ============================================
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -sf http://localhost/server-status || curl -sf http://localhost/ || exit 1
 
-# Cleanup unnecessary files to reduce image size
-RUN rm -rf /usr/src/* /tmp/* /var/tmp/*
+# ============================================
+# Expose Ports
+# ============================================
+EXPOSE 80 443
 
+# ============================================
 # Entrypoint
+# ============================================
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

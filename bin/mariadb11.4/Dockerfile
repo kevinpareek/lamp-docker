@@ -12,8 +12,7 @@ LABEL org.opencontainers.image.source="https://github.com/kevinpareek/turbo-stac
 # Environment Variables
 # ============================================
 ENV MARIADB_AUTO_UPGRADE=1 \
-    MARIADB_DISABLE_UPGRADE_BACKUP=1 \
-    TZ=Asia/Kolkata
+    MARIADB_DISABLE_UPGRADE_BACKUP=1
 
 # ============================================
 # Create Log Directory

@@ -1,6 +1,18 @@
+# ============================================
+# MySQL 8.4 Production Ready Docker Image
+# ============================================
 FROM mysql:8.4
-RUN echo "[mysqld]" >> /etc/mysql/my.cnf
-RUN echo "mysql_native_password=ON" >> /etc/mysql/my.cnf
+
+LABEL maintainer="PHP Turbo Stack <github.com/kevinpareek/turbo-stack>"
+LABEL version="2.0"
+LABEL description="Production-ready MySQL 8.4 with optimized settings"
+LABEL org.opencontainers.image.source="https://github.com/kevinpareek/turbo-stack"
+
+# ============================================
+# Enable mysql_native_password for compatibility
+# ============================================
+RUN echo "[mysqld]" >> /etc/mysql/my.cnf && \
+    echo "mysql_native_password=ON" >> /etc/mysql/my.cnf
 
 # ============================================
 # Create Log Directory
@@ -16,4 +28,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD mysqladmin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" --silent
 
 EXPOSE 3306
-

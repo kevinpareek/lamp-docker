@@ -11,7 +11,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.0.0
 - Dual stack modes:
   - **Hybrid**: Nginx (reverse proxy) → Varnish → Apache (PHP via mod\_php).
   - **Thunder**: Nginx (frontend + backend) → PHP-FPM.
-- Support for multiple PHP versions (5.4–8.4) via dedicated Docker images.
+- Support for multiple PHP versions (7.4–8.4) via dedicated Docker images.
 - Support for MySQL and MariaDB versions via dedicated Docker images.
 - Pre-configured services: Nginx, Apache, MySQL/MariaDB, Redis, Varnish, Memcached, Mailpit, phpMyAdmin.
 - `tbs.sh` helper script for:
