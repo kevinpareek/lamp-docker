@@ -13,7 +13,7 @@ Stop wasting time configuring servers. This stack gives you everything you need�
 *   **🔥 Dual Modes**:
     *   **Hybrid Mode**: Nginx (Proxy) → Varnish → Apache (Webserver). Best for compatibility.
     *   **Thunder Mode**: Nginx (Webserver) → PHP-FPM. Best for performance.
-*   **🐘 Multiple PHP Versions**: Switch instantly between PHP 5.4 to 8.4.
+*   **🐘 Multiple PHP Versions**: Switch instantly between PHP 7.4 to 8.4.
 *   **💾 Database Freedom**: Choose MySQL (5.7 - 8.4) or MariaDB (10.3 - 11.4).
     *   *Coming Soon: MongoDB & PostgreSQL support.*
 *   **⚡ Caching Suite**: Pre-configured **Redis**, **Memcached**, and **Varnish**.
@@ -213,7 +213,6 @@ You can switch modes in `.env` or via `tbs config`.
     *   **PHP-FPM** handles code execution directly for maximum speed.
     *   *Note: `.htaccess` files are NOT supported in this mode.*
 *   Ideal for Laravel, Symfony, and high-performance modern apps.
-*   *Note: `.htaccess` files are ignored in this mode.*
 
 ### 3. Node.js Mode (Coming Soon)
 **Nginx ➡ Node.js**
@@ -276,7 +275,7 @@ You can switch modes in `.env` or via `tbs config`.
 | **Mailpit (UI)** | 8025 | `8025` |
 | **Mailpit (SMTP)** | 1025 | `1025` |
 | **Redis** | 6379 | `6379` |
-| **Memcached** | 11211 | `11211` (Internal Only) |
+| **Memcached** | 11211 | `11211` (bound to `127.0.0.1` by default) |
 
 ### Adding PHP Extensions
 Edit `./bin/php<version>/Dockerfile` (e.g., `./bin/php8.2/Dockerfile`) and run `tbs build`.

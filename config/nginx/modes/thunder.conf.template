@@ -2,26 +2,22 @@
 # Thunder Mode NGINX Configuration (FPM)
 # ============================================
 
-# HTTP Server
+# HTTP Server (Frontend -> Varnish)
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name localhost _;
-    root ${APACHE_DOCUMENT_ROOT};
-    index index.php index.html index.htm;
 
     include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
 
-# HTTPS Server
+# HTTPS Server (Frontend -> Varnish)
 server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
     http2 on;
     server_name localhost _;
-    root ${APACHE_DOCUMENT_ROOT};
-    index index.php index.html index.htm;
 
     # SSL Configuration
     ssl_certificate /etc/nginx/ssl-sites/cert.pem;
@@ -37,7 +33,7 @@ server {
 # ============================================
 server {
     listen 8080 default_server;
-    server_name localhost;
+    server_name localhost _;
     root ${APACHE_DOCUMENT_ROOT};
     index index.php index.html index.htm;
 
