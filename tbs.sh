@@ -144,6 +144,89 @@ get_os_type() {
     esac
 }
 
+# Prevent Git Bash from rewriting docker paths on Windows
+prepare_windows_path_handling() {
+    if [[ "$(get_os_type)" == "windows" ]]; then
+        export MSYS_NO_PATHCONV=1
+        export MSYS2_ARG_CONV_EXCL="*"
+    fi
+}
+
+install_tbs_command() {
+    # Always target a user-writable bin dir
+    local bin_dir="${HOME}/.local/bin"
+    local wrapper_path="${bin_dir}/tbs"
+
+    mkdir -p "$bin_dir" 2>/dev/null || true
+
+    # Bash shim (works on Linux/mac/Git Bash)
+    cat > "$wrapper_path" <<EOF
+#!/bin/bash
+exec "$tbsFile" "\$@"
+EOF
+    chmod +x "$wrapper_path" 2>/dev/null || true
+
+    # Ensure current shell can find it immediately
+    case ":$PATH:" in
+        *:"$bin_dir":*) ;;
+        *) export PATH="$bin_dir:$PATH" ;;
+    esac
+
+    # Persist PATH for bash shells
+    local shell_rc
+    if [[ -f "${HOME}/.bashrc" ]]; then
+        shell_rc="${HOME}/.bashrc"
+    elif [[ -f "${HOME}/.profile" ]]; then
+        shell_rc="${HOME}/.profile"
+    else
+        shell_rc="${HOME}/.bashrc"
+        touch "$shell_rc"
+    fi
+
+    # Git Bash warning helper: ensure .bash_profile sources .bashrc if none exists
+    if [[ -f "${HOME}/.bashrc" ]]; then
+        if [[ ! -f "${HOME}/.bash_profile" && ! -f "${HOME}/.bash_login" && ! -f "${HOME}/.profile" ]]; then
+            cat > "${HOME}/.bash_profile" <<'EOF'
+#!/bin/bash
+if [ -f "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+fi
+EOF
+        fi
+    fi
+
+    local export_line="export PATH=\"$bin_dir:\$PATH\""
+    if ! grep -F "$export_line" "$shell_rc" >/dev/null 2>&1; then
+        {
+            echo ""
+            echo "# Added by tbs.sh for Turbo Stack CLI"
+            echo "$export_line"
+        } >> "$shell_rc"
+    fi
+
+    # On Windows, also drop cmd/ps1 shims for PowerShell/CMD users
+    if [[ "$(get_os_type)" == "windows" ]]; then
+        local win_bin_dir="${HOME}/.local/bin"
+        mkdir -p "$win_bin_dir" 2>/dev/null || true
+
+        local win_tbs_path="$tbsFile"
+        if command_exists cygpath; then
+            win_tbs_path="$(cygpath -w "$tbsFile")"
+        fi
+
+        # CMD shim
+        cat > "${win_bin_dir}/tbs.cmd" <<EOF
+@echo off
+"%ProgramFiles%\\Git\\bin\\bash.exe" "$win_tbs_path" %*
+EOF
+
+        # PowerShell shim
+        cat > "${win_bin_dir}/tbs.ps1" <<EOF
+& "\$env:ProgramFiles\\Git\\bin\\bash.exe" "$win_tbs_path" @args
+EOF
+    fi
+}
+
 # Reload Web Servers
 reload_webservers() {
     # Ensure WEBSERVER_SERVICE is set if not already
@@ -869,6 +952,12 @@ tbs() {
 
     # go to tbs path
     cd "$tbsPath"
+
+    # Ensure docker paths are not mangled on Windows terminals (e.g., Git Bash)
+    prepare_windows_path_handling
+
+    # Install a convenience shim so `tbs` works globally on this machine
+    install_tbs_command
 
     # Load environment variables from .env file
     if [[ -f .env ]]; then
