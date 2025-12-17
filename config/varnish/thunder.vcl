@@ -2,6 +2,8 @@ vcl 4.0;
 
 # ============================================
 # Thunder Mode VCL - Nginx -> Varnish -> Nginx:8080 -> PHP-FPM
+# In thunder mode, Varnish proxies to Nginx internal server on port 8080
+# which then communicates with PHP-FPM via FastCGI
 # ============================================
 
 backend default {

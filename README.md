@@ -109,96 +109,86 @@ The stack is designed to work on **macOS, Linux, Windows, and other Unix-like sy
 
 ---
 
-## 🛠️ The `tbs` Helper Script
+## 🛠️ The `tbs` Command
 
-Manage your entire stack with simple commands.
+Manage your entire stack with simple, intuitive commands.
 
+### Core Commands
 | Command | Description |
 | :--- | :--- |
-| `tbs` | Open the interactive Turbo Stack menu. |
-| `tbs start` | Start all services (Docker Compose profiles based on `STACK_MODE` and `APP_ENV`). |
-| `tbs stop` | Stop services and remove orphans. |
-| `tbs restart` | Restart the stack with the current profiles. |
-| `tbs build` | Rebuild images (e.g., after adding PHP extensions) and start the stack. |
-| `tbs status` | Show running containers (`docker compose ps`). |
-| `tbs logs [service]` | Stream logs for all services or for a specific service. |
-| `tbs config` | Wizard to change PHP version, DB, environment, or Stack Mode and update `.env` |
-| `tbs addapp <name> [domain]` | Create a new site (Apache + Nginx vhost, SSL, document root under `www/applications`). Default domain: `<name>.localhost`. |
-| `tbs removeapp <name> [domain]` | Remove app vhost(s), optional app files, and related SSL certs. |
-| `tbs code <name>` | Open a project folder in VS Code. `tbs code` (without name) lets you pick an app. |
-| `tbs ssl <domain>` | Force SSL generation for an existing domain (Certbot for live, mkcert for local). |
-| `tbs ssl-localhost` | Generate trusted SSL certs for `localhost` and reload Nginx/Apache. |
-| `tbs phpconfig <app>` | Configure per-application PHP settings (memory, upload limits, timeouts, etc.). |
-| `tbs backup` | Backup all user databases and `www/applications` to `data/backup`. |
-| `tbs restore` | Restore databases and app files from a backup archive. |
+| `tbs` | Open interactive menu |
+| `tbs start` | Start all services |
+| `tbs stop` | Stop all services |
+| `tbs restart` | Restart the stack |
+| `tbs build` | Rebuild images and start |
+| `tbs status` | Show running containers |
+| `tbs logs [service]` | Stream logs |
+| `tbs config` | Configuration wizard |
+| `tbs info` | Show stack info |
 
-### Project Creators
+### App Management (`tbs app`)
 | Command | Description |
 | :--- | :--- |
-| `tbs create laravel <name>` | Create a new Laravel project with Composer |
-| `tbs create wordpress <name>` | Create WordPress site with auto database setup |
-| `tbs create symfony <name>` | Create a new Symfony project |
-| `tbs create blank <name>` | Create a blank PHP project |
+| `tbs app` | Interactive app manager |
+| `tbs app add <name>` | Create new app (auto SSH, SSL, vhost) |
+| `tbs app rm [app]` | Delete app |
+| `tbs app db [app]` | Database management |
+| `tbs app ssh [app]` | SSH/SFTP settings |
+| `tbs app domain [app]` | Manage domains |
+| `tbs app ssl [app]` | SSL certificates |
+| `tbs app php [app]` | PHP configuration |
+| `tbs app config [app]` | App settings (varnish, webroot, etc.) |
+| `tbs app code [app]` | Open in VS Code |
+| `tbs app open [app]` | Open in browser |
+| `tbs app info [app]` | Show app config |
+| `tbs app supervisor [app]` | Manage background workers |
+| `tbs app cron [app]` | Manage cron jobs |
+| `tbs app logs [app]` | App logging |
 
-### Database Management
+### Project Creators (`tbs create`)
+| Command | Description |
+| :--- | :--- |
+| `tbs create laravel <name>` | New Laravel project |
+| `tbs create wordpress <name>` | WordPress with auto database |
+| `tbs create symfony <name>` | New Symfony project |
+| `tbs create blank <name>` | Blank PHP project |
+
+### Database (`tbs db`)
 | Command | Description |
 | :--- | :--- |
 | `tbs db list` | List all databases |
-| `tbs db create <name>` | Create a new database |
-| `tbs db drop <name>` | Drop a database (with confirmation) |
-| `tbs db import <name> <file>` | Import SQL file (supports .sql and .sql.gz) |
-| `tbs db export <name>` | Export database to SQL file |
-| `tbs db user <name> [pass] [db]` | Create MySQL user with database access |
+| `tbs db create <name>` | Create database |
+| `tbs db drop <name>` | Drop database |
+| `tbs db import <name> <file>` | Import SQL (.sql / .sql.gz) |
+| `tbs db export <name>` | Export to SQL file |
+| `tbs db user <name> [pass] [db]` | Create MySQL user |
 
-### Shell Access
+### Shell & Tools
 | Command | Description |
 | :--- | :--- |
-| `tbs shell` | Interactive container shell selection |
-| `tbs shell php` | Access PHP/Webserver container |
-| `tbs shell mysql` | Access MySQL/MariaDB container |
-| `tbs shell redis` | Access Redis container |
-| `tbs shell nginx` | Access Nginx container |
+| `tbs shell [php\|mysql\|redis\|nginx]` | Container shell access |
+| `tbs pma` | Open phpMyAdmin |
+| `tbs mail` | Open Mailpit |
+| `tbs redis-cli` | Redis CLI |
+| `tbs code [app]` | Open in VS Code |
 
-### System Information
+### Backup & Restore
 | Command | Description |
 | :--- | :--- |
-| `tbs info` | Show complete stack status and configuration |
-| `tbs info php` | Show PHP version and loaded extensions |
-| `tbs info mysql` | Show MySQL version and databases |
-| `tbs info redis` | Show Redis server information |
+| `tbs backup` | Backup databases + apps |
+| `tbs restore` | Restore from backup |
 
-### Tool Shortcuts
-| Command | Description | URL |
-| :--- | :--- | :--- |
-| `tbs pma` | phpMyAdmin | [http://localhost:8080](http://localhost:8080) |
-| `tbs mail` | Mailpit | [http://localhost:8025](http://localhost:8025) |
-| `tbs redis-cli` | Redis CLI | - |
-| `tbs cmd` | PHP Shell | - |
+### SSH Admin
+| Command | Description |
+| :--- | :--- |
+| `tbs sshadmin` | Show admin SSH credentials |
+| `tbs sshadmin password` | Reset admin password |
 
-#### If `tbs` is not found (manual install)
-The script auto-installs a shim, but if your shell still cannot find `tbs`, set it up once:
-- Linux/mac/WSL/Git Bash:
-  ```bash
-  mkdir -p ~/.local/bin
-  cat > ~/.local/bin/tbs <<'EOF'
-  #!/bin/bash
-  exec "/path/to/your/clone/tbs.sh" "$@"
-  EOF
-  chmod +x ~/.local/bin/tbs
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-  source ~/.bashrc
-  ```
-- Windows PowerShell (User PATH):
-  ```powershell
-  $bin="$HOME\.local\bin"; New-Item -ItemType Directory -Force -Path $bin | Out-Null
-  Set-Content -Path "$bin\tbs.cmd" -Value "@echo off`n\"%ProgramFiles%\Git\bin\bash.exe\" \"D:/path/to/your/clone/tbs.sh\" %*"
-  [Environment]::SetEnvironmentVariable("Path", "$bin;" + $env:Path, "User")
-  ```
-- Windows CMD (per-session):
-  ```cmd
-  set "PATH=%UserProfile%\.local\bin;%PATH%"
-  ```
-Then open a new shell and run `tbs status`.
+#### Global `tbs` Command
+The script auto-installs a global shim. If your shell can't find `tbs`, restart your terminal or run:
+```bash
+source ~/.bashrc   # or ~/.zshrc for Zsh
+```
 
 ---
 
@@ -269,181 +259,87 @@ You can switch modes in `.env` or via `tbs config`.
 
 ---
 
-## � Per-Application PHP Configuration
+## 🎛️ Per-Application Features
 
-Turbo Stack allows you to customize PHP settings for individual applications without affecting other apps.
+Each app created via `tbs app add` automatically gets:
+- **Unique app_user ID** - Random 12-char identifier for isolation
+- **SSH/SFTP access** - Auto-generated secure credentials
+- **SSL certificates** - Via mkcert (local) or Let's Encrypt (production)
+- **Dedicated directory structure** - `public_html/`, `logs/`, `tmp/`, etc.
 
-### Using `tbs phpconfig`
+### App Configuration (`tbs app config`)
 
 ```bash
-# Configure PHP settings for a specific app
-tbs phpconfig myapp
+# Interactive config menu
+tbs app config myapp
 
-# Interactive menu to select an app
-tbs phpconfig
+# Direct commands
+tbs app config myapp varnish on/off    # Toggle Varnish caching
+tbs app config myapp webroot public    # Change document root
+tbs app config myapp perms             # Reset file permissions
+tbs app config myapp show              # Show full config JSON
 ```
 
-### Available Settings
-
-| Setting | Description | Default |
-| :--- | :--- | :--- |
-| `memory_limit` | Maximum memory per script | `256M` |
-| `upload_max_filesize` | Maximum upload file size | `64M` |
-| `post_max_size` | Maximum POST data size | `64M` |
-| `max_execution_time` | Script timeout (seconds) | `300` |
-| `max_input_time` | Input parsing timeout | `300` |
-| `max_input_vars` | Maximum input variables | `5000` |
-
-### How It Works
-
-- **Hybrid Mode (Apache)**: Creates a `user.ini` file in your app's root directory
-- **Thunder Mode (PHP-FPM)**: Creates a dedicated FPM pool config in `sites/php/pools/`
-
-### Config File Locations
-
-| Mode | Config Location | Auto-reload |
-| :--- | :--- | :--- |
-| Hybrid | `www/applications/<app>/user.ini` | Yes (every 5 min) |
-| Thunder | `sites/php/pools/<app>.conf` | Requires `tbs restart` |
-
-> **Note:** Per-app configs in `sites/php/pools/` are gitignored by default, keeping your repository clean.
-
----
-
-## 🎛️ Per-Application Configuration
-
-Turbo Stack provides comprehensive per-application control through the `tbs appconfig` command.
-
-### Using `tbs appconfig`
+### Database per App (`tbs app db`)
 
 ```bash
-# Show all apps and their configuration status
-tbs appconfig
+tbs app db myapp              # Interactive database menu
+# Options: Create, Show credentials, Reset password, Import, Export, Delete
+```
 
-# View configuration for a specific app
-tbs appconfig myapp show
+### SSH/SFTP Access (`tbs app ssh`)
 
-# Toggle Varnish caching for an app
-tbs appconfig myapp varnish enable
-tbs appconfig myapp varnish disable
+```bash
+tbs app ssh myapp             # Interactive SSH menu
+# Options: Show credentials, Enable, Reset password, Disable
 
-# Change webroot (e.g., for Laravel's public folder)
-tbs appconfig myapp webroot public
+# Connect via SFTP
+sftp -P 2244 <app_user>@localhost
+```
 
-# Domain management
-tbs appconfig myapp domain add staging.example.com
-tbs appconfig myapp domain remove staging.example.com
-tbs appconfig myapp domain primary www.example.com
+### Domain Management (`tbs app domain`)
 
-# Create dedicated database for app
-tbs appconfig myapp database
+```bash
+tbs app domain myapp          # Manage domains
+# Options: Add domain, Remove domain
+```
 
-# Reset file permissions
-tbs appconfig myapp permissions
+### PHP Configuration (`tbs app php`)
 
-# Supervisor (background workers/queues)
-tbs appconfig myapp supervisor add laravel-queue "php artisan queue:work"
-tbs appconfig myapp supervisor remove laravel-queue
-tbs appconfig myapp supervisor list
+```bash
+tbs app php myapp             # PHP config menu
+# Options: Create .user.ini, Create FPM pool, Edit configs
+```
+
+### Background Workers & Cron
+
+```bash
+# Supervisor (background processes)
+tbs app supervisor myapp add worker    # Add new worker
+tbs app supervisor myapp list          # List workers
+tbs app supervisor myapp rm worker     # Remove worker
 
 # Cron jobs
-tbs appconfig myapp cron add "every-minute" "* * * * *" "php artisan schedule:run"
-tbs appconfig myapp cron remove "every-minute"
-tbs appconfig myapp cron list
-
-# Application logs
-tbs appconfig myapp logs enable
-tbs appconfig myapp logs disable
-tbs appconfig myapp logs tail
+tbs app cron myapp add                 # Add cron job
+tbs app cron myapp list                # List jobs
 ```
 
 ### Configuration Storage
 
-Each app's configuration is stored as JSON in `sites/apps/<app_name>.json`:
+Each app config is stored as JSON in `sites/apps/<app_user>.json`:
 
 ```json
 {
+  "app_user": "abc123xyz",
   "name": "myapp",
-  "domains": ["myapp.localhost", "www.myapp.com"],
-  "primary_domain": "myapp.localhost",
-  "webroot": "public",
+  "domains": ["abc123xyz.localhost"],
+  "primary_domain": "abc123xyz.localhost",
+  "webroot": "public_html",
   "varnish": true,
-  "database": {
-    "name": "myapp_db",
-    "user": "myapp_user",
-    "created": true
-  },
-  "logs": {
-    "enabled": true,
-    "path": "logs"
-  },
-  "supervisor": {
-    "enabled": true,
-    "programs": ["laravel-queue"]
-  },
-  "cron": {
-    "enabled": true,
-    "jobs": ["scheduler"]
-  },
-  "ssh": {
-    "enabled": true,
-    "username": "myapp_ssh",
-    "password": "auto_generated",
-    "port": 2244
-  },
-  "permissions": {
-    "owner": "myapp_ssh",
-    "group": "myapp_ssh"
-  }
+  "database": { "name": "myapp", "user": "myapp", "created": true },
+  "ssh": { "enabled": true, "username": "abc123xyz", "password": "***", "port": 2244 }
 }
 ```
-
-### Feature Overview
-
-| Feature | Command | Description |
-| :--- | :--- | :--- |
-| **Varnish Toggle** | `varnish enable/disable` | Enable/disable caching per app |
-| **Custom Webroot** | `webroot <path>` | Change document root (e.g., `public`) |
-| **Domain Management** | `domain add/remove/primary` | Manage multiple domains |
-| **Database per App** | `database` | Create dedicated MySQL user & database |
-| **SSH/SFTP Access** | `ssh enable/disable/reset` | Per-app SSH user with isolated access |
-| **Permissions Reset** | `permissions` | Reset ownership to www-data |
-| **Supervisor Jobs** | `supervisor add/remove/list` | Manage background workers |
-| **Cron Jobs** | `cron add/remove/list` | Manage scheduled tasks |
-| **App Logs** | `logs enable/disable/tail` | Per-app logging configuration |
-
-### Per-App SSH/SFTP Access
-
-Each application can have its own SSH/SFTP user for secure file access:
-
-```bash
-# Enable SSH for an app (generates random username/password)
-tbs appconfig myapp ssh enable
-
-# Output:
-#   Username: myapp_ssh
-#   Password: <random_16_char>
-#   Port:     2244
-
-# Connect via SFTP
-sftp -P 2244 myapp_ssh@localhost
-
-# Regenerate password
-tbs appconfig myapp ssh reset
-
-# Disable/Delete access
-tbs appconfig myapp ssh disable
-tbs appconfig myapp ssh delete
-```
-
-**Key Features:**
-- **Unique SSH user** per application
-- **Auto-generated** secure credentials
-- **Chroot jail** - users can only access their app directory
-- **File ownership** - app files owned by SSH user (not www-data)
-- **Toggle on/off** without deleting credentials
-
-> **Note:** Start SSH service with: `docker compose --profile ssh up -d ssh`
 
 ---
 
@@ -494,13 +390,15 @@ In production mode (`APP_ENV=production`), additional security measures are appl
 ├── logs/                # Logs for web, DB, and services (Apache, Nginx, MySQL, etc.)
 ├── sites/               # Generated configs (managed by tbs.sh – do NOT edit manually)
 │   ├── apache/          # Active Apache vhosts for your apps
+│   ├── apps/            # App configuration JSON files
 │   ├── nginx/           # Active Nginx configs per app / mode
 │   ├── php/pools/       # Per-app PHP-FPM pool configs (gitignored)
+│   ├── ssh/             # SSH user configs per app
 │   └── ssl/             # Generated SSL certs (mkcert / Let's Encrypt)
 ├── www/                 # Web root inside containers
-│   ├── applications/    # Your project folders (created via `tbs addapp`)
+│   ├── applications/    # Your project folders (created via `tbs app add`)
 │   └── index.php        # Landing page
-└── tbs.sh               # Turbo Stack helper/automation script
+└── tbs.sh               # Turbo Stack CLI script
 ```
 
 **Database auto-init:** Any `.sql` (or compressed `.sql.gz`) file you drop into `config/initdb` will be picked up and executed automatically when the database container starts for the first time—perfect for seeding schemas, users, and sample data.
@@ -561,66 +459,22 @@ For more details, see `SECURITY.md`. For release notes, see `CHANGELOG.md`.
 
 We're constantly improving Turbo Stack! Here's what's on our roadmap:
 
-### 🐘 PHP Enhancements
+| Category | Feature | Description |
+| :--- | :--- | :--- |
+| **🐘 PHP** | PHP 8.5 | Support for upcoming PHP 8.5 release |
+| **🐘 PHP** | ionCube Loader | ionCube PHP Encoder support |
+| **🌐 Routing** | Web Rules | Custom header & URL rewrite rules per app |
+| **📁 Structure** | New Webroot Standard | Document root at `applications/<app>/public_html/` |
+| **📁 Structure** | App Data Directory | Dedicated data storage at `applications/<app>/app_data/` |
+| **💾 Database** | MongoDB Support | Full MongoDB integration |
+| **💾 Database** | PostgreSQL Support | Full PostgreSQL integration |
+| **🚀 Stack** | Node.js Mode | Full Node.js application support with PM2 |
+| **📊 Monitoring** | New Relic APM | Application Performance Monitoring |
+| **📊 Monitoring** | Prometheus + Grafana | Self-hosted metrics & dashboards |
+| **📊 Monitoring** | Sentry | Error tracking & crash reporting |
+| **📊 Monitoring** | Health Checks | Automated service health monitoring |
 
-| Feature | Description | Status |
-| :--- | :--- | :---: |
-| **PHP 8.5** | Support for upcoming PHP 8.5 release | 🔜 Planned |
-| **ionCube Loader** | ionCube PHP Encoder support for encoded applications | 🔜 Planned |
-
-### 🎛️ Per-Application Controls
-
-| Feature | Description | Status |
-| :--- | :--- | :---: |
-| **Varnish Toggle** | Enable/disable Varnish caching per application | ✅ Done |
-| **SSH Shell Access** | Secure shell access to individual app containers | ✅ Done |
-| **Supervisord Jobs** | Per-app background process management (queues, workers) | ✅ Done |
-| **Cron Jobs** | Application-specific scheduled tasks | ✅ Done |
-| **Custom Webroot** | Change document root path (e.g., `public`, `web`, `public_html`) | ✅ Done |
-| **Permission Reset** | One-click file/folder ownership & permission reset | ✅ Done |
-
-### 🌐 Domain & Routing
-
-| Feature | Description | Status |
-| :--- | :--- | :---: |
-| **Multi-Domain Support** | Add multiple domains/aliases per application | ✅ Done |
-| **Domain Management** | Add, remove, change domains (with primary domain protection) | ✅ Done |
-| **Web Rules** | Custom header rules and URL rewrite rules per app | 🔜 Planned |
-
-### 📁 Application Structure Improvements
-
-| Feature | Description | Status |
-| :--- | :--- | :---: |
-| **App-Specific Logs** | Logs stored in `applications/<app>/logs/` | ✅ Done |
-| **New Webroot Standard** | Document root at `applications/<app>/public_html/` | 🔜 Planned |
-| **App Data Directory** | Dedicated data storage at `applications/<app>/app_data/` | 🔜 Planned |
-
-### 💾 Database Enhancements
-
-| Feature | Description | Status |
-| :--- | :--- | :---: |
-| **Per-App Database** | Auto-create MySQL database & user per application | ✅ Done |
-| **MongoDB Support** | Full MongoDB integration | 🔜 Planned |
-| **PostgreSQL Support** | Full PostgreSQL integration | 🔜 Planned |
-
-### 🚀 Stack Modes
-
-| Feature | Description | Status |
-| :--- | :--- | :---: |
-| **Node.js Mode** | Full Node.js application support with PM2 | 🔜 Planned |
-
-### 📊 Monitoring & Observability
-
-| Feature | Description | Status |
-| :--- | :--- | :---: |
-| **New Relic APM** | Application Performance Monitoring (optional, paid) | 🔜 Planned |
-| **Prometheus + Grafana** | Self-hosted metrics & beautiful dashboards | 🔜 Planned |
-| **Sentry** | Error tracking & crash reporting | 🔜 Planned |
-| **Health Checks** | Automated service health monitoring | 🔜 Planned |
-
----
-
-> 💡 **Want to contribute?** Pick a feature from the roadmap and submit a PR! Check our [Contributing](#-contributing) section.
+> 💡 **Want to contribute?** Pick a feature from the roadmap and submit a PR!
 
 ---
 

@@ -122,7 +122,7 @@ load_env_file() {
             # Strip surrounding quotes
             if [[ "$value" =~ ^\"(.*)\"$ ]]; then
                 value="${BASH_REMATCH[1]}"
-            elif [[ "$value" =~ ^'(.*)'$ ]]; then
+            elif [[ "$value" =~ ^\047(.*)\047$ ]]; then
                 value="${BASH_REMATCH[1]}"
             fi
 
@@ -643,7 +643,13 @@ set_app_config() {
     
     if command_exists jq; then
         local tmp_file=$(mktemp)
-        jq ".$key = $value" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+        if jq ".$key = $value" "$config_file" > "$tmp_file" 2>/dev/null; then
+            mv "$tmp_file" "$config_file"
+        else
+            rm -f "$tmp_file"
+            error_message "Failed to update config key: $key"
+            return 1
+        fi
     else
         error_message "jq is required for modifying app config. Install with: brew install jq"
         return 1
@@ -1701,7 +1707,11 @@ tbs() {
             command_exists jq && {
                 local cfg=$(get_app_config_path "$app_user")
                 local tmp=$(mktemp)
-                jq '.database={"name":"'"$db_name"'","user":"'"$db_user"'","password":"'"$db_pass"'","host":"dbhost","created":true}' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+                if jq '.database={"name":"'"$db_name"'","user":"'"$db_user"'","password":"'"$db_pass"'","host":"dbhost","created":true}' "$cfg" > "$tmp" 2>/dev/null; then
+                    mv "$tmp" "$cfg"
+                else
+                    rm -f "$tmp"
+                fi
             }
             
             echo ""
@@ -2116,7 +2126,7 @@ EOF
                 local i=1
                 for d in "${domains[@]}"; do
                     [[ -z "$d" || "$d" == "null" ]] && continue
-                    local cert="$ssl_dir/${d}.crt"
+                    local cert="$ssl_dir/${d}-cert.pem"
                     [[ -f "$cert" ]] && echo "    $i) $d ${GREEN}✓${NC}" || echo "    $i) $d ${YELLOW}✗${NC}"
                     ((i++))
                 done
@@ -2163,7 +2173,7 @@ EOF
                        echo ""
                        for d in "${domains[@]}"; do
                            [[ -z "$d" || "$d" == "null" ]] && continue
-                           local cert="$ssl_dir/${d}.crt"
+                           local cert="$ssl_dir/${d}-cert.pem"
                            if [[ -f "$cert" ]]; then
                                local expiry=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2)
                                echo "  $d: ${GREEN}Valid${NC} (expires: $expiry)"
@@ -2663,11 +2673,29 @@ POOL
                 # Get DB config or create if missing
                 local db_name=$(get_app_config "$u" "database.name")
                 if [[ -z "$db_name" || "$db_name" == "null" ]]; then
-                     _app_db_create "$u"
-                     db_name=$(get_app_config "$u" "database.name")
+                    # Create database for this app
+                    db_name="${u//-/_}"
+                    local db_user="$db_name"
+                    local db_pass=$(generate_strong_password 16)
+                    
+                    _db_create "$db_name" && _db_create_user "$db_user" "$db_pass" "$db_name"
+                    
+                    # Update app config
+                    command_exists jq && {
+                        local cfg=$(get_app_config_path "$u")
+                        local tmp=$(mktemp)
+                        if jq '.database={"name":"'"$db_name"'","user":"'"$db_user"'","password":"'"$db_pass"'","host":"dbhost","created":true}' "$cfg" > "$tmp" 2>/dev/null; then
+                            mv "$tmp" "$cfg"
+                        else
+                            rm -f "$tmp"
+                        fi
+                    }
+                    
+                    green_message "Database created: $db_name"
+                else
+                    db_user=$(get_app_config "$u" "database.user")
+                    db_pass=$(get_app_config "$u" "database.password")
                 fi
-                local db_user=$(get_app_config "$u" "database.user")
-                local db_pass=$(get_app_config "$u" "database.password")
                 local db_host=$(get_app_config "$u" "database.host")
                 [[ -z "$db_host" || "$db_host" == "null" || "$db_host" == "mysql" || "$db_host" == "database" ]] && db_host="dbhost"
 
