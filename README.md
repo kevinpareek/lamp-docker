@@ -384,9 +384,15 @@ Each app's configuration is stored as JSON in `sites/apps/<app_name>.json`:
     "enabled": true,
     "jobs": ["scheduler"]
   },
+  "ssh": {
+    "enabled": true,
+    "username": "myapp_ssh",
+    "password": "auto_generated",
+    "port": 2222
+  },
   "permissions": {
-    "owner": "www-data",
-    "group": "www-data"
+    "owner": "myapp_ssh",
+    "group": "myapp_ssh"
   }
 }
 ```
@@ -399,10 +405,44 @@ Each app's configuration is stored as JSON in `sites/apps/<app_name>.json`:
 | **Custom Webroot** | `webroot <path>` | Change document root (e.g., `public`) |
 | **Domain Management** | `domain add/remove/primary` | Manage multiple domains |
 | **Database per App** | `database` | Create dedicated MySQL user & database |
+| **SSH/SFTP Access** | `ssh enable/disable/reset` | Per-app SSH user with isolated access |
 | **Permissions Reset** | `permissions` | Reset ownership to www-data |
 | **Supervisor Jobs** | `supervisor add/remove/list` | Manage background workers |
 | **Cron Jobs** | `cron add/remove/list` | Manage scheduled tasks |
 | **App Logs** | `logs enable/disable/tail` | Per-app logging configuration |
+
+### Per-App SSH/SFTP Access
+
+Each application can have its own SSH/SFTP user for secure file access:
+
+```bash
+# Enable SSH for an app (generates random username/password)
+tbs appconfig myapp ssh enable
+
+# Output:
+#   Username: myapp_ssh
+#   Password: <random_16_char>
+#   Port:     2222
+
+# Connect via SFTP
+sftp -P 2222 myapp_ssh@localhost
+
+# Regenerate password
+tbs appconfig myapp ssh reset
+
+# Disable/Delete access
+tbs appconfig myapp ssh disable
+tbs appconfig myapp ssh delete
+```
+
+**Key Features:**
+- **Unique SSH user** per application
+- **Auto-generated** secure credentials
+- **Chroot jail** - users can only access their app directory
+- **File ownership** - app files owned by SSH user (not www-data)
+- **Toggle on/off** without deleting credentials
+
+> **Note:** Start SFTP service with: `docker compose --profile sftp up -d sftp`
 
 ---
 

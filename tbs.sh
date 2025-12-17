@@ -438,6 +438,12 @@ init_app_config() {
         "user": "",
         "created": false
     },
+    "ssh": {
+        "enabled": false,
+        "username": "",
+        "password": "",
+        "port": 2222
+    },
     "logs": {
         "enabled": false,
         "path": "logs"
@@ -2231,9 +2237,11 @@ EOF
                     if [[ -f "$config_file" ]]; then
                         local varnish=$(get_app_config "$app" "varnish")
                         local db_created=$(get_app_config "$app" "database.created")
+                        local ssh_enabled=$(get_app_config "$app" "ssh.enabled")
                         status="✅ Configured"
                         [[ "$varnish" == "false" ]] && status="$status | Varnish: OFF"
                         [[ "$db_created" == "true" ]] && status="$status | DB: ✓"
+                        [[ "$ssh_enabled" == "true" ]] && status="$status | SSH: ✓"
                     fi
                     
                     echo "  • $app - $status"
@@ -2258,6 +2266,10 @@ EOF
             echo "  database create         - Create dedicated database & user"
             echo "  database show           - Show database credentials"
             echo "  permissions reset       - Reset file/folder permissions"
+            echo "  ssh enable              - Create SSH/SFTP user for app"
+            echo "  ssh disable             - Disable SSH access"
+            echo "  ssh reset               - Regenerate SSH password"
+            echo "  ssh delete              - Remove SSH user completely"
             echo "  supervisor add <name>   - Add supervisor program"
             echo "  supervisor remove <name> - Remove supervisor program"
             echo "  supervisor list         - List supervisor programs"
@@ -2702,6 +2714,197 @@ EOF
                         fi
                         echo ""
                         echo "Usage: tbs appconfig $app_name logs enable|disable"
+                        ;;
+                esac
+                ;;
+            
+            # SSH/SFTP user management
+            ssh|sftp)
+                local ssh_action="${param1:-show}"
+                local ssh_user_file="$tbsPath/config/sftp/users/${app_name}.json"
+                
+                case "$ssh_action" in
+                    enable|create)
+                        # Generate random username and password
+                        local ssh_user="${app_name}_ssh"
+                        local ssh_pass=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
+                        
+                        # Calculate unique UID/GID (base 2000 + app index)
+                        local app_index=$(ls -1 "$APPLICATIONS_DIR" 2>/dev/null | grep -n "^${app_name}$" | cut -d: -f1)
+                        local ssh_uid=$((2000 + ${app_index:-1}))
+                        local ssh_gid=$ssh_uid
+                        
+                        # Create SSH user config file
+                        mkdir -p "$tbsPath/config/sftp/users"
+                        cat > "$ssh_user_file" <<EOF
+{
+    "username": "$ssh_user",
+    "password": "$ssh_pass",
+    "app_name": "$app_name",
+    "enabled": true,
+    "uid": $ssh_uid,
+    "gid": $ssh_gid,
+    "created_at": "$(date -Iseconds)"
+}
+EOF
+                        
+                        # Update app config
+                        if command_exists jq; then
+                            local tmp_file=$(mktemp)
+                            jq ".ssh = {\"enabled\": true, \"username\": \"$ssh_user\", \"password\": \"$ssh_pass\", \"port\": 2222, \"uid\": $ssh_uid, \"gid\": $ssh_gid}" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+                        fi
+                        
+                        # Update file ownership in app directory to SSH user
+                        if is_service_running "$WEBSERVER_SERVICE"; then
+                            info_message "Updating file ownership to SSH user..."
+                            docker compose exec "$WEBSERVER_SERVICE" bash -c "
+                                # Create group and user if they don't exist
+                                groupadd -g $ssh_gid $ssh_user 2>/dev/null || true
+                                useradd -u $ssh_uid -g $ssh_gid -M -d /var/www/html/${APPLICATIONS_DIR_NAME}/$app_name $ssh_user 2>/dev/null || true
+                                
+                                # Change ownership
+                                chown -R $ssh_uid:$ssh_gid /var/www/html/${APPLICATIONS_DIR_NAME}/$app_name
+                            " 2>/dev/null
+                            
+                            # Update permissions config
+                            set_app_config "$app_name" "permissions.owner" "\"$ssh_user\""
+                            set_app_config "$app_name" "permissions.group" "\"$ssh_user\""
+                        fi
+                        
+                        echo ""
+                        green_message "SSH/SFTP access ENABLED for $app_name"
+                        echo ""
+                        echo "  ╔════════════════════════════════════════════════╗"
+                        echo "  ║            SSH/SFTP Credentials                ║"
+                        echo "  ╠════════════════════════════════════════════════╣"
+                        echo "  ║  Host:     localhost                           ║"
+                        echo "  ║  Port:     ${HOST_MACHINE_SFTP_PORT:-2222}                              ║"
+                        echo "  ║  Username: $ssh_user                           "
+                        echo "  ║  Password: $ssh_pass                           "
+                        echo "  ╚════════════════════════════════════════════════╝"
+                        echo ""
+                        info_message "Connect using:"
+                        echo "  sftp -P ${HOST_MACHINE_SFTP_PORT:-2222} $ssh_user@localhost"
+                        echo ""
+                        yellow_message "Note: Start SFTP service with: docker compose --profile sftp up -d sftp"
+                        echo ""
+                        
+                        # Save credentials to a local file for reference
+                        local creds_file="$app_root/.sftp-credentials"
+                        cat > "$creds_file" <<EOF
+# SFTP Credentials for $app_name
+# Generated: $(date)
+# SECURITY: Delete this file after noting the credentials!
+
+Host: localhost
+Port: ${HOST_MACHINE_SFTP_PORT:-2222}
+Username: $ssh_user
+Password: $ssh_pass
+
+# Connection command:
+# sftp -P ${HOST_MACHINE_SFTP_PORT:-2222} $ssh_user@localhost
+EOF
+                        chmod 600 "$creds_file"
+                        info_message "Credentials saved to: $creds_file"
+                        ;;
+                    
+                    disable)
+                        if [[ -f "$ssh_user_file" ]]; then
+                            if command_exists jq; then
+                                local tmp_file=$(mktemp)
+                                jq '.enabled = false' "$ssh_user_file" > "$tmp_file" && mv "$tmp_file" "$ssh_user_file"
+                            fi
+                        fi
+                        
+                        # Update app config
+                        set_app_config "$app_name" "ssh.enabled" "false"
+                        
+                        yellow_message "SSH/SFTP access DISABLED for $app_name"
+                        info_message "User still exists but cannot login. Use 'ssh enable' to re-enable."
+                        ;;
+                    
+                    reset|regenerate)
+                        # Generate new password
+                        local ssh_user=$(get_app_config "$app_name" "ssh.username")
+                        local new_pass=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
+                        
+                        if [[ -z "$ssh_user" ]]; then
+                            error_message "SSH not configured for $app_name. Run 'tbs appconfig $app_name ssh enable' first."
+                            return 1
+                        fi
+                        
+                        # Update SSH user file
+                        if [[ -f "$ssh_user_file" ]] && command_exists jq; then
+                            local tmp_file=$(mktemp)
+                            jq ".password = \"$new_pass\" | .enabled = true" "$ssh_user_file" > "$tmp_file" && mv "$tmp_file" "$ssh_user_file"
+                        fi
+                        
+                        # Update app config
+                        set_app_config "$app_name" "ssh.password" "\"$new_pass\""
+                        set_app_config "$app_name" "ssh.enabled" "true"
+                        
+                        green_message "SSH password regenerated for $app_name"
+                        echo ""
+                        echo "  Username: $ssh_user"
+                        echo "  Password: $new_pass"
+                        echo ""
+                        info_message "Restart SFTP container to apply: docker compose --profile sftp restart sftp"
+                        ;;
+                    
+                    delete)
+                        read -p "Are you sure you want to delete SSH access for $app_name? (y/N): " confirm
+                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                            # Remove SSH user file
+                            rm -f "$ssh_user_file"
+                            
+                            # Reset ownership back to www-data
+                            if is_service_running "$WEBSERVER_SERVICE"; then
+                                docker compose exec "$WEBSERVER_SERVICE" chown -R www-data:www-data "/var/www/html/${APPLICATIONS_DIR_NAME}/$app_name" 2>/dev/null
+                            fi
+                            
+                            # Clear SSH config
+                            if command_exists jq; then
+                                local tmp_file=$(mktemp)
+                                jq '.ssh = {"enabled": false, "username": "", "password": "", "port": 2222}' "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+                            fi
+                            
+                            set_app_config "$app_name" "permissions.owner" '"www-data"'
+                            set_app_config "$app_name" "permissions.group" '"www-data"'
+                            
+                            # Remove credentials file
+                            rm -f "$app_root/.sftp-credentials"
+                            
+                            green_message "SSH access deleted for $app_name"
+                            info_message "Ownership reset to www-data:www-data"
+                        fi
+                        ;;
+                    
+                    show|*)
+                        echo ""
+                        local ssh_enabled=$(get_app_config "$app_name" "ssh.enabled")
+                        local ssh_user=$(get_app_config "$app_name" "ssh.username")
+                        
+                        if [[ "$ssh_enabled" == "true" && -n "$ssh_user" ]]; then
+                            blue_message "=== SSH/SFTP Access: $app_name ==="
+                            echo ""
+                            if command_exists jq; then
+                                jq '.ssh' "$config_file"
+                            fi
+                            echo ""
+                            info_message "SFTP Service: $(is_service_running 'sftp' && echo 'Running' || echo 'Not running')"
+                            echo ""
+                        else
+                            yellow_message "SSH/SFTP not configured for $app_name"
+                            echo ""
+                            echo "Enable with: tbs appconfig $app_name ssh enable"
+                        fi
+                        echo ""
+                        echo "Available commands:"
+                        echo "  tbs appconfig $app_name ssh enable    - Create SSH user"
+                        echo "  tbs appconfig $app_name ssh disable   - Disable SSH access"
+                        echo "  tbs appconfig $app_name ssh reset     - Regenerate password"
+                        echo "  tbs appconfig $app_name ssh delete    - Remove SSH user"
+                        echo ""
                         ;;
                 esac
                 ;;

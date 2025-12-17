@@ -280,6 +280,27 @@ services:
       retries: 3
     logging: *default-logging
 
+  # ============================================
+  # SFTP Server (Per-App SSH Access)
+  # ============================================
+  sftp:
+    build:
+      context: ./bin/sftp
+    container_name: "${COMPOSE_PROJECT_NAME}-sftp"
+    restart: unless-stopped
+    ports:
+      - "${HOST_MACHINE_SFTP_PORT:-2222}:22"
+    volumes:
+      - "${DOCUMENT_ROOT}:/var/www/html:rw"
+      - "./config/sftp/users:/etc/sftp.d/users:ro"
+    environment:
+      TZ: "Asia/Kolkata"
+    networks:
+      - backend
+    profiles:
+      - sftp
+    logging: *default-logging
+
 # ============================================
 # Networks
 # ============================================
