@@ -2784,15 +2784,16 @@ EOF
                         echo "  ╚════════════════════════════════════════════════╝"
                         echo ""
                         info_message "Connect using:"
-                        echo "  sftp -P ${HOST_MACHINE_SFTP_PORT:-2222} $ssh_user@localhost"
+                        echo "  SSH:  ssh -p ${HOST_MACHINE_SFTP_PORT:-2222} $ssh_user@localhost"
+                        echo "  SFTP: sftp -P ${HOST_MACHINE_SFTP_PORT:-2222} $ssh_user@localhost"
                         echo ""
-                        yellow_message "Note: Start SFTP service with: docker compose --profile sftp up -d sftp"
+                        yellow_message "Note: Start SSH service with: docker compose --profile sftp up -d sftp"
                         echo ""
                         
                         # Save credentials to a local file for reference
-                        local creds_file="$app_root/.sftp-credentials"
+                        local creds_file="$app_root/.ssh-credentials"
                         cat > "$creds_file" <<EOF
-# SFTP Credentials for $app_name
+# SSH/SFTP Credentials for $app_name
 # Generated: $(date)
 # SECURITY: Delete this file after noting the credentials!
 
@@ -2801,8 +2802,11 @@ Port: ${HOST_MACHINE_SFTP_PORT:-2222}
 Username: $ssh_user
 Password: $ssh_pass
 
-# Connection command:
-# sftp -P ${HOST_MACHINE_SFTP_PORT:-2222} $ssh_user@localhost
+# SSH Connection:
+ssh -p ${HOST_MACHINE_SFTP_PORT:-2222} $ssh_user@localhost
+
+# SFTP Connection:
+sftp -P ${HOST_MACHINE_SFTP_PORT:-2222} $ssh_user@localhost
 EOF
                         chmod 600 "$creds_file"
                         info_message "Credentials saved to: $creds_file"
@@ -2872,6 +2876,7 @@ EOF
                             set_app_config "$app_name" "permissions.group" '"www-data"'
                             
                             # Remove credentials file
+                            rm -f "$app_root/.ssh-credentials"
                             rm -f "$app_root/.sftp-credentials"
                             
                             green_message "SSH access deleted for $app_name"

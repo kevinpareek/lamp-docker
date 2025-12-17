@@ -30,24 +30,14 @@ create_user() {
             addgroup -g "$gid" "$username" 2>/dev/null || true
         fi
         
-        # Create user with specific home directory
-        adduser -D -u "$uid" -G "$username" -h "/home/$username" -s /bin/bash "$username" 2>/dev/null || true
+        # Create user with home directory pointing to app
+        local app_path="/var/www/html/applications/$app_name"
+        adduser -D -u "$uid" -G "$username" -h "$app_path" -s /bin/bash "$username" 2>/dev/null || true
         echo "$username:$password" | chpasswd
+        
+        # Add user to www-data group for web file access
+        adduser "$username" www-data 2>/dev/null || true
     fi
-    
-    # Setup chroot directory structure
-    local chroot_dir="/home/$username"
-    mkdir -p "$chroot_dir"
-    chown root:root "$chroot_dir"
-    chmod 755 "$chroot_dir"
-    
-    # Create writable app directory (symlinked to actual app)
-    local app_dir="$chroot_dir/app"
-    mkdir -p "$app_dir"
-    
-    # Bind mount will be done via docker-compose volumes
-    # Set ownership
-    chown "$username:$username" "$app_dir" 2>/dev/null || true
 }
 
 # Function to disable user
@@ -103,9 +93,9 @@ setup_sshd() {
     # Generate host keys if not exist
     ssh-keygen -A
     
-    # Configure SSHD for chroot SFTP
+    # Configure SSHD for both SSH and SFTP access
     cat > /etc/ssh/sshd_config <<'EOF'
-# SSH Server Configuration for per-app SFTP access
+# SSH Server Configuration for per-app SSH/SFTP access
 Port 22
 Protocol 2
 
@@ -131,15 +121,18 @@ MaxAuthTries 3
 MaxSessions 5
 LoginGraceTime 30
 
-# SFTP Configuration with Chroot
+# Allow TCP forwarding for development
+AllowTcpForwarding yes
+X11Forwarding no
+
+# SFTP Subsystem
 Subsystem sftp internal-sftp
 
-# Match all non-root users for chroot
-Match User *,!root
-    ChrootDirectory /home/%u
-    ForceCommand internal-sftp
-    AllowTcpForwarding no
-    X11Forwarding no
+# Match users for chroot (optional - uncomment for restricted access)
+# Match User *,!root
+#     ChrootDirectory /home/%u
+#     ForceCommand internal-sftp
+#     AllowTcpForwarding no
 EOF
 }
 
