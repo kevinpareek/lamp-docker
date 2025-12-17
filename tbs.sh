@@ -88,6 +88,12 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Check if a container/service is running
+is_service_running() {
+    local service="$1"
+    docker compose ps "$service" --format "{{.State}}" 2>/dev/null | grep -q "running"
+}
+
 # Load KEY=VALUE pairs from an env file.
 # - Ignores blank lines and comments.
 # - Supports optional surrounding single/double quotes.
@@ -1103,21 +1109,31 @@ interactive_menu() {
         echo "   8) Remove App"
         echo "   9) Open App Code"
         echo "   10) App PHP Config"
+        echo "   11) Create Project (Laravel/WordPress/Symfony)"
+
+        echo -e "\n${BLUE}💾 Database${NC}"
+        echo "   12) List Databases"
+        echo "   13) Create Database"
+        echo "   14) Import Database"
+        echo "   15) Export Database"
 
         echo -e "\n${BLUE}⚙️ Configuration & Tools${NC}"
-        echo "   11) Configure Environment"
-        echo "   12) Backup Data"
-        echo "   13) Restore Data"
-        echo "   14) SSL Certificates"
-        echo "   15) Open Mailpit"
-        echo "   16) Open phpMyAdmin"
-        echo "   17) Redis CLI"
-        echo "   18) Shell Access (Bash)"
+        echo "   16) Configure Environment"
+        echo "   17) System Info"
+        echo "   18) Backup Data"
+        echo "   19) Restore Data"
+        echo "   20) SSL Certificates"
+        
+        echo -e "\n${BLUE}🔧 Shell & Tools${NC}"
+        echo "   21) Container Shell"
+        echo "   22) Open Mailpit"
+        echo "   23) Open phpMyAdmin"
+        echo "   24) Redis CLI"
 
         echo -e "\n   ${RED}0) Exit${NC}"
         
         echo ""
-        read -p "Enter your choice [0-18]: " choice
+        read -p "Enter your choice [0-24]: " choice
 
         local wait_needed=true
         case $choice in
@@ -1155,18 +1171,45 @@ interactive_menu() {
                     tbs phpconfig "$app_name" "$action"
                 fi
                 ;;
-            11) tbs config ;;
-            12) tbs backup ;;
-            13) tbs restore ;;
-            14) 
+            11)
+                echo ""
+                read -p "Project type [laravel/wordpress/symfony/blank]: " project_type
+                read -p "Enter application name: " app_name
+                tbs create "$project_type" "$app_name"
+                ;;
+            12) tbs db list ;;
+            13)
+                echo ""
+                read -p "Enter database name: " db_name
+                tbs db create "$db_name"
+                ;;
+            14)
+                echo ""
+                read -p "Enter database name: " db_name
+                read -p "Enter SQL file path: " sql_file
+                tbs db import "$db_name" "$sql_file"
+                ;;
+            15)
+                echo ""
+                read -p "Enter database name: " db_name
+                tbs db export "$db_name"
+                ;;
+            16) tbs config ;;
+            17) tbs info ;;
+            18) tbs backup ;;
+            19) tbs restore ;;
+            20) 
                 echo ""
                 read -p "Enter domain name: " domain
                 tbs ssl "$domain"
                 ;;
-            15) tbs mail ;;
-            16) tbs pma ;;
-            17) tbs redis-cli ;;
-            18) tbs cmd ;;
+            21)
+                echo ""
+                tbs shell
+                ;;
+            22) tbs mail ;;
+            23) tbs pma ;;
+            24) tbs redis-cli ;;
             0) echo "Bye!"; exit 0 ;;
             *) red_message "Invalid choice. Please try again."; sleep 1; wait_needed=false ;;
         esac
@@ -1771,6 +1814,351 @@ EOF
         docker compose exec redis redis-cli
         ;;
 
+    # Shell access to containers
+    shell)
+        local service="${2:-}"
+        
+        if [[ -z "$service" ]]; then
+            echo ""
+            info_message "Available services:"
+            echo "  php        - PHP/Webserver container (default shell)"
+            echo "  mysql      - MySQL/MariaDB container"
+            echo "  redis      - Redis container"
+            echo "  nginx      - Nginx container"
+            echo "  varnish    - Varnish container"
+            echo "  memcached  - Memcached container"
+            echo "  mailpit    - Mailpit container"
+            echo ""
+            read -p "Enter service name: " service
+        fi
+        
+        # Map service aliases to actual container names
+        local container_name="$service"
+        case "$service" in
+            php|webserver) container_name="$WEBSERVER_SERVICE" ;;
+            mysql|mariadb|db|database) container_name="mysql" ;;
+            mail) container_name="mailpit" ;;
+        esac
+        
+        # Check if container is running
+        if ! is_service_running "$container_name"; then
+            error_message "Container '$container_name' is not running. Start the stack first: tbs start"
+            return 1
+        fi
+        
+        case "$service" in
+            php|webserver)
+                docker compose exec "$WEBSERVER_SERVICE" bash
+                ;;
+            mysql|mariadb|db|database)
+                docker compose exec mysql bash
+                ;;
+            redis)
+                docker compose exec redis sh
+                ;;
+            nginx)
+                docker compose exec nginx sh
+                ;;
+            varnish)
+                docker compose exec varnish sh
+                ;;
+            memcached)
+                docker compose exec memcached sh
+                ;;
+            mailpit|mail)
+                docker compose exec mailpit sh
+                ;;
+            *)
+                error_message "Unknown service: $service"
+                info_message "Available: php, mysql, redis, nginx, varnish, memcached, mailpit"
+                return 1
+                ;;
+        esac
+        ;;
+
+    # Database management commands
+    db)
+        local db_action="${2:-}"
+        local db_name="${3:-}"
+        local db_file="${4:-}"
+        
+        # Get MySQL root credentials from .env
+        local mysql_root_pass="${MYSQL_ROOT_PASSWORD:-root}"
+        
+        # Check if MySQL container is running
+        if ! is_service_running "mysql"; then
+            error_message "MySQL container is not running. Start the stack first: tbs start"
+            return 1
+        fi
+        
+        case "$db_action" in
+            list|ls)
+                info_message "Databases:"
+                docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "SHOW DATABASES;" 2>/dev/null | grep -v -E "^(Database|information_schema|performance_schema|mysql|sys)$"
+                ;;
+            create)
+                if [[ -z "$db_name" ]]; then
+                    read -p "Enter database name: " db_name
+                fi
+                if [[ -z "$db_name" ]]; then
+                    error_message "Database name required"
+                    return 1
+                fi
+                docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
+                if [[ $? -eq 0 ]]; then
+                    green_message "Database '$db_name' created successfully!"
+                else
+                    error_message "Failed to create database"
+                fi
+                ;;
+            drop)
+                if [[ -z "$db_name" ]]; then
+                    read -p "Enter database name to drop: " db_name
+                fi
+                if [[ -z "$db_name" ]]; then
+                    error_message "Database name required"
+                    return 1
+                fi
+                read -p "Are you sure you want to drop database '$db_name'? (y/N): " confirm
+                if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                    docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "DROP DATABASE IF EXISTS \`$db_name\`;" 2>/dev/null
+                    green_message "Database '$db_name' dropped!"
+                else
+                    info_message "Cancelled."
+                fi
+                ;;
+            import)
+                if [[ -z "$db_name" ]]; then
+                    read -p "Enter database name: " db_name
+                fi
+                if [[ -z "$db_file" ]]; then
+                    db_file="${4:-}"
+                    if [[ -z "$db_file" ]]; then
+                        read -p "Enter SQL file path: " db_file
+                    fi
+                fi
+                if [[ ! -f "$db_file" ]]; then
+                    error_message "File not found: $db_file"
+                    return 1
+                fi
+                info_message "Importing $db_file into $db_name..."
+                if [[ "$db_file" == *.gz ]]; then
+                    gunzip -c "$db_file" | docker compose exec -T mysql mysql -uroot -p"$mysql_root_pass" "$db_name" 2>/dev/null
+                else
+                    docker compose exec -T mysql mysql -uroot -p"$mysql_root_pass" "$db_name" < "$db_file" 2>/dev/null
+                fi
+                if [[ $? -eq 0 ]]; then
+                    green_message "Import completed!"
+                else
+                    error_message "Import failed"
+                fi
+                ;;
+            export)
+                if [[ -z "$db_name" ]]; then
+                    read -p "Enter database name: " db_name
+                fi
+                if [[ -z "$db_name" ]]; then
+                    error_message "Database name required"
+                    return 1
+                fi
+                local export_file="${BACKUP_DIR:-$tbsPath/data/backup}/${db_name}_$(date +%Y%m%d_%H%M%S).sql"
+                info_message "Exporting $db_name to $export_file..."
+                docker compose exec mysql mysqldump -uroot -p"$mysql_root_pass" "$db_name" 2>/dev/null > "$export_file"
+                if [[ $? -eq 0 && -s "$export_file" ]]; then
+                    green_message "Exported to: $export_file"
+                else
+                    error_message "Export failed"
+                    rm -f "$export_file"
+                fi
+                ;;
+            user)
+                local username="${3:-}"
+                local user_pass="${4:-}"
+                local user_db="${5:-}"
+                
+                if [[ -z "$username" ]]; then
+                    read -p "Enter username: " username
+                fi
+                if [[ -z "$username" ]]; then
+                    error_message "Username required"
+                    return 1
+                fi
+                if [[ -z "$user_pass" ]]; then
+                    user_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16)
+                fi
+                if [[ -z "$user_db" ]]; then
+                    read -p "Grant access to database (leave empty for same as username): " user_db
+                    user_db="${user_db:-$username}"
+                fi
+                docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "CREATE USER IF NOT EXISTS '$username'@'%' IDENTIFIED BY '$user_pass'; GRANT ALL PRIVILEGES ON \`$user_db\`.* TO '$username'@'%'; FLUSH PRIVILEGES;" 2>/dev/null
+                if [[ $? -eq 0 ]]; then
+                    green_message "User created:"
+                    echo "  Username: $username"
+                    echo "  Password: $user_pass"
+                    echo "  Database: $user_db"
+                else
+                    error_message "Failed to create user"
+                fi
+                ;;
+            *)
+                echo ""
+                info_message "Database Management Commands:"
+                echo "  tbs db list              - List all databases"
+                echo "  tbs db create <name>     - Create a new database"
+                echo "  tbs db drop <name>       - Drop a database"
+                echo "  tbs db import <name> <file> - Import SQL file"
+                echo "  tbs db export <name>     - Export database to SQL"
+                echo "  tbs db user <name> [pass] [db] - Create user with access"
+                echo ""
+                ;;
+        esac
+        ;;
+
+    # Quick project creators
+    create)
+        local project_type="${2:-}"
+        local app_name="${3:-}"
+        
+        # Check if stack is running
+        if ! is_service_running "$WEBSERVER_SERVICE"; then
+            yellow_message "Stack is not running. Starting..."
+            tbs_start
+        fi
+        
+        if [[ -z "$project_type" ]]; then
+            echo ""
+            info_message "Available project types:"
+            echo "  laravel     - Create a new Laravel project"
+            echo "  wordpress   - Create a new WordPress installation"
+            echo "  symfony     - Create a new Symfony project"
+            echo "  blank       - Create a blank PHP project"
+            echo ""
+            read -p "Select project type: " project_type
+        fi
+        
+        if [[ -z "$app_name" ]]; then
+            read -p "Enter application name: " app_name
+        fi
+        
+        if [[ -z "$app_name" ]]; then
+            error_message "Application name required"
+            return 1
+        fi
+        
+        case "$project_type" in
+            laravel)
+                info_message "Creating Laravel project: $app_name"
+                # First create the app
+                tbs addapp "$app_name"
+                # Then install Laravel
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications && rm -rf $app_name && composer create-project laravel/laravel $app_name"
+                green_message "Laravel project created!"
+                info_message "Access at: https://${app_name}.localhost"
+                ;;
+            wordpress)
+                info_message "Creating WordPress project: $app_name"
+                # First create the app
+                tbs addapp "$app_name"
+                # Download WordPress using WP-CLI
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$app_name && wp core download --allow-root"
+                # Create database
+                tbs db create "$app_name"
+                # Create wp-config.php
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$app_name && wp config create --dbname=$app_name --dbuser=docker --dbpass=docker --dbhost=mysql --allow-root"
+                green_message "WordPress installed!"
+                info_message "Access at: https://${app_name}.localhost"
+                info_message "Database: $app_name"
+                info_message "Run the WordPress installer to complete setup."
+                ;;
+            symfony)
+                info_message "Creating Symfony project: $app_name"
+                # First create the app
+                tbs addapp "$app_name"
+                # Install Symfony
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications && rm -rf $app_name && composer create-project symfony/skeleton $app_name"
+                green_message "Symfony project created!"
+                info_message "Access at: https://${app_name}.localhost"
+                ;;
+            blank|empty)
+                info_message "Creating blank project: $app_name"
+                tbs addapp "$app_name"
+                green_message "Blank project created!"
+                info_message "Access at: https://${app_name}.localhost"
+                ;;
+            *)
+                error_message "Unknown project type: $project_type"
+                info_message "Available: laravel, wordpress, symfony, blank"
+                return 1
+                ;;
+        esac
+        ;;
+
+    # System info command
+    info)
+        local info_type="${2:-all}"
+        
+        case "$info_type" in
+            php)
+                echo ""
+                blue_message "=== PHP Information ==="
+                if is_service_running "$WEBSERVER_SERVICE"; then
+                    docker compose exec "$WEBSERVER_SERVICE" php -v 2>/dev/null | head -1
+                    echo ""
+                    info_message "Loaded Extensions:"
+                    docker compose exec "$WEBSERVER_SERVICE" php -m 2>/dev/null | grep -v "^\[" | sort | tr '\n' ', ' | sed 's/,$/\n/'
+                else
+                    yellow_message "PHP container is not running"
+                fi
+                echo ""
+                ;;
+            mysql|db)
+                echo ""
+                blue_message "=== MySQL/MariaDB Information ==="
+                if is_service_running "mysql"; then
+                    docker compose exec mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -e "SELECT VERSION();" 2>/dev/null | tail -1
+                    echo ""
+                    info_message "Databases:"
+                    docker compose exec mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -e "SHOW DATABASES;" 2>/dev/null | grep -v -E "^(Database|information_schema|performance_schema|mysql|sys)$"
+                else
+                    yellow_message "MySQL container is not running"
+                fi
+                echo ""
+                ;;
+            redis)
+                echo ""
+                blue_message "=== Redis Information ==="
+                if is_service_running "redis"; then
+                    docker compose exec redis redis-cli INFO server 2>/dev/null | grep -E "^(redis_version|uptime_in_seconds|connected_clients)"
+                else
+                    yellow_message "Redis container is not running"
+                fi
+                echo ""
+                ;;
+            all|*)
+                echo ""
+                print_header
+                
+                blue_message "=== Stack Configuration ==="
+                echo "  Stack Mode:    ${STACK_MODE:-hybrid}"
+                echo "  Environment:   ${APP_ENV:-development}"
+                echo "  Installation:  ${INSTALLATION_TYPE:-local}"
+                echo "  PHP Version:   ${PHPVERSION:-php8.2}"
+                echo "  Database:      ${DATABASE:-mariadb10.11}"
+                echo ""
+                
+                blue_message "=== Running Services ==="
+                docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null
+                echo ""
+                
+                blue_message "=== URLs ==="
+                echo "  Web:        http://localhost"
+                echo "  phpMyAdmin: http://localhost:${HOST_MACHINE_PMA_PORT:-8080}"
+                echo "  Mailpit:    http://localhost:8025"
+                echo ""
+                ;;
+        esac
+        ;;
+
     # PHP Config - Per Application
     phpconfig)
         local app_name=$2
@@ -2045,31 +2433,57 @@ POOLCONF
             print_header
             echo "Usage: tbs [command] [args]"
             echo ""
-            echo "Commands:"
+            echo "Stack Commands:"
             echo "  start       Start the Turbo Stack"
             echo "  stop        Stop the Turbo Stack"
             echo "  restart     Restart the Turbo Stack"
             echo "  build       Rebuild and start the Turbo Stack"
-            echo "  cmd         Open a bash shell in the webserver container"
+            echo "  status      Show stack status"
+            echo "  config      Configure the environment"
+            echo "  info        Show system info (usage: tbs info [php|mysql|redis|all])"
+            echo ""
+            echo "Application Commands:"
             echo "  addapp      Add a new application (usage: tbs addapp <name> [domain])"
             echo "  removeapp   Remove an application (usage: tbs removeapp <name> [domain])"
+            echo "  create      Quick project setup:"
+            echo "              tbs create laravel <name>    - Create Laravel project"
+            echo "              tbs create wordpress <name>  - Create WordPress site"
+            echo "              tbs create symfony <name>    - Create Symfony project"
+            echo "              tbs create blank <name>      - Create blank project"
             echo "  code        Open VS Code for an app (usage: tbs code [name])"
-            echo "  config      Configure the environment"
-            echo "  backup      Backup databases and applications"
-            echo "  restore     Restore from a backup"
-            echo "  ssl         Generate SSL certificates (usage: tbs ssl <domain>)"
-            echo "  ssl-localhost Generate default localhost SSL certificates"
+            echo ""
+            echo "PHP Configuration:"
             echo "  phpconfig   Manage per-app PHP config:"
             echo "              tbs phpconfig                    - List all apps config status"
             echo "              tbs phpconfig <app> create       - Create .user.ini"
             echo "              tbs phpconfig <app> edit         - Edit .user.ini"
             echo "              tbs phpconfig <app> create-pool  - Create FPM pool (Thunder mode)"
             echo "              tbs phpconfig <app> edit-pool    - Edit FPM pool config"
-            echo "  logs        Show logs (usage: tbs logs [service])"
-            echo "  status      Show stack status"
-            echo "  mail        Open Mailpit"
-            echo "  pma         Open phpMyAdmin"
+            echo ""
+            echo "Database Commands:"
+            echo "  db          Database management:"
+            echo "              tbs db list              - List all databases"
+            echo "              tbs db create <name>     - Create a database"
+            echo "              tbs db drop <name>       - Drop a database"
+            echo "              tbs db import <name> <file> - Import SQL file"
+            echo "              tbs db export <name>     - Export database to SQL"
+            echo "              tbs db user <name> [pass] [db] - Create user with access"
+            echo ""
+            echo "Shell & Tools:"
+            echo "  shell       Access container shell (usage: tbs shell [php|mysql|redis|nginx])"
+            echo "  cmd         Open bash shell in webserver container"
             echo "  redis-cli   Open Redis CLI"
+            echo "  pma         Open phpMyAdmin"
+            echo "  mail        Open Mailpit"
+            echo ""
+            echo "Backup & SSL:"
+            echo "  backup      Backup databases and applications"
+            echo "  restore     Restore from a backup"
+            echo "  ssl         Generate SSL certificates (usage: tbs ssl <domain>)"
+            echo "  ssl-localhost Generate default localhost SSL certificates"
+            echo ""
+            echo "Logs:"
+            echo "  logs        Show logs (usage: tbs logs [service])"
             echo ""
             ;;
         *)

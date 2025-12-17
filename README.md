@@ -4,7 +4,7 @@
 
 Stop wasting time configuring servers. This stack gives you everything you need—**Apache, Nginx, MySQL/MariaDB, Redis, Varnish, Memcached, Mailpit, and more**—all in one powerful Docker setup.
 
-> **🔮 Future Roadmap:** We are actively working on adding support for **Node.js**, **MongoDB**, and **PostgreSQL**. Stay tuned!
+> **🔮 Future Roadmap:** Check out the [Coming Soon](#-coming-soon) section to see exciting features we're working on!
 
 ---
 
@@ -128,8 +128,44 @@ Manage your entire stack with simple commands.
 | `tbs code <name>` | Open a project folder in VS Code. `tbs code` (without name) lets you pick an app. |
 | `tbs ssl <domain>` | Force SSL generation for an existing domain (Certbot for live, mkcert for local). |
 | `tbs ssl-localhost` | Generate trusted SSL certs for `localhost` and reload Nginx/Apache. |
+| `tbs phpconfig <app>` | Configure per-application PHP settings (memory, upload limits, timeouts, etc.). |
 | `tbs backup` | Backup all user databases and `www/applications` to `data/backup`. |
 | `tbs restore` | Restore databases and app files from a backup archive. |
+
+### Project Creators
+| Command | Description |
+| :--- | :--- |
+| `tbs create laravel <name>` | Create a new Laravel project with Composer |
+| `tbs create wordpress <name>` | Create WordPress site with auto database setup |
+| `tbs create symfony <name>` | Create a new Symfony project |
+| `tbs create blank <name>` | Create a blank PHP project |
+
+### Database Management
+| Command | Description |
+| :--- | :--- |
+| `tbs db list` | List all databases |
+| `tbs db create <name>` | Create a new database |
+| `tbs db drop <name>` | Drop a database (with confirmation) |
+| `tbs db import <name> <file>` | Import SQL file (supports .sql and .sql.gz) |
+| `tbs db export <name>` | Export database to SQL file |
+| `tbs db user <name> [pass] [db]` | Create MySQL user with database access |
+
+### Shell Access
+| Command | Description |
+| :--- | :--- |
+| `tbs shell` | Interactive container shell selection |
+| `tbs shell php` | Access PHP/Webserver container |
+| `tbs shell mysql` | Access MySQL/MariaDB container |
+| `tbs shell redis` | Access Redis container |
+| `tbs shell nginx` | Access Nginx container |
+
+### System Information
+| Command | Description |
+| :--- | :--- |
+| `tbs info` | Show complete stack status and configuration |
+| `tbs info php` | Show PHP version and loaded extensions |
+| `tbs info mysql` | Show MySQL version and databases |
+| `tbs info redis` | Show Redis server information |
 
 ### Tool Shortcuts
 | Command | Description | URL |
@@ -232,7 +268,79 @@ You can switch modes in `.env` or via `tbs config`.
 
 ---
 
-## 📂 Directory Structure
+## � Per-Application PHP Configuration
+
+Turbo Stack allows you to customize PHP settings for individual applications without affecting other apps.
+
+### Using `tbs phpconfig`
+
+```bash
+# Configure PHP settings for a specific app
+tbs phpconfig myapp
+
+# Interactive menu to select an app
+tbs phpconfig
+```
+
+### Available Settings
+
+| Setting | Description | Default |
+| :--- | :--- | :--- |
+| `memory_limit` | Maximum memory per script | `256M` |
+| `upload_max_filesize` | Maximum upload file size | `64M` |
+| `post_max_size` | Maximum POST data size | `64M` |
+| `max_execution_time` | Script timeout (seconds) | `300` |
+| `max_input_time` | Input parsing timeout | `300` |
+| `max_input_vars` | Maximum input variables | `5000` |
+
+### How It Works
+
+- **Hybrid Mode (Apache)**: Creates a `user.ini` file in your app's root directory
+- **Thunder Mode (PHP-FPM)**: Creates a dedicated FPM pool config in `sites/php/pools/`
+
+### Config File Locations
+
+| Mode | Config Location | Auto-reload |
+| :--- | :--- | :--- |
+| Hybrid | `www/applications/<app>/user.ini` | Yes (every 5 min) |
+| Thunder | `sites/php/pools/<app>.conf` | Requires `tbs restart` |
+
+> **Note:** Per-app configs in `sites/php/pools/` are gitignored by default, keeping your repository clean.
+
+---
+
+## 🔒 Security Features
+
+Turbo Stack includes built-in security rules to protect your applications from common attack vectors.
+
+### Blocked Files & Extensions
+
+The following files and patterns are automatically blocked from public access:
+
+| Category | Blocked Patterns |
+| :--- | :--- |
+| **Version Control** | `.git`, `.svn`, `.hg` |
+| **Environment Files** | `.env`, `.env.*` |
+| **Database Files** | `.sql`, `.sql.gz`, `.sqlite`, `.db` |
+| **Backup Files** | `.bak`, `.backup`, `.old`, `.orig` |
+| **Config Files** | `.yml`, `.yaml`, `.xml`, `.json`, `.ini`, `.conf` |
+| **Sensitive Files** | `.htpasswd`, `.htaccess`, `.pem`, `.key`, `.crt`, `.log` |
+| **PHP Internals** | `composer.json`, `composer.lock`, `phpunit.xml`, `artisan` |
+
+### Production Hardening
+
+In production mode (`APP_ENV=production`), additional security measures are applied:
+
+- **`open_basedir`**: Restricts PHP file access to web root only
+- **`disable_functions`**: Dangerous functions like `exec`, `shell_exec`, `system` are disabled
+- **Session Security**: `httponly`, `secure`, and `samesite` flags enabled
+- **Error Display**: Errors logged to file, not displayed to users
+
+> **Tip:** Always review `config/php/php.production.ini` before deploying to production.
+
+---
+
+## �📂 Directory Structure
 
 ```text
 ├── bin/                 # Docker build context for PHP, Nginx, MySQL/MariaDB images
@@ -241,6 +349,7 @@ You can switch modes in `.env` or via `tbs config`.
 │   ├── mariadb/         # Custom MySQL/MariaDB configs (e.g. my.cnf)
 │   ├── nginx/           # Nginx templates, partials, and mode configs
 │   ├── php/             # php.ini variants, FPM pool, supervisord configs
+│   │   └── templates/   # Per-app config templates (user.ini, FPM pool)
 │   ├── varnish/         # VCL configurations for Hybrid / Thunder modes
 │   └── vhosts/          # Base Apache vhost templates used by tbs.sh
 ├── data/                # Persistent data volumes (DB, Redis, backups)
@@ -248,6 +357,7 @@ You can switch modes in `.env` or via `tbs config`.
 ├── sites/               # Generated configs (managed by tbs.sh – do NOT edit manually)
 │   ├── apache/          # Active Apache vhosts for your apps
 │   ├── nginx/           # Active Nginx configs per app / mode
+│   ├── php/pools/       # Per-app PHP-FPM pool configs (gitignored)
 │   └── ssl/             # Generated SSL certs (mkcert / Let's Encrypt)
 ├── www/                 # Web root inside containers
 │   ├── applications/    # Your project folders (created via `tbs addapp`)
@@ -306,6 +416,73 @@ Add this to `.vscode/launch.json`:
 4.  Ensure `STACK_MODE` is set correctly for your needs.
 
 For more details, see `SECURITY.md`. For release notes, see `CHANGELOG.md`.
+
+---
+
+## 🔮 Coming Soon
+
+We're constantly improving Turbo Stack! Here's what's on our roadmap:
+
+### 🐘 PHP Enhancements
+
+| Feature | Description | Priority |
+| :--- | :--- | :---: |
+| **PHP 8.5** | Support for upcoming PHP 8.5 release | 🔴 High |
+| **ionCube Loader** | ionCube PHP Encoder support for encoded applications | 🟡 Medium |
+
+### 🎛️ Per-Application Controls
+
+| Feature | Description | Priority |
+| :--- | :--- | :---: |
+| **Varnish Toggle** | Enable/disable Varnish caching per application | 🔴 High |
+| **SSH Shell Access** | Secure shell access to individual app containers | 🔴 High |
+| **Supervisord Jobs** | Per-app background process management (queues, workers) | 🔴 High |
+| **Cron Jobs** | Application-specific scheduled tasks | 🔴 High |
+| **Custom Webroot** | Change document root path (e.g., `public`, `web`, `public_html`) | 🟡 Medium |
+| **Permission Reset** | One-click file/folder ownership & permission reset | 🟡 Medium |
+
+### 🌐 Domain & Routing
+
+| Feature | Description | Priority |
+| :--- | :--- | :---: |
+| **Multi-Domain Support** | Add multiple domains/aliases per application | 🔴 High |
+| **Domain Management** | Add, remove, change domains (with primary domain protection) | 🔴 High |
+| **Web Rules** | Custom header rules and URL rewrite rules per app | 🟡 Medium |
+
+### 📁 Application Structure Improvements
+
+| Feature | Description | Priority |
+| :--- | :--- | :---: |
+| **App-Specific Logs** | Logs stored in `applications/<app>/logs/` | 🔴 High |
+| **New Webroot Standard** | Document root at `applications/<app>/public_html/` | 🔴 High |
+| **App Data Directory** | Dedicated data storage at `applications/<app>/app_data/` | 🟡 Medium |
+
+### 💾 Database Enhancements
+
+| Feature | Description | Priority |
+| :--- | :--- | :---: |
+| **Per-App Database** | Auto-create MySQL database & user per application | 🔴 High |
+| **MongoDB Support** | Full MongoDB integration | 🟡 Medium |
+| **PostgreSQL Support** | Full PostgreSQL integration | 🟡 Medium |
+
+### 🚀 Stack Modes
+
+| Feature | Description | Priority |
+| :--- | :--- | :---: |
+| **Node.js Mode** | Full Node.js application support with PM2 | 🟡 Medium |
+
+### 📊 Monitoring & Observability
+
+| Feature | Description | Priority |
+| :--- | :--- | :---: |
+| **New Relic APM** | Application Performance Monitoring (optional, paid) | 🟢 Low |
+| **Prometheus + Grafana** | Self-hosted metrics & beautiful dashboards | 🟡 Medium |
+| **Sentry** | Error tracking & crash reporting | 🟡 Medium |
+| **Health Checks** | Automated service health monitoring | 🟡 Medium |
+
+---
+
+> 💡 **Want to contribute?** Pick a feature from the roadmap and submit a PR! Check our [Contributing](#-contributing) section.
 
 ---
 

@@ -109,6 +109,12 @@ RUN set -eux; \
 COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
 
 # ============================================
+# Install WP-CLI
+# ============================================
+RUN curl -fsSL https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o /usr/local/bin/wp \
+    && chmod +x /usr/local/bin/wp
+
+# ============================================
 # Install mhsendmail
 # ============================================
 RUN curl -fsSL 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' \
