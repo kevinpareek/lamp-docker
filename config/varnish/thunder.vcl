@@ -24,6 +24,11 @@ backend default {
 
 # Common cache logic
 sub vcl_recv {
+    # DEVELOPMENT MODE: Bypass cache completely
+    if (req.http.X-App-Env == "development") {
+        return (pass);
+    }
+
     # Only cache GET and HEAD requests
     if (req.method != "GET" && req.method != "HEAD") {
         return (pass);

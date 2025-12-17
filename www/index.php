@@ -36,7 +36,7 @@ if (extension_loaded('memcached')) {
 
 // Check Database
 if (extension_loaded('mysqli')) {
-    $db_host = getenv('MYSQL_HOST') ?: 'database';
+    $db_host = getenv('MYSQL_HOST') ?: 'dbhost';
     $db_user = getenv('MYSQL_USER') ?: 'docker';
     $db_pass = getenv('MYSQL_PASSWORD') ?: 'docker';
     

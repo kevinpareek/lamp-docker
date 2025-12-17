@@ -145,6 +145,8 @@ Manage your entire stack with simple, intuitive commands.
 | `tbs app cron [app]` | Manage cron jobs |
 | `tbs app logs [app]` | App logging |
 
+> Database management is app-scoped via `tbs app db <app>`, which covers create, import/export, reset password, and delete. Databases and MySQL users share the same app-prefixed name (for example, `myapp_abcd`).
+
 ### Project Creators (`tbs create`)
 | Command | Description |
 | :--- | :--- |
@@ -152,16 +154,6 @@ Manage your entire stack with simple, intuitive commands.
 | `tbs create wordpress <name>` | WordPress with auto database |
 | `tbs create symfony <name>` | New Symfony project |
 | `tbs create blank <name>` | Blank PHP project |
-
-### Database (`tbs db`)
-| Command | Description |
-| :--- | :--- |
-| `tbs db list` | List all databases |
-| `tbs db create <name>` | Create database |
-| `tbs db drop <name>` | Drop database |
-| `tbs db import <name> <file>` | Import SQL (.sql / .sql.gz) |
-| `tbs db export <name>` | Export to SQL file |
-| `tbs db user <name> [pass] [db]` | Create MySQL user |
 
 ### Shell & Tools
 | Command | Description |

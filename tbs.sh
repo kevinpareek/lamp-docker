@@ -676,6 +676,45 @@ execute_mysqldump() {
 # Database Helpers
 # ============================================
 
+# Helper: Select a database from list (returns selected db name in SELECTED_DB)
+# Usage: _db_select_from_list db_list[@] || return
+_db_select_from_list() {
+    local -n _dbs=$1
+    local prompt="${2:-Database}"
+    SELECTED_DB=""
+    
+    if [[ ${#_dbs[@]} -eq 0 ]]; then
+        error_message "No databases found"
+        return 1
+    fi
+    
+    echo "  Select database number:"
+    read -p "  $prompt [1-${#_dbs[@]}]: " db_sel
+    
+    if [[ "$db_sel" =~ ^[0-9]+$ ]] && [[ $db_sel -ge 1 ]] && [[ $db_sel -le ${#_dbs[@]} ]]; then
+        SELECTED_DB="${_dbs[$((db_sel-1))]}"
+        return 0
+    else
+        error_message "Invalid selection"
+        return 1
+    fi
+}
+
+# Helper: Update app config with jq (reduces repeated mktemp/mv pattern)
+# Usage: _jq_update "config_file" "jq_expression"
+_jq_update() {
+    local cfg="$1" expr="$2"
+    command_exists jq || return 1
+    local tmp=$(mktemp)
+    if jq "$expr" "$cfg" > "$tmp" 2>/dev/null; then
+        mv "$tmp" "$cfg"
+        return 0
+    else
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
 # Create a database
 _db_create() {
     local db_name="$1"
@@ -688,6 +727,38 @@ _db_create() {
         error_message "Failed to create database: $db_name"
         return 1
     fi
+}
+
+# Check if a database exists
+_db_exists() {
+    local db_name="$1"
+    [[ -z "$db_name" ]] && return 1
+    local result
+    result=$(execute_mysql_command -N -B -e "SHOW DATABASES LIKE '$db_name';")
+    [[ "$result" == "$db_name" ]]
+}
+
+# Check if a MySQL user exists
+_db_user_exists() {
+    local user="$1"
+    [[ -z "$user" ]] && return 1
+    local result
+    result=$(execute_mysql_command -N -B -e "SELECT COUNT(*) FROM mysql.user WHERE user='$user';")
+    [[ "$result" -gt 0 ]]
+}
+
+# Suggest a unique, app-scoped database name
+_suggest_app_db_name() {
+    local app_prefix="$1"
+    [[ -z "$app_prefix" ]] && return 1
+    local suffix
+    suffix=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 4)
+    [[ -z "$suffix" || ${#suffix} -lt 4 ]] && suffix=$(printf "%04d" $((RANDOM%10000)))
+    local candidate="${app_prefix}_${suffix}"
+    if _db_exists "$candidate"; then
+        candidate="${app_prefix}_$((RANDOM%9000+1000))"
+    fi
+    echo "$candidate"
 }
 
 # Drop a database
@@ -1493,23 +1564,19 @@ interactive_menu() {
         echo "   9) Open App Code"
         echo "   10) App Configuration (varnish, webroot, perms)"
 
-        echo -e "\n${BLUE}💾 Database${NC}"
-        echo "   11) Database Manager (list/create/import/export)"
-
         echo -e "\n${BLUE}⚙️ Configuration & Tools${NC}"
-        echo "   12) Configure Environment"
-        echo "   13) System Info"
-        echo "   14) Backup/Restore"
-        echo "   15) SSL Certificates"
+        echo "   11) Configure Environment"
+        echo "   12) System Info"
+        echo "   13) Backup/Restore"
         
         echo -e "\n${BLUE}🔧 Shell & Tools${NC}"
-        echo "   16) Container Shell"
-        echo "   17) Mailpit | 18) phpMyAdmin | 19) Redis CLI"
+        echo "   14) Container Shell"
+        echo "   15) Mailpit | 16) phpMyAdmin | 17) Redis CLI"
 
         echo -e "\n   ${RED}0) Exit${NC}"
         
         echo ""
-        read -p "Choice [0-19]: " choice
+        read -p "Choice [0-17]: " choice
 
         local wait_needed=true
         case $choice in
@@ -1518,14 +1585,9 @@ interactive_menu() {
             8) echo ""; read -p "Type [laravel/wordpress/symfony/blank]: " t; read -p "App name: " n; tbs create "$t" "$n" ;;
             9) tbs app code ;;
             10) tbs app config ;;
-            11) echo ""; echo "1) List  2) Create  3) Import  4) Export"; read -p "Action: " a
-                case "$a" in 1) tbs db list ;; 2) read -p "Name: " n; tbs db create "$n" ;;
-                    3) read -p "DB: " n; read -p "File: " f; tbs db import "$n" "$f" ;;
-                    4) read -p "DB: " n; tbs db export "$n" ;; esac ;;
-            12) tbs config ;; 13) tbs info ;;
-            14) echo ""; echo "1) Backup  2) Restore"; read -p "Action: " a; [[ "$a" == "1" ]] && tbs backup || tbs restore ;;
-            15) tbs app ssl ;;
-            16) tbs shell ;; 17) tbs mail ;; 18) tbs pma ;; 19) tbs redis-cli ;;
+            11) tbs config ;; 12) tbs info ;;
+            13) echo ""; echo "1) Backup  2) Restore"; read -p "Action: " a; [[ "$a" == "1" ]] && tbs backup || tbs restore ;;
+            14) tbs shell ;; 15) tbs mail ;; 16) tbs pma ;; 17) tbs redis-cli ;;
             0) echo "Bye!"; exit 0 ;;
             *) red_message "Invalid"; sleep 1; wait_needed=false ;;
         esac
@@ -1686,17 +1748,45 @@ tbs() {
             blue_message "═══════════════════════════════════════════════════════════════"
         }
         
-        # Create database for app
+        # Create database for app (supports multiple databases)
         _app_db_create() {
             local app_user="$1"
             
             is_service_running "dbhost" || { error_message "MySQL not running. Run: tbs start"; return 1; }
             
-            local db_name="${app_user//-/_}"
-            read -p "Database name (default: $db_name): " input_db
-            db_name="${input_db:-$db_name}"
+            local app_prefix="${app_user//-/_}"
+            local db_name=""
+            local default_name=$(_suggest_app_db_name "$app_prefix")
+
+            yellow_message "  Database name and DB user will be the same."
+
+            while true; do
+                read -p "Database name [default: $default_name]: " input_db
+                if [[ -z "$input_db" ]]; then
+                    db_name="$default_name"
+                else
+                    if [[ ! "$input_db" =~ ^${app_prefix}_[A-Za-z0-9]+$ ]]; then
+                        db_name="${app_prefix}_$input_db"
+                    else
+                        db_name="$input_db"
+                    fi
+                fi
+
+                if _db_exists "$db_name"; then
+                    error_message "Database '$db_name' already exists. Pick another name."
+                    default_name=$(_suggest_app_db_name "$app_prefix")
+                    continue
+                fi
+                if _db_user_exists "$db_name"; then
+                    error_message "MySQL user '$db_name' already exists. Choose a different database name."
+                    default_name=$(_suggest_app_db_name "$app_prefix")
+                    continue
+                fi
+                break
+            done
             
             local db_user="$db_name"
+
             local suggested_pass=$(generate_strong_password 16)
             echo -e "  Auto password: ${CYAN}$suggested_pass${NC}"
             read -p "Password (Enter=auto): " db_pass
@@ -1704,14 +1794,20 @@ tbs() {
             
             _db_create "$db_name" && _db_create_user "$db_user" "$db_pass" "$db_name"
             
+            # Add to databases array (supports multiple DBs per app)
             command_exists jq && {
                 local cfg=$(get_app_config_path "$app_user")
                 local tmp=$(mktemp)
-                if jq '.database={"name":"'"$db_name"'","user":"'"$db_user"'","password":"'"$db_pass"'","host":"dbhost","created":true}' "$cfg" > "$tmp" 2>/dev/null; then
-                    mv "$tmp" "$cfg"
+                local new_db='{"name":"'"$db_name"'","user":"'"$db_user"'","password":"'"$db_pass"'","host":"dbhost","created":true}'
+                # Check if databases array exists, if not create it
+                if jq -e '.databases' "$cfg" >/dev/null 2>&1; then
+                    jq '.databases += ['"$new_db"']' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
                 else
-                    rm -f "$tmp"
+                    jq '.databases = ['"$new_db"']' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
                 fi
+                # Also update legacy .database field for backward compatibility
+                tmp=$(mktemp)
+                jq '.database='"$new_db" "$cfg" > "$tmp" && mv "$tmp" "$cfg"
             }
             
             echo ""
@@ -1721,6 +1817,46 @@ tbs() {
             echo "  Password: $db_pass"
             echo "  Host: dbhost (container) / localhost:${HOST_MACHINE_MYSQL_PORT:-3306} (host)"
             echo ""
+        }
+        
+        # Get all databases for an app (from config + auto-detect by prefix)
+        _app_get_databases() {
+            local app_user="$1"
+            local app_prefix="${app_user//-/_}"
+            local cfg=$(get_app_config_path "$app_user")
+            local dbs=()
+            
+            # Get from config databases array
+            if command_exists jq && [[ -f "$cfg" ]]; then
+                while IFS= read -r db; do
+                    [[ -n "$db" && "$db" != "null" ]] && dbs+=("$db")
+                done < <(jq -r '.databases[]?.name // empty' "$cfg" 2>/dev/null)
+            fi
+            
+            # Also auto-detect databases with app prefix from MySQL
+            local mysql_dbs
+            mysql_dbs=$(execute_mysql_command -N -B -e "SHOW DATABASES LIKE '${app_prefix}%';" 2>/dev/null)
+            while IFS= read -r db; do
+                [[ -z "$db" ]] && continue
+                # Check if already in array
+                local found=false
+                for existing in "${dbs[@]}"; do [[ "$existing" == "$db" ]] && found=true && break; done
+                [[ "$found" == "false" ]] && dbs+=("$db")
+            done <<< "$mysql_dbs"
+            
+            printf '%s\n' "${dbs[@]}"
+        }
+        
+        # Get database info from config
+        _app_get_db_info() {
+            local app_user="$1"
+            local db_name="$2"
+            local field="$3"
+            local cfg=$(get_app_config_path "$app_user")
+            
+            if command_exists jq && [[ -f "$cfg" ]]; then
+                jq -r '.databases[]? | select(.name=="'"$db_name"'") | .'"$field"' // empty' "$cfg" 2>/dev/null
+            fi
         }
         
         # ==========================================
@@ -1928,77 +2064,104 @@ EOF
             green_message "✅ App '$app_name' deleted!"
             ;;
         
-        # tbs app db [app] - Database management
+        # tbs app db [app] - Database management (supports multiple databases)
         db|database)
             _app_get "$app_arg1" || return 1
             local app_user="$SELECTED_APP"
+            local app_prefix="${app_user//-/_}"
+            local cfg=$(get_app_config_path "$app_user")
             
             is_service_running "dbhost" || { error_message "MySQL not running"; return 1; }
             
             while true; do
-                local db=$(get_app_config "$app_user" "database.name")
-                local db_user=$(get_app_config "$app_user" "database.user")
-                local db_created=$(get_app_config "$app_user" "database.created")
+                _app_header "$app_user" "Database Management"
                 
-                _app_header "$app_user" "💾 Database"
-                [[ "$db_created" == "true" ]] && echo "  Current: $db (user: $db_user)"
+                # Get all databases for this app
+                local db_list=()
+                while IFS= read -r line; do
+                    [[ -n "$line" ]] && db_list+=("$line")
+                done < <(_app_get_databases "$app_user")
+                
+                if [[ ${#db_list[@]} -gt 0 ]]; then
+                    echo -e "  ${CYAN}App Databases (prefix: ${app_prefix}_):${NC}"
+                    for i in "${!db_list[@]}"; do
+                        local db="${db_list[$i]}"
+                        local db_user_info=$(_app_get_db_info "$app_user" "$db" "user")
+                        echo "    $((i+1))) $db (user: ${db_user_info:-$db})"
+                    done
+                else
+                    yellow_message "No databases found for this app"
+                fi
                 echo ""
-                echo "  1) 📋 Show Credentials    4) 📥 Import"
-                echo "  2) ➕ Create Database     5) 📤 Export"
-                echo "  3) 🔄 Reset Password      6) 🗑️  Delete"
-                echo "  0) ↩️  Back"
+                echo "  1) Create Database    4) Import SQL"
+                echo "  2) Show Credentials   5) Export SQL"
+                echo "  3) Reset Password     6) Delete Database"
+                echo "  0) Back"
                 echo ""
                 read -p "Select [0-6]: " choice
                 
                 case "$choice" in
-                    1) [[ "$db_created" != "true" ]] && { yellow_message "No database"; } || {
-                       local cfg=$(get_app_config_path "$app_user")
-                       echo ""
-                       echo "  Database: $(jq -r '.database.name' "$cfg")"
-                       echo "  Username: $(jq -r '.database.user' "$cfg")"
-                       echo "  Password: $(jq -r '.database.password' "$cfg")"
-                       echo "  Host: dbhost / localhost:${HOST_MACHINE_MYSQL_PORT:-3306}"
+                    1) _app_db_create "$app_user" ;;
+                    2) # Show credentials
+                       _db_select_from_list db_list && {
+                           local db_pass=$(_app_get_db_info "$app_user" "$SELECTED_DB" "password")
+                           local db_user=$(_app_get_db_info "$app_user" "$SELECTED_DB" "user")
+                           echo ""
+                           echo "  Database: $SELECTED_DB"
+                           echo "  Username: ${db_user:-$SELECTED_DB}"
+                           [[ -n "$db_pass" ]] && echo "  Password: $db_pass" || yellow_message "  Password: (not in config)"
+                           echo "  Host: dbhost / localhost:${HOST_MACHINE_MYSQL_PORT:-3306}"
                        }
                        ;;
-                    2) _app_db_create "$app_user" ;;
-                    3) [[ "$db_created" != "true" ]] && { error_message "No database"; } || {
-                       local new_pass=$(generate_strong_password 16)
-                       echo -e "  Auto: ${CYAN}$new_pass${NC}"
-                       read -p "New password (Enter=auto): " input_pass
-                       new_pass="${input_pass:-$new_pass}"
-                       execute_mysql_command -e "ALTER USER '$db_user'@'%' IDENTIFIED BY '$new_pass'; FLUSH PRIVILEGES;"
-                       command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".database.password=\"$new_pass\"" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
-                       green_message "✅ Password: $new_pass"
+                    3) # Reset password
+                       _db_select_from_list db_list && {
+                           local db_user=$(_app_get_db_info "$app_user" "$SELECTED_DB" "user")
+                           [[ -z "$db_user" ]] && db_user="$SELECTED_DB"
+                           local new_pass=$(generate_strong_password 16)
+                           echo -e "  Auto: ${CYAN}$new_pass${NC}"
+                           read -p "New password (Enter=auto): " input_pass
+                           new_pass="${input_pass:-$new_pass}"
+                           execute_mysql_command -e "ALTER USER '$db_user'@'%' IDENTIFIED BY '$new_pass'; FLUSH PRIVILEGES;"
+                           _jq_update "$cfg" '(.databases[] | select(.name=="'"$SELECTED_DB"'")).password = "'"$new_pass"'"'
+                           _jq_update "$cfg" 'if .database.name == "'"$SELECTED_DB"'" then .database.password = "'"$new_pass"'" else . end'
+                           green_message "Password updated: $new_pass"
                        }
                        ;;
-                    4) [[ "$db_created" != "true" ]] && { error_message "No database"; } || {
-                       read -p "SQL file: " sql_file
-                       if [[ ! -f "$sql_file" ]]; then error_message "File not found"; else
-                           [[ "$sql_file" == *.gz ]] && gunzip -c "$sql_file" | execute_mysql_command "$db" || execute_mysql_command "$db" < "$sql_file"
-                           green_message "✅ Imported!"
-                       fi
+                    4) # Import
+                       [[ ${#db_list[@]} -eq 0 ]] && { error_message "Create a database first"; } || {
+                           _db_select_from_list db_list && {
+                               read -p "SQL file path: " sql_file
+                               [[ -f "$sql_file" ]] && {
+                                   [[ "$sql_file" == *.gz ]] && gunzip -c "$sql_file" | execute_mysql_command "$SELECTED_DB" || execute_mysql_command "$SELECTED_DB" < "$sql_file"
+                                   green_message "Imported to $SELECTED_DB!"
+                               } || error_message "File not found"
+                           }
                        }
                        ;;
-                    5) [[ "$db_created" != "true" ]] && { error_message "No database"; } || {
-                       local out="$tbsPath/data/backup/${db}_$(date +%Y%m%d_%H%M%S).sql"
-                       _db_export "$db" "$out"
+                    5) # Export
+                       _db_select_from_list db_list && {
+                           local out="$tbsPath/data/backup/${SELECTED_DB}_$(date +%Y%m%d_%H%M%S).sql"
+                           _db_export "$SELECTED_DB" "$out"
                        }
                        ;;
-                    6) [[ "$db_created" != "true" ]] && { error_message "No database"; } || {
-                       read -p "Type '$db' to delete: " confirm
-                       if [[ "$confirm" != "$db" ]]; then info_message "Cancelled"; else
-                           _db_drop "$db"
-                           [[ -n "$db_user" ]] && _db_drop_user "$db_user"
-                           command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".database={\"name\":\"\",\"user\":\"\",\"password\":\"\",\"created\":false}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
-                           green_message "✅ Deleted!"
-                       fi
+                    6) # Delete
+                       _db_select_from_list db_list "Delete" && {
+                           local db_user=$(_app_get_db_info "$app_user" "$SELECTED_DB" "user")
+                           read -p "Type '$SELECTED_DB' to confirm: " confirm
+                           [[ "$confirm" == "$SELECTED_DB" ]] && {
+                               _db_drop "$SELECTED_DB"
+                               [[ -n "$db_user" ]] && _db_drop_user "$db_user"
+                               _jq_update "$cfg" 'del(.databases[] | select(.name=="'"$SELECTED_DB"'"))'
+                               _jq_update "$cfg" 'if .database.name == "'"$SELECTED_DB"'" then .database={"name":"","user":"","password":"","created":false} else . end'
+                               green_message "Database '$SELECTED_DB' deleted!"
+                           } || info_message "Cancelled"
                        }
                        ;;
                     0) return 0 ;;
                     *) error_message "Invalid option" ;;
                 esac
                 echo ""
-                read -p "Press Enter to continue..."
+                read -p "Press Enter..."
             done
             ;;
         
@@ -2010,12 +2173,12 @@ EOF
             
             while true; do
                 local ssh_enabled=$(get_app_config "$app_user" "ssh.enabled")
-                _app_header "$app_user" "🔑 SSH/SFTP"
-                [[ "$ssh_enabled" == "true" ]] && echo "  Status: ${GREEN}Enabled${NC}" || echo "  Status: ${RED}Disabled${NC}"
+                _app_header "$app_user" "SSH/SFTP"
+                echo -e "  Status: $([[ "$ssh_enabled" == "true" ]] && echo "${GREEN}Enabled${NC}" || echo "${RED}Disabled${NC}")"
                 echo ""
-                echo "  1) 📋 Show Credentials    3) 🔄 Reset Password"
-                echo "  2) ✅ Enable SSH          4) ❌ Disable SSH"
-                echo "  0) ↩️  Back"
+                echo "  1) Show Credentials    3) Reset Password"
+                echo "  2) Enable SSH          4) Disable SSH"
+                echo "  0) Back"
                 echo ""
                 read -p "Select [0-4]: " choice
                 
@@ -2060,43 +2223,42 @@ EOF
         domain|domains)
             _app_get "$app_arg1" || return 1
             local app_user="$SELECTED_APP"
+            local cfg=$(get_app_config_path "$app_user")
             
             while true; do
-                _app_header "$app_user" "🌍 Domains"
+                _app_header "$app_user" "Domains"
                 echo "  Current domains:"
-                command_exists jq && jq -r '.domains[]? // empty' "$(get_app_config_path "$app_user")" 2>/dev/null | while read d; do
+                command_exists jq && jq -r '.domains[]? // empty' "$cfg" 2>/dev/null | while read d; do
                     local p=$(get_app_config "$app_user" "primary_domain")
-                    [[ "$d" == "$p" ]] && echo "    • $d (primary)" || echo "    • $d"
+                    [[ "$d" == "$p" ]] && echo "    * $d (primary)" || echo "    - $d"
                 done
                 echo ""
-                echo "  1) ➕ Add Domain"
-                echo "  2) ➖ Remove Domain"
-                echo "  0) ↩️  Back"
+                echo "  1) Add Domain"
+                echo "  2) Remove Domain"
+                echo "  0) Back"
                 echo ""
                 read -p "Select [0-2]: " choice
                 
                 case "$choice" in
                     1) read -p "New domain: " new_dom
-                       if [[ -n "$new_dom" ]]; then
+                       [[ -n "$new_dom" ]] && {
                            local primary=$(get_app_config "$app_user" "primary_domain")
-                           local src_vhost="${VHOSTS_DIR}/${primary}.conf"
-                           [[ -f "$src_vhost" ]] && sed "s/$primary/$new_dom/g" "$src_vhost" > "${VHOSTS_DIR}/${new_dom}.conf"
-                           local src_nginx="${NGINX_CONF_DIR}/${primary}.conf"
-                           [[ -f "$src_nginx" ]] && sed "s/$primary/$new_dom/g" "$src_nginx" > "${NGINX_CONF_DIR}/${new_dom}.conf"
-                           command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".domains+=[\"$new_dom\"]" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                           [[ -f "${VHOSTS_DIR}/${primary}.conf" ]] && sed "s/$primary/$new_dom/g" "${VHOSTS_DIR}/${primary}.conf" > "${VHOSTS_DIR}/${new_dom}.conf"
+                           [[ -f "${NGINX_CONF_DIR}/${primary}.conf" ]] && sed "s/$primary/$new_dom/g" "${NGINX_CONF_DIR}/${primary}.conf" > "${NGINX_CONF_DIR}/${new_dom}.conf"
+                           _jq_update "$cfg" '.domains+=["'"$new_dom"'"]'
                            generate_ssl_certificates "$new_dom" "${VHOSTS_DIR}/${new_dom}.conf" "${NGINX_CONF_DIR}/${new_dom}.conf" 2>/dev/null || true
                            reload_webservers
-                           green_message "✅ Domain added: $new_dom"
-                       fi
+                           green_message "Domain added: $new_dom"
+                       }
                        ;;
                     2) read -p "Domain to remove: " rem_dom
                        local primary=$(get_app_config "$app_user" "primary_domain")
-                       if [[ "$rem_dom" == "$primary" ]]; then error_message "Cannot remove primary domain"; else
+                       [[ "$rem_dom" == "$primary" ]] && { error_message "Cannot remove primary"; } || {
                            rm -f "${VHOSTS_DIR}/${rem_dom}.conf" "${NGINX_CONF_DIR}/${rem_dom}.conf"
-                           command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".domains-=[\"$rem_dom\"]" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                           _jq_update "$cfg" '.domains-=["'"$rem_dom"'"]'
                            reload_webservers
-                           green_message "✅ Domain removed"
-                       fi
+                           green_message "Domain removed"
+                       }
                        ;;
                     0) return 0 ;;
                     *) error_message "Invalid option" ;;
@@ -2111,28 +2273,30 @@ EOF
             _app_get "$app_arg1" || return 1
             local app_user="$SELECTED_APP"
             local ssl_dir="$tbsPath/sites/ssl"
+            local cfg=$(get_app_config_path "$app_user")
             
             while true; do
-                _app_header "$app_user" "🔒 SSL Certificates"
+                _app_header "$app_user" "SSL Certificates"
                 
                 # Get all domains
                 local domains=()
                 if command_exists jq; then
-                    mapfile -t domains < <(jq -r '.domains[]? // empty' "$(get_app_config_path "$app_user")" 2>/dev/null)
+                    while IFS= read -r line; do
+                        [[ -n "$line" ]] && domains+=("$line")
+                    done < <(jq -r '.domains[]? // empty' "$cfg" 2>/dev/null)
                 fi
                 [[ ${#domains[@]} -eq 0 ]] && domains=("$(get_app_config "$app_user" "primary_domain")")
                 
                 echo "  App Domains:"
-                local i=1
-                for d in "${domains[@]}"; do
+                for i in "${!domains[@]}"; do
+                    local d="${domains[$i]}"
                     [[ -z "$d" || "$d" == "null" ]] && continue
                     local cert="$ssl_dir/${d}-cert.pem"
-                    [[ -f "$cert" ]] && echo "    $i) $d ${GREEN}✓${NC}" || echo "    $i) $d ${YELLOW}✗${NC}"
-                    ((i++))
+                    [[ -f "$cert" ]] && echo -e "    $((i+1))) $d ${GREEN}[OK]${NC}" || echo -e "    $((i+1))) $d ${YELLOW}[NO]${NC}"
                 done
                 echo ""
-                echo "  1) 🔐 Generate SSL for ALL domains"
-                echo "  2) 🔐 Generate SSL for specific domain"
+                echo "  1) Generate SSL for ALL"
+                echo "  2) Generate SSL for specific domain"
                 echo "  3) 🔍 Check SSL status"
                 echo "  0) ↩️  Back"
                 echo ""
@@ -2306,10 +2470,22 @@ POOL
                         info_message "Varnish: $(get_app_config "$app_user" "varnish")" ;;
                     webroot)
                         [[ -z "$sub_val" ]] && { info_message "Webroot: $(get_app_config "$app_user" "webroot")"; return; }
-                        set_app_config "$app_user" "webroot" "\"$sub_val\""; green_message "Webroot: $sub_val"
-                        local d=$(get_app_config "$app_user" "primary_domain") dr="/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/$sub_val"
+                        # Ensure webroot starts with public_html
+                        local new_wr
+                        if [[ "$sub_val" == "public_html" || "$sub_val" == "." ]]; then
+                            new_wr="public_html"
+                        elif [[ "$sub_val" == public_html/* ]]; then
+                            new_wr="$sub_val"
+                        else
+                            # User gave subpath only, prefix with public_html/
+                            sub_val="${sub_val#/}"
+                            new_wr="public_html/$sub_val"
+                        fi
+                        set_app_config "$app_user" "webroot" "\"$new_wr\""; green_message "Webroot: $new_wr"
+                        local d=$(get_app_config "$app_user" "primary_domain") dr="/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/$new_wr"
                         [[ -f "${VHOSTS_DIR}/${d}.conf" ]] && sed_i "s|DocumentRoot.*|DocumentRoot $dr|g" "${VHOSTS_DIR}/${d}.conf"
                         [[ -f "${NGINX_CONF_DIR}/${d}.conf" ]] && sed_i "s|root.*/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user[^;]*|root $dr|g" "${NGINX_CONF_DIR}/${d}.conf"
+                        echo "  Full path: $dr"
                         info_message "Restart to apply: tbs restart" ;;
                     perms|permissions)
                         is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
@@ -2326,21 +2502,80 @@ POOL
                 _app_header "$app_user" "⚙️  Settings"
                 local varnish=$(get_app_config "$app_user" "varnish")
                 local webroot=$(get_app_config "$app_user" "webroot")
-                echo "  Varnish: ${varnish:-true}"
-                echo "  Webroot: ${webroot:-public_html}"
+                
+                # Show development mode warning
+                if [[ "${APP_ENV:-development}" == "development" ]]; then
+                    yellow_message "  [Development Mode] - Cache is minimal by default"
+                fi
                 echo ""
-                echo "  1) 🔄 Toggle Varnish"
-                echo "  2) 📁 Change Webroot"
-                echo "  3) 🔐 Reset Permissions"
-                echo "  4) 📋 Show Full Config"
-                echo "  0) ↩️  Back"
+                echo "  Varnish Cache: ${varnish:-true}"
+                echo "  Webroot:       ${webroot:-public_html}"
+                echo ""
+                echo "  1) Toggle Varnish Cache"
+                echo "  2) Change Webroot"
+                echo "  3) Reset Permissions"
+                echo "  4) Show Full Config"
+                echo "  0) Back"
                 echo ""
                 read -p "Select [0-4]: " choice
                 
                 case "$choice" in
-                    1) [[ "$varnish" == "false" ]] && set_app_config "$app_user" "varnish" "true" && green_message "Varnish ON" || { set_app_config "$app_user" "varnish" "false"; yellow_message "Varnish OFF"; } ;;
-                    2) read -p "Webroot (e.g., public, web): " new_wr
-                       [[ -n "$new_wr" ]] && { set_app_config "$app_user" "webroot" "\"$new_wr\""; green_message "Webroot: $new_wr"; } ;;
+                    1) # Toggle Varnish - fixed logic
+                       if [[ "$varnish" == "false" ]]; then
+                           set_app_config "$app_user" "varnish" "true"
+                           green_message "Varnish Cache: ON"
+                       else
+                           set_app_config "$app_user" "varnish" "false"
+                           yellow_message "Varnish Cache: OFF"
+                       fi
+                       if [[ "${APP_ENV:-development}" == "development" ]]; then
+                           info_message "Note: In development mode, Varnish has minimal caching enabled."
+                       fi
+                       ;;
+                    2) # Change Webroot - only subpath after public_html/
+                       local current_wr=$(get_app_config "$app_user" "webroot")
+                       [[ -z "$current_wr" || "$current_wr" == "null" ]] && current_wr="public_html"
+                       local base_path="/${app_user}/public_html"
+                       local full_path="/var/www/html/${APPLICATIONS_DIR_NAME}${base_path}"
+                       
+                       echo ""
+                       blue_message "Webroot Configuration"
+                       echo "  Base path (fixed): $full_path/"
+                       echo "  Current webroot:   $current_wr"
+                       echo ""
+                       yellow_message "  Note: You can only change the path AFTER public_html/"
+                       echo "  Example: For Laravel, enter 'public' to set public_html/public"
+                       echo "  Example: For Symfony, enter 'public' to set public_html/public"
+                       echo "  Leave empty or enter '.' for public_html itself"
+                       echo ""
+                       read -p "  Subpath after public_html/ : " new_subpath
+                       
+                       # Clean input - remove leading/trailing slashes
+                       new_subpath="${new_subpath#/}"
+                       new_subpath="${new_subpath%/}"
+                       
+                       # Set the webroot
+                       local new_wr
+                       if [[ -z "$new_subpath" || "$new_subpath" == "." ]]; then
+                           new_wr="public_html"
+                       else
+                           new_wr="public_html/$new_subpath"
+                       fi
+                       
+                       set_app_config "$app_user" "webroot" "\"$new_wr\""
+                       
+                       # Update vhost configs
+                       local d=$(get_app_config "$app_user" "primary_domain")
+                       local dr="/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/$new_wr"
+                       [[ -f "${VHOSTS_DIR}/${d}.conf" ]] && sed_i "s|DocumentRoot.*|DocumentRoot $dr|g" "${VHOSTS_DIR}/${d}.conf"
+                       [[ -f "${NGINX_CONF_DIR}/${d}.conf" ]] && sed_i "s|root.*/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user[^;]*|root $dr|g" "${NGINX_CONF_DIR}/${d}.conf"
+                       
+                       echo ""
+                       green_message "Webroot updated!"
+                       echo "  New webroot: $new_wr"
+                       echo "  Full path:   $dr"
+                       info_message "Restart to apply: tbs restart"
+                       ;;
                     3) is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
@@ -2634,25 +2869,8 @@ POOL
 
     # Database management
     db)
-        local action="${2:-}" name="${3:-}" file="${4:-}"
-        is_service_running "dbhost" || { error_message "MySQL not running"; return 1; }
-        case "$action" in
-            list|ls) execute_mysql_command -e "SHOW DATABASES;" | grep -vE "^(Database|information_schema|performance_schema|mysql|sys)$" ;;
-            create) [[ -z "$name" ]] && read -p "Database name: " name; _db_create "$name" ;;
-            drop) [[ -z "$name" ]] && read -p "Database to drop: " name
-                  read -p "Drop '$name'? (y/N): " confirm; [[ "$confirm" =~ ^[Yy]$ ]] && _db_drop "$name" || info_message "Cancelled" ;;
-            import) [[ -z "$name" ]] && read -p "Database: " name; [[ -z "$file" ]] && read -p "SQL file: " file
-                    _db_import "$name" "$file" ;;
-            export) [[ -z "$name" ]] && read -p "Database: " name; [[ -z "$name" ]] && { error_message "Name required"; return 1; }
-                    local outfile="$tbsPath/data/backup/${name}_$(date +%Y%m%d_%H%M%S).sql"
-                    _db_export "$name" "$outfile" ;;
-            user) local user="${3:-}" pass="${4:-}" db="${5:-}"
-                  [[ -z "$user" ]] && read -p "Username: " user; [[ -z "$user" ]] && { error_message "Required"; return 1; }
-                  [[ -z "$pass" ]] && pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16)
-                  [[ -z "$db" ]] && db="$user"
-                  _db_create_user "$user" "$pass" "$db" && echo "User: $user | Pass: $pass | DB: $db" ;;
-            *) info_message "tbs db [list|create|drop|import|export|user] <name>" ;;
-        esac
+        error_message "Direct database commands have been removed. Use: tbs app db <app_user>"
+        return 1
         ;;
 
     # Quick project creators
@@ -2674,7 +2892,15 @@ POOL
                 local db_name=$(get_app_config "$u" "database.name")
                 if [[ -z "$db_name" || "$db_name" == "null" ]]; then
                     # Create database for this app
-                    db_name="${u//-/_}"
+                    local app_prefix="${u//-/_}"
+                    while true; do
+                        db_name=$(_suggest_app_db_name "$app_prefix")
+                        [[ -z "$db_name" ]] && db_name="${app_prefix}_$((RANDOM%9000+1000))"
+                        if _db_exists "$db_name" || _db_user_exists "$db_name"; then
+                            continue
+                        fi
+                        break
+                    done
                     local db_user="$db_name"
                     local db_pass=$(generate_strong_password 16)
                     
@@ -2748,7 +2974,6 @@ POOL
             echo "Stack:    start, stop, restart, build, status, config, info"
             echo "Apps:     tbs app [add|rm|db|ssh|domain|ssl|php|config|code|open] <app>"
             echo "Projects: tbs create [laravel|wordpress|symfony|blank] <name>"
-            echo "Database: tbs db [list|create|drop|import|export|user] <name>"
             echo "Tools:    shell [php|mysql|redis], pma, mail, code, logs [service]"
             echo "SSH:      sshadmin [show|password]"
             echo "Other:    backup, restore, ssl-localhost"
