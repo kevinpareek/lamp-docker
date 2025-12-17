@@ -221,7 +221,7 @@ Most behavior is controlled through `.env` (created from `sample.env` and mainta
   - DB & tools: `HOST_MACHINE_MYSQL_PORT`, `HOST_MACHINE_PMA_PORT`, `HOST_MACHINE_REDIS_PORT`.
 - **Database credentials**
   - `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` (change for production!).
-  - **Host**: `database` (internal container name) or `localhost` (from host machine).
+  - **Host**: `dbhost` (internal container name) or `localhost` (from host machine).
 
 Run `./tbs.sh config` anytime to re-run the wizard and safely update `.env`.
 

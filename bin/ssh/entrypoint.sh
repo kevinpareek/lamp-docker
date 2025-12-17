@@ -153,7 +153,7 @@ load_users() {
             if command -v jq &>/dev/null; then
                 local username=$(jq -r '.username // .app_user // empty' "$user_file")
                 local password=$(jq -r '.password // empty' "$user_file")
-                local dir_name=$(jq -r '.dir_name // .app_user // .app_name // empty' "$user_file")
+                local dir_name=$(jq -r '.app_user // .dir_name // .app_name // empty' "$user_file")
                 local enabled=$(jq -r '.enabled // true' "$user_file")
                 local uid=$(jq -r '.uid // 1000' "$user_file")
                 local gid=$(jq -r '.gid // 1000' "$user_file")

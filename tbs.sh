@@ -407,7 +407,7 @@ check_containers_running() {
     fi
     
     if [[ "$check_database" == "true" ]]; then
-        if ! is_service_running "database"; then
+        if ! is_service_running "dbhost"; then
             error_message "Database container is not running. Please start the stack first."
             return 1
         fi
@@ -424,22 +424,43 @@ check_containers_running() {
 # Excludes problematic characters: # ' " , . ` \ / that break configs
 generate_strong_password() {
     local length="${1:-22}"
-    # Safe special characters that work everywhere
-    local safe_chars='A-Za-z0-9!@$%^&*_+-=[]{}|:;?'
+    local password=""
     
-    local password=$(LC_ALL=C tr -dc "$safe_chars" < /dev/urandom | head -c "$length" 2>/dev/null)
+    # Try openssl first (most reliable cross-platform)
+    if command_exists openssl; then
+        password=$(openssl rand -base64 48 2>/dev/null | tr -dc 'A-Za-z0-9!@$%^&*_+' | head -c "$length")
+    fi
     
-    # Fallback if urandom fails
+    # Fallback to /dev/urandom
     if [[ -z "$password" || ${#password} -lt $length ]]; then
-        password=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9!@$%^&*_+' | head -c "$length")
+        password=$(LC_ALL=C tr -dc 'A-Za-z0-9!@$%^&*_+' < /dev/urandom 2>/dev/null | head -c "$length" || true)
+    fi
+    
+    # Ultimate fallback using $RANDOM (bash built-in)
+    if [[ -z "$password" || ${#password} -lt $length ]]; then
+        local chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@$%^&*_+'
+        password=""
+        for ((i=0; i<length; i++)); do
+            password+="${chars:RANDOM%${#chars}:1}"
+        done
     fi
     
     # Ensure password has: uppercase, lowercase, number, special
-    if [[ ! "$password" =~ [A-Z] ]] || [[ ! "$password" =~ [a-z] ]] || [[ ! "$password" =~ [0-9] ]] || [[ ! "$password" =~ [!@$%^\&*_+-] ]]; then
-        local upper=$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c 1)
-        local lower=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 1)
-        local number=$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c 1)
-        local special=$(echo '!@$%^&*_+' | fold -w1 | shuf | head -c 1)
+    local needs_fix=false
+    [[ ! "$password" =~ [A-Z] ]] && needs_fix=true
+    [[ ! "$password" =~ [a-z] ]] && needs_fix=true
+    [[ ! "$password" =~ [0-9] ]] && needs_fix=true
+    [[ ! "$password" =~ [!@$%^\&*_+] ]] && needs_fix=true
+    
+    if [[ "$needs_fix" == "true" ]]; then
+        # Add missing character types
+        local upper='A' lower='z' number='7' special='!'
+        if command_exists openssl; then
+            upper=$(openssl rand -base64 4 2>/dev/null | tr -dc 'A-Z' | head -c 1 || echo 'A')
+            lower=$(openssl rand -base64 4 2>/dev/null | tr -dc 'a-z' | head -c 1 || echo 'z')
+            number=$(openssl rand -base64 4 2>/dev/null | tr -dc '0-9' | head -c 1 || echo '7')
+        fi
+        special=$(echo '!@$%^&*_+' | fold -w1 2>/dev/null | shuf 2>/dev/null | head -c 1 || echo '!')
         password="${password:0:$((length-4))}${upper}${lower}${number}${special}"
     fi
     
@@ -457,16 +478,24 @@ generate_app_user() {
     local apps_dir_name="${APPLICATIONS_DIR_NAME:-applications}"
     
     local user_id
-    while true; do
-        # Generate random ID
-        user_id=$(echo "$(date +%s%N 2>/dev/null || date +%s)$RANDOM" | $sum_cmd | tr -dc 'a-z' | head -c 12)
+    local max_attempts=100
+    local attempts=0
+    
+    while [[ $attempts -lt $max_attempts ]]; do
+        # Generate random ID using multiple sources for better entropy
+        local seed="$(date +%s%N 2>/dev/null || date +%s)${RANDOM}${RANDOM}"
+        user_id=$(echo "$seed" | $sum_cmd 2>/dev/null | tr -dc 'a-z' | head -c 12)
         
-        # Check if directory exists to ensure uniqueness
-        if [[ ! -d "$doc_root/$apps_dir_name/$user_id" ]]; then
+        # Validate and check uniqueness
+        if [[ -n "$user_id" && ${#user_id} -ge 8 && ! -d "$doc_root/$apps_dir_name/$user_id" ]]; then
             echo "$user_id"
             return 0
         fi
+        ((attempts++))
     done
+    
+    # Final fallback with timestamp
+    echo "app$(date +%s | tail -c 10)"
 }
 
 # Get app config file path (by app_user - primary identifier)
@@ -626,7 +655,7 @@ set_app_config() {
 execute_mysql_command() {
     # Use -T to disable TTY allocation (required for pipes/scripts)
     # Pass arguments directly to mysql client to avoid shell quoting issues
-    docker compose exec -T "$WEBSERVER_SERVICE" mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -h database "$@" 2>/dev/null
+    docker compose exec -T "$WEBSERVER_SERVICE" mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -h dbhost "$@" 2>/dev/null
 }
 
 # Execute MySQL dump through webserver container
@@ -634,7 +663,7 @@ execute_mysqldump() {
     local database="$1"
     local output_file="$2"
     
-    docker compose exec -T "$WEBSERVER_SERVICE" mysqldump -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -h database --databases "$database" >"$output_file" 2>/dev/null
+    docker compose exec -T "$WEBSERVER_SERVICE" mysqldump -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -h dbhost --databases "$database" >"$output_file" 2>/dev/null
 }
 
 # ============================================
@@ -1432,7 +1461,7 @@ tbs_start() {
         info_message "  • phpMyAdmin: http://localhost:${HOST_MACHINE_PMA_PORT:-8080}"
         info_message "  • Mailpit: http://localhost:8025"
     fi
-    info_message "  • Database: localhost:${HOST_MACHINE_MYSQL_PORT:-3306} (Host: database)"
+    info_message "  • Database: localhost:${HOST_MACHINE_MYSQL_PORT:-3306} (Host: dbhost)"
     info_message "  • Redis: localhost:${HOST_MACHINE_REDIS_PORT:-6379}"
     info_message "  • Memcached: localhost:11211"
     print_line
@@ -1655,7 +1684,7 @@ tbs() {
         _app_db_create() {
             local app_user="$1"
             
-            is_service_running "database" || { error_message "MySQL not running. Run: tbs start"; return 1; }
+            is_service_running "dbhost" || { error_message "MySQL not running. Run: tbs start"; return 1; }
             
             local db_name="${app_user//-/_}"
             read -p "Database name (default: $db_name): " input_db
@@ -1672,7 +1701,7 @@ tbs() {
             command_exists jq && {
                 local cfg=$(get_app_config_path "$app_user")
                 local tmp=$(mktemp)
-                jq ".database={\"name\":\"$db_name\",\"user\":\"$db_user\",\"password\":\"$db_pass\",\"host\":\"database\",\"created\":true}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+                jq '.database={"name":"'"$db_name"'","user":"'"$db_user"'","password":"'"$db_pass"'","host":"dbhost","created":true}' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
             }
             
             echo ""
@@ -1680,7 +1709,7 @@ tbs() {
             echo "  Database: $db_name"
             echo "  Username: $db_user"  
             echo "  Password: $db_pass"
-            echo "  Host: database (container) / localhost:${HOST_MACHINE_MYSQL_PORT:-3306} (host)"
+            echo "  Host: dbhost (container) / localhost:${HOST_MACHINE_MYSQL_PORT:-3306} (host)"
             echo ""
         }
         
@@ -1866,7 +1895,7 @@ EOF
             info_message "Deleting..."
             
             # Delete database
-            [[ "$del_db" =~ ^[Yy]$ ]] && is_service_running "database" && {
+            [[ "$del_db" =~ ^[Yy]$ ]] && is_service_running "dbhost" && {
                 local db_user=$(get_app_config "$app_user" "database.user")
                 _db_drop "$db_name"
                 [[ -n "$db_user" && "$db_user" != "null" ]] && _db_drop_user "$db_user"
@@ -1893,9 +1922,8 @@ EOF
         db|database)
             _app_get "$app_arg1" || return 1
             local app_user="$SELECTED_APP"
-            local mysql_pass="${MYSQL_ROOT_PASSWORD:-root}"
             
-            is_service_running "database" || { error_message "MySQL not running"; return 1; }
+            is_service_running "dbhost" || { error_message "MySQL not running"; return 1; }
             
             while true; do
                 local db=$(get_app_config "$app_user" "database.name")
@@ -1919,7 +1947,7 @@ EOF
                        echo "  Database: $(jq -r '.database.name' "$cfg")"
                        echo "  Username: $(jq -r '.database.user' "$cfg")"
                        echo "  Password: $(jq -r '.database.password' "$cfg")"
-                       echo "  Host: database / localhost:${HOST_MACHINE_MYSQL_PORT:-3306}"
+                       echo "  Host: dbhost / localhost:${HOST_MACHINE_MYSQL_PORT:-3306}"
                        }
                        ;;
                     2) _app_db_create "$app_user" ;;
@@ -2271,7 +2299,7 @@ POOL
                         set_app_config "$app_user" "webroot" "\"$sub_val\""; green_message "Webroot: $sub_val"
                         local d=$(get_app_config "$app_user" "primary_domain") dr="/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/$sub_val"
                         [[ -f "${VHOSTS_DIR}/${d}.conf" ]] && sed_i "s|DocumentRoot.*|DocumentRoot $dr|g" "${VHOSTS_DIR}/${d}.conf"
-                        [[ -f "${NGINX_CONF_DIR}/${d}.conf" ]] && sed_i "s|root.*applications/$app_user.*|root $dr;|g" "${NGINX_CONF_DIR}/${d}.conf"
+                        [[ -f "${NGINX_CONF_DIR}/${d}.conf" ]] && sed_i "s|root.*/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user[^;]*|root $dr|g" "${NGINX_CONF_DIR}/${d}.conf"
                         info_message "Restart to apply: tbs restart" ;;
                     perms|permissions)
                         is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
@@ -2587,7 +2615,7 @@ POOL
         local s="${2:-php}"
         case "$s" in
             php|web*) docker compose exec "$WEBSERVER_SERVICE" bash ;;
-            mysql|maria*|db) docker compose exec database bash ;;
+            mysql|maria*|db) docker compose exec dbhost bash ;;
             redis) docker compose exec redis sh ;;
             nginx|varnish|memcached|mailpit) docker compose exec "$s" sh ;;
             *) error_message "Unknown: $s (php/mysql/redis/nginx/varnish/memcached/mailpit)" ;;
@@ -2597,7 +2625,7 @@ POOL
     # Database management
     db)
         local action="${2:-}" name="${3:-}" file="${4:-}"
-        is_service_running "database" || { error_message "MySQL not running"; return 1; }
+        is_service_running "dbhost" || { error_message "MySQL not running"; return 1; }
         case "$action" in
             list|ls) execute_mysql_command -e "SHOW DATABASES;" | grep -vE "^(Database|information_schema|performance_schema|mysql|sys)$" ;;
             create) [[ -z "$name" ]] && read -p "Database name: " name; _db_create "$name" ;;
@@ -2626,9 +2654,10 @@ POOL
         
         tbs app add "$n"
         local u=$(find_app_user_by_name "$n"); [[ -z "$u" ]] && { error_message "App not found"; return 1; }
+        local apps_dir="${APPLICATIONS_DIR_NAME:-applications}"
         
         case "$t" in
-            laravel) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u && rm -rf public_html/* && composer create-project --no-interaction laravel/laravel public_html"
+            laravel) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/$apps_dir/$u && rm -rf public_html/* && composer create-project --no-interaction laravel/laravel public_html"
                      tbs app config "$u" webroot "public_html/public"; green_message "Laravel: https://${u}.localhost" ;;
             wordpress)
                 # Get DB config or create if missing
@@ -2640,17 +2669,17 @@ POOL
                 local db_user=$(get_app_config "$u" "database.user")
                 local db_pass=$(get_app_config "$u" "database.password")
                 local db_host=$(get_app_config "$u" "database.host")
-                [[ -z "$db_host" || "$db_host" == "null" || "$db_host" == "mysql" ]] && db_host="database"
+                [[ -z "$db_host" || "$db_host" == "null" || "$db_host" == "mysql" || "$db_host" == "database" ]] && db_host="dbhost"
 
                 # Install WordPress
                 green_message "Installing WordPress..."
-                docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u/public_html && rm -f index.php index.html && wp core download --allow-root --force"
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/$apps_dir/$u/public_html && rm -f index.php index.html && wp core download --allow-root --force"
                 
                 # Configure WordPress
-                docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u/public_html && wp config create --dbname='$db_name' --dbuser='$db_user' --dbpass='$db_pass' --dbhost='$db_host' --allow-root --force"
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/$apps_dir/$u/public_html && wp config create --dbname='$db_name' --dbuser='$db_user' --dbpass='$db_pass' --dbhost='$db_host' --allow-root --force"
                 
                 green_message "WordPress: https://${u}.localhost" ;;
-            symfony) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u && rm -rf public_html/* && composer create-project --no-interaction symfony/skeleton public_html"
+            symfony) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/$apps_dir/$u && rm -rf public_html/* && composer create-project --no-interaction symfony/skeleton public_html"
                      tbs app config "$u" webroot "public_html/public"; green_message "Symfony: https://${u}.localhost" ;;
             blank|empty) green_message "Blank: https://${u}.localhost" ;;
             *) error_message "Unknown: $t. Available: laravel, wordpress, symfony, blank" ;;

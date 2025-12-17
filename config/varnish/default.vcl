@@ -2,8 +2,7 @@ vcl 4.0;
 
 # ============================================
 # Default Varnish Configuration Template
-# Copy and modify for custom setups
-# Use hybrid.vcl or thunder.vcl for Turbo Stack
+# This is a reference template - use hybrid.vcl or thunder.vcl
 # ============================================
 
 backend default {
@@ -18,22 +17,30 @@ backend default {
         .interval = 5s;
         .window = 5;
         .threshold = 3;
+        .initial = 3;
     }
 }
 
+# Common cache logic
 sub vcl_recv {
-    # Only handle GET and HEAD requests
+    # Only cache GET and HEAD requests
     if (req.method != "GET" && req.method != "HEAD") {
         return (pass);
     }
 
-    # Strip hash and other static parameters
-    if (req.url ~ "\.(css|js|png|gif|jp(e)?g|swf|ico)") {
+    # Strip cookies for static assets
+    if (req.url ~ "\.(css|js|png|gif|jp(e)?g|swf|ico|woff|woff2|ttf|eot|svg|webp|avif)(\?.*)?$") {
         unset req.http.cookie;
+        return (hash);
     }
 
-    # Pass through for authentication/cookies (Basic WordPress/App logic)
-    if (req.http.Authorization || req.http.Cookie) {
+    # Pass through for admin/login/cart pages
+    if (req.url ~ "^/(wp-admin|wp-login|admin|checkout|cart|my-account|login|logout)") {
+        return (pass);
+    }
+
+    # Pass through for authenticated users
+    if (req.http.Authorization || req.http.Cookie ~ "(wordpress_logged_in|PHPSESSID|laravel_session)") {
         return (pass);
     }
 
@@ -41,8 +48,15 @@ sub vcl_recv {
 }
 
 sub vcl_backend_response {
-    # Grace mode: Keep content for 2 minutes beyond TTL
-    set beresp.grace = 2m;
+    # Grace: serve stale content while fetching new
+    set beresp.grace = 6h;
+
+    # Cache static assets longer
+    if (bereq.url ~ "\.(css|js|png|gif|jp(e)?g|swf|ico|woff|woff2|ttf|eot|svg|webp|avif)(\?.*)?$") {
+        unset beresp.http.cookie;
+        unset beresp.http.set-cookie;
+        set beresp.ttl = 7d;
+    }
 
     # Set a default TTL if not set by the backend
     if (beresp.ttl <= 0s) {
@@ -50,20 +64,28 @@ sub vcl_backend_response {
         set beresp.uncacheable = true;
         return (deliver);
     }
+    
+    # Don't cache errors
+    if (beresp.status >= 500) {
+        set beresp.ttl = 0s;
+        set beresp.uncacheable = true;
+    }
+    
     return (deliver);
 }
 
 sub vcl_deliver {
-    # Add a header to indicate cache status
+    # Debug header
     if (obj.hits > 0) {
         set resp.http.X-Cache = "HIT";
+        set resp.http.X-Cache-Hits = obj.hits;
     } else {
         set resp.http.X-Cache = "MISS";
     }
     
-    # Remove some headers for security/cleanliness
+    # Security: Remove internal headers
     unset resp.http.X-Powered-By;
     unset resp.http.Server;
-    unset resp.http.Via;
     unset resp.http.X-Varnish;
+    unset resp.http.Via;
 }
