@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### [1.0.1] - 2025-12-17
+
+#### Fixed
+- Fixed Nginx configuration templates referencing non-existent `includes` directory (changed to `partials`).
+- Fixed SSH service integration: added `ENABLE_SSH` configuration option and updated `tbs.sh` to include the SSH profile when enabled.
+- Standardized Alpine Linux versions across Nginx and SSH containers (upgraded SSH to Alpine 3.20).
+- Fixed Nginx entrypoint script to correctly process `common.conf` into `includes` directory, and reverted templates to point to the processed file.
+- Fixed MySQL 8.0+ compatibility by commenting out deprecated `query_cache` settings in `my.cnf`.
+- Fixed Redis session configuration by defaulting `REDIS_PASSWORD` to empty in `sample.env` to match PHP configuration.
+
 ### [1.0.0] - 2025-12-16
 
 #### Added

@@ -1,5 +1,5 @@
 # SSH Server for per-app SSH/SFTP access
-FROM alpine:3.19
+FROM alpine:3.20
 
 # Install SSH server and useful tools
 RUN apk add --no-cache \

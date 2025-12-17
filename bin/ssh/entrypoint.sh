@@ -1,18 +1,13 @@
 #!/bin/bash
 # SFTP/SSH Entrypoint Script
 # Manages per-app users with isolated access
-# - Admin user: Can access all apps
-# - App users: Can only access their own app directory
+# - Admin user: From TBS_ADMIN_* env vars (master user)
+# - App users: From /etc/ssh.d/users/*.json (per-app access)
 
 set -e
 
 USERS_DIR="/etc/ssh.d/users"
-ADMIN_FILE="/etc/ssh.d/admin.json"
-WEB_ROOT="/var/www/html/applications"
-
-# Create necessary directories
-mkdir -p "$USERS_DIR"
-mkdir -p "$(dirname "$ADMIN_FILE")"
+WEB_ROOT="/var/www/html/${APPLICATIONS_DIR_NAME:-applications}"
 
 # Function to create/update admin user (access to all apps)
 create_admin_user() {
@@ -142,18 +137,17 @@ enable_user() {
 load_users() {
     echo "Loading SSH users..."
     
-    # First, setup admin user if configured
-    if [[ -f "$ADMIN_FILE" ]] && command -v jq &>/dev/null; then
-        local admin_user=$(jq -r '.username // empty' "$ADMIN_FILE")
-        local admin_pass=$(jq -r '.password // empty' "$ADMIN_FILE")
-        local admin_enabled=$(jq -r '.enabled // true' "$ADMIN_FILE")
-        
-        if [[ "$admin_enabled" == "true" && -n "$admin_user" && -n "$admin_pass" ]]; then
-            create_admin_user "$admin_user" "$admin_pass"
-        fi
+    # First, setup admin user from environment variables
+    local admin_user="${TBS_ADMIN_USER:-}"
+    local admin_pass="${TBS_ADMIN_PASSWORD:-}"
+    
+    if [[ -n "$admin_user" && -n "$admin_pass" ]]; then
+        create_admin_user "$admin_user" "$admin_pass"
+    else
+        echo "TBS Admin not configured (set TBS_ADMIN_USER and TBS_ADMIN_PASSWORD)"
     fi
     
-    # Load app-specific users
+    # Load app-specific users from JSON files
     for user_file in "$USERS_DIR"/*.json; do
         if [[ -f "$user_file" ]]; then
             if command -v jq &>/dev/null; then

@@ -15,9 +15,6 @@ get_script_dir() {
 tbsPath=$(get_script_dir)
 tbsFile="$tbsPath/$(basename "${BASH_SOURCE[0]}")"
 
-# Allowed TLDs for application domains
-ALLOWED_TLDS="\.localhost|\.com|\.org|\.net|\.info|\.biz|\.name|\.pro|\.aero|\.coop|\.museum|\.jobs|\.mobi|\.travel|\.asia|\.cat|\.tel|\.app|\.blog|\.shop|\.xyz|\.tech|\.online|\.site|\.web|\.store|\.club|\.media|\.news|\.agency|\.guru|\.in|\.co.in|\.ai.in|\.net.in|\.org.in|\.firm.in|\.gen.in|\.ind.in|\.com.au|\.co.uk|\.co.nz|\.co.za|\.com.br|\.co.jp|\.ca|\.de|\.fr|\.cn|\.ru|\.us"
-
 # Colors and Styles
 BOLD='\033[1m'
 RED='\033[0;31m'
@@ -376,12 +373,15 @@ build_profiles() {
     if [[ "${APP_ENV:-development}" == "development" ]]; then
         profiles="$profiles --profile development"
     fi
+    if [[ "${ENABLE_SSH:-false}" == "true" ]]; then
+        profiles="$profiles --profile ssh"
+    fi
     echo "$profiles"
 }
 
 # Get all profiles for complete stack operations
 get_all_profiles() {
-    echo "--profile hybrid --profile thunder --profile development --profile tools"
+    echo "--profile hybrid --profile thunder --profile development --profile tools --profile ssh"
 }
 
 # Ensure required directories exist
@@ -447,11 +447,11 @@ generate_strong_password() {
 }
 
 # Generate unique app_user (primary identifier for app)
-# Format: <app_name>_<random> - used as directory, SSH user, and config key
+# Format: <app_name><random> - alphanumeric only, used as directory, SSH user, and config key
 generate_app_user() {
     local app_name="$1"
-    local suffix=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
-    echo "${app_name}_${suffix}"
+    local suffix=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6)
+    echo "${app_name}${suffix}"
 }
 
 # Get app config file path (by app_user - primary identifier)
@@ -937,7 +937,7 @@ open_browser() {
 tbs_config() {
     print_header
     # Set required configuration keys
-    reqConfig=("INSTALLATION_TYPE" "APP_ENV" "STACK_MODE" "PHPVERSION" "DATABASE")
+    reqConfig=("INSTALLATION_TYPE" "APP_ENV" "STACK_MODE" "PHPVERSION" "DATABASE" "ENABLE_SSH")
 
     # Track whether we already had a .env (only prompt INSTALLATION_TYPE on first run)
     local existing_env_file=true
@@ -1170,6 +1170,34 @@ tbs_config() {
         done
     }
 
+    # Function to prompt user to enable SSH
+    choose_enable_ssh() {
+        blue_message "Enable SSH Service?"
+        echo "   1. No (Default)"
+        echo "   2. Yes"
+        
+        local default_index=1
+        if [[ "$ENABLE_SSH" == "true" ]]; then
+            default_index=2
+        fi
+
+        while true; do
+            echo -ne "Select [1-2] (${YELLOW}Default: $default_index${NC}): "
+            read ssh_index
+            ssh_index=${ssh_index:-$default_index}
+
+            if [[ "$ssh_index" == "1" ]]; then
+                ENABLE_SSH="false"
+                break
+            elif [[ "$ssh_index" == "2" ]]; then
+                ENABLE_SSH="true"
+                break
+            else
+                error_message "Invalid selection. Please enter 1 or 2."
+            fi
+        done
+    }
+
     # Function to update or create the .env file
     update_env_file() {
         info_message "Updating the .env file..."
@@ -1188,6 +1216,8 @@ tbs_config() {
                 set_app_env
             elif [[ "$key" == "STACK_MODE" ]]; then
                 choose_stack_mode
+            elif [[ "$key" == "ENABLE_SSH" ]]; then
+                choose_enable_ssh
             elif [[ "$key" == "INSTALLATION_TYPE" ]]; then
                 if [[ "$existing_env_file" == "false" ]]; then
                     choose_installation_type
@@ -1301,127 +1331,46 @@ interactive_menu() {
         echo "   6) View Logs"
 
         echo -e "\n${BLUE}📦 Application${NC}"
-        echo "   7) Add New App"
-        echo "   8) Remove App"
+        echo "   7) App Manager - Create, Delete, Database, SSH, Domains"
+        echo "   8) Create Project (Laravel/WordPress/Symfony)"
         echo "   9) Open App Code"
-        echo "   10) App PHP Config"
-        echo "   11) App Configuration (varnish, domain, db, perms)"
-        echo "   12) Create Project (Laravel/WordPress/Symfony)"
+        echo "   10) App Configuration (varnish, webroot, perms)"
 
         echo -e "\n${BLUE}💾 Database${NC}"
-        echo "   13) List Databases"
-        echo "   14) Create Database"
-        echo "   15) Import Database"
-        echo "   16) Export Database"
+        echo "   11) Database Manager (list/create/import/export)"
 
         echo -e "\n${BLUE}⚙️ Configuration & Tools${NC}"
-        echo "   17) Configure Environment"
-        echo "   18) System Info"
-        echo "   19) Backup Data"
-        echo "   20) Restore Data"
-        echo "   21) SSL Certificates"
+        echo "   12) Configure Environment"
+        echo "   13) System Info"
+        echo "   14) Backup/Restore"
+        echo "   15) SSL Certificates"
         
         echo -e "\n${BLUE}🔧 Shell & Tools${NC}"
-        echo "   22) Container Shell"
-        echo "   23) Open Mailpit"
-        echo "   24) Open phpMyAdmin"
-        echo "   25) Redis CLI"
+        echo "   16) Container Shell"
+        echo "   17) Mailpit | 18) phpMyAdmin | 19) Redis CLI"
 
         echo -e "\n   ${RED}0) Exit${NC}"
         
         echo ""
-        read -p "Enter your choice [0-25]: " choice
+        read -p "Choice [0-19]: " choice
 
         local wait_needed=true
         case $choice in
-            1) tbs start ;;
-            2) tbs stop ;;
-            3) tbs restart ;;
-            4) tbs build ;;
-            5) tbs status ;;
-            6) tbs logs ;;
-            7) 
-                echo ""
-                read -p "Enter application name: " app_name
-                read -p "Enter domain name (Default: ${app_name}.localhost): " domain
-                domain=${domain:-"${app_name}.localhost"}
-                tbs addapp "$app_name" "$domain"
-                ;;
-            8) 
-                echo ""
-                read -p "Enter application name: " app_name
-                tbs removeapp "$app_name"
-                ;;
-            9) 
-                echo ""
-                read -p "Enter application name (optional): " app_name
-                tbs code "$app_name"
-                ;;
-            10)
-                echo ""
-                tbs phpconfig
-                echo ""
-                read -p "Enter app name to configure (or press Enter to skip): " app_name
-                if [[ -n "$app_name" ]]; then
-                    read -p "Action [create/edit/show/delete] (Default: show): " action
-                    action=${action:-show}
-                    tbs phpconfig "$app_name" "$action"
-                fi
-                ;;
-            11)
-                echo ""
-                tbs appconfig
-                echo ""
-                read -p "Enter app name to configure (or press Enter to skip): " app_name
-                if [[ -n "$app_name" ]]; then
-                    echo ""
-                    echo "Actions: show, varnish, webroot, domain, database, permissions, supervisor, cron, logs"
-                    read -p "Action (Default: show): " action
-                    action=${action:-show}
-                    tbs appconfig "$app_name" "$action"
-                fi
-                ;;
-            12)
-                echo ""
-                read -p "Project type [laravel/wordpress/symfony/blank]: " project_type
-                read -p "Enter application name: " app_name
-                tbs create "$project_type" "$app_name"
-                ;;
-            13) tbs db list ;;
-            14)
-                echo ""
-                read -p "Enter database name: " db_name
-                tbs db create "$db_name"
-                ;;
-            15)
-                echo ""
-                read -p "Enter database name: " db_name
-                read -p "Enter SQL file path: " sql_file
-                tbs db import "$db_name" "$sql_file"
-                ;;
-            16)
-                echo ""
-                read -p "Enter database name: " db_name
-                tbs db export "$db_name"
-                ;;
-            17) tbs config ;;
-            18) tbs info ;;
-            19) tbs backup ;;
-            20) tbs restore ;;
-            21) 
-                echo ""
-                read -p "Enter domain name: " domain
-                tbs ssl "$domain"
-                ;;
-            22)
-                echo ""
-                tbs shell
-                ;;
-            23) tbs mail ;;
-            24) tbs pma ;;
-            25) tbs redis-cli ;;
+            1) tbs start ;; 2) tbs stop ;; 3) tbs restart ;; 4) tbs build ;; 5) tbs status ;; 6) tbs logs ;;
+            7) tbs app ;;
+            8) echo ""; read -p "Type [laravel/wordpress/symfony/blank]: " t; read -p "App name: " n; tbs create "$t" "$n" ;;
+            9) tbs app code ;;
+            10) tbs app config ;;
+            11) echo ""; echo "1) List  2) Create  3) Import  4) Export"; read -p "Action: " a
+                case "$a" in 1) tbs db list ;; 2) read -p "Name: " n; tbs db create "$n" ;;
+                    3) read -p "DB: " n; read -p "File: " f; tbs db import "$n" "$f" ;;
+                    4) read -p "DB: " n; tbs db export "$n" ;; esac ;;
+            12) tbs config ;; 13) tbs info ;;
+            14) echo ""; echo "1) Backup  2) Restore"; read -p "Action: " a; [[ "$a" == "1" ]] && tbs backup || tbs restore ;;
+            15) tbs app ssl ;;
+            16) tbs shell ;; 17) tbs mail ;; 18) tbs pma ;; 19) tbs redis-cli ;;
             0) echo "Bye!"; exit 0 ;;
-            *) red_message "Invalid choice. Please try again."; sleep 1; wait_needed=false ;;
+            *) red_message "Invalid"; sleep 1; wait_needed=false ;;
         esac
 
         if $wait_needed; then
@@ -1453,9 +1402,9 @@ tbs() {
     # Determine webserver service name based on stack mode
     WEBSERVER_SERVICE=$(get_webserver_service)
 
-    # Check Turbo Stack status
-    if [[ "$1" =~ ^(start|addapp|removeapp|cmd|backup|restore|ssl|mail|pma|redis-cli)$ ]] && ! is_service_running "$WEBSERVER_SERVICE"; then
-        yellow_message "Turbo Stack is not running. Starting Turbo Stack..."
+    # Auto-start stack if needed
+    if [[ "$1" =~ ^(start|app|backup|restore|ssl|mail|pma|redis-cli|db|create|shell)$ ]] && ! is_service_running "$WEBSERVER_SERVICE"; then
+        yellow_message "Stack not running. Starting..."
         tbs_start
     fi
 
@@ -1473,11 +1422,6 @@ tbs() {
         docker compose $ALL_PROFILES down --remove-orphans
         cleanup_stack_networks
         green_message "Turbo Stack is stopped"
-        ;;
-
-    # Open a bash shell inside the webserver container
-    cmd)
-        docker compose exec "$WEBSERVER_SERVICE" bash
         ;;
 
     # Restart the Turbo Stack
@@ -1502,532 +1446,778 @@ tbs() {
         green_message "Turbo Stack rebuilt and running."
         ;;
 
-    # Add a new application and create a corresponding virtual host
-    addapp)
-        # Validate if the application name is provided
-        if [[ -z $2 ]]; then
-            error_message "Application name is required."
-            return 1
-        fi
-
-        local app_name=$2
-        local domain=$3
-
-        # Validate application name (alphanumeric, hyphens, underscores only)
-        if [[ ! $app_name =~ ^[a-zA-Z0-9_-]+$ ]]; then
-            error_message "Application name must contain only alphanumeric characters, hyphens, and underscores."
-            return 1
-        fi
-
-        # Generate unique app_user (PRIMARY IDENTIFIER for everything)
-        # app_user is used as: directory name, SSH username, config filename
-        local app_user=$(generate_app_user "$app_name")
-        local ssh_pass=$(generate_strong_password 22)
+    # ============================================
+    # Unified App Command - tbs app <action> [args]
+    # All app-related operations in one place
+    # ============================================
+    app)
+        local app_action="${2:-}"
+        local app_arg1="${3:-}"
+        local app_arg2="${4:-}"
+        local app_arg3="${5:-}"
         
-        # Calculate unique UID/GID
-        local uid_hash=$(echo "$app_user$(date +%s)" | md5sum | tr -dc '0-9' | head -c 4)
-        local ssh_uid=$((2000 + ${uid_hash:-1}))
-        local ssh_gid=$ssh_uid
+        # ==========================================
+        # Helper Functions
+        # ==========================================
         
-        info_message "Generated app user: $app_user"
-
-        # Set default domain to <app_user>.localhost if not provided
-        if [[ -z $domain ]]; then
-            domain="${app_user}.localhost"
-        else
-            # Check if the domain matches the allowed TLDs
-            if [[ ! $domain =~ ^[a-zA-Z0-9.-]+($ALLOWED_TLDS)$ ]]; then
-                error_message "Domain must end with a valid TLD."
-                return 1
+        # List all apps
+        _app_list() {
+            local apps_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
+            APP_LIST=()
+            
+            [[ ! -d "$apps_dir" ]] && { yellow_message "No apps found."; return 1; }
+            
+            echo ""
+            blue_message "╔══════════════════════════════════════════════════════════════╗"
+            blue_message "║                      📦 Applications                         ║"
+            blue_message "╠══════════════════════════════════════════════════════════════╣"
+            
+            local i=1
+            for app_dir in "$apps_dir"/*/; do
+                [[ ! -d "$app_dir" ]] && continue
+                local u=$(basename "$app_dir")
+                local n=$(get_app_config "$u" "name"); [[ -z "$n" || "$n" == "null" ]] && n="$u"
+                local d=$(get_app_config "$u" "primary_domain")
+                local icons=""
+                [[ "$(get_app_config "$u" "database.created")" == "true" ]] && icons+="💾"
+                [[ "$(get_app_config "$u" "ssh.enabled")" == "true" ]] && icons+="🔑"
+                [[ "$(get_app_config "$u" "varnish")" == "false" ]] && icons+="⚡"
+                
+                printf "║  ${CYAN}%2d${NC}) %-18s ${GREEN}%-22s${NC} %s\n" "$i" "$u" "${d:-N/A}" "$icons"
+                APP_LIST+=("$u")
+                ((i++))
+            done
+            
+            [[ ${#APP_LIST[@]} -eq 0 ]] && echo "║  ${YELLOW}No apps. Create: tbs app add <name>${NC}"
+            blue_message "╚══════════════════════════════════════════════════════════════╝"
+            echo ""
+        }
+        
+        # Select app interactively
+        _app_select() {
+            _app_list || return 1
+            [[ ${#APP_LIST[@]} -eq 0 ]] && return 1
+            
+            local sel
+            read -p "Select [1-${#APP_LIST[@]}] (0=cancel): " sel
+            [[ "$sel" == "0" ]] && return 1
+            [[ "$sel" =~ ^[0-9]+$ && "$sel" -ge 1 && "$sel" -le "${#APP_LIST[@]}" ]] || { error_message "Invalid"; return 1; }
+            SELECTED_APP="${APP_LIST[$((sel-1))]}"
+        }
+        
+        # Get or select app
+        _app_get() {
+            local input="$1"
+            if [[ -n "$input" ]]; then
+                SELECTED_APP=$(resolve_app_user "$input")
+                [[ -z "$SELECTED_APP" ]] && { error_message "App '$input' not found."; return 1; }
+            else
+                _app_select || return 1
             fi
-        fi
-
-        # Validate domain format (allow alphanumeric and dots)
-        if [[ ! $domain =~ ^[a-zA-Z0-9.-]+$ ]]; then
-            error_message "Invalid domain format."
-            return 1
-        fi
-
-        # app_user IS the directory name (primary identifier)
-
-        # Define vhost directory and file using .env variables
-        local vhost_file="${VHOSTS_DIR}/${domain}.conf"
-        local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
-
-        # Ensure required directories exist
-        ensure_directories
-
-        # Create the vhost configuration file
-        # Webroot is public_html inside app directory
-        yellow_message "Creating vhost configuration for $domain..."
-        cat >"$vhost_file" <<EOL
+        }
+        
+        # App info header
+        _app_header() {
+            local u="$1" title="$2"
+            local n=$(get_app_config "$u" "name"); [[ -z "$n" || "$n" == "null" ]] && n="$u"
+            local d=$(get_app_config "$u" "primary_domain")
+            echo ""
+            blue_message "═══════════════════════════════════════════════════════════════"
+            printf "  $title: ${CYAN}$n${NC} (${GREEN}$u${NC})\n"
+            [[ -n "$d" && "$d" != "null" ]] && printf "  Domain: ${GREEN}$d${NC}\n"
+            blue_message "═══════════════════════════════════════════════════════════════"
+        }
+        
+        # Create database for app
+        _app_db_create() {
+            local app_user="$1"
+            local mysql_pass="${MYSQL_ROOT_PASSWORD:-root}"
+            
+            is_service_running "mysql" || { error_message "MySQL not running. Run: tbs start"; return 1; }
+            
+            local db_name="${app_user//-/_}"
+            read -p "Database name (default: $db_name): " input_db
+            db_name="${input_db:-$db_name}"
+            
+            local db_user="$db_name"
+            local suggested_pass=$(generate_strong_password 16)
+            echo -e "  Auto password: ${CYAN}$suggested_pass${NC}"
+            read -p "Password (Enter=auto): " db_pass
+            db_pass="${db_pass:-$suggested_pass}"
+            
+            docker compose exec -T mysql mysql -uroot -p"$mysql_pass" -e \
+                "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+                 CREATE USER IF NOT EXISTS '$db_user'@'%' IDENTIFIED BY '$db_pass';
+                 GRANT ALL PRIVILEGES ON \`$db_name\`.* TO '$db_user'@'%'; FLUSH PRIVILEGES;" 2>/dev/null
+            
+            command_exists jq && {
+                local cfg=$(get_app_config_path "$app_user")
+                local tmp=$(mktemp)
+                jq ".database={\"name\":\"$db_name\",\"user\":\"$db_user\",\"password\":\"$db_pass\",\"host\":\"mysql\",\"created\":true}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+            }
+            
+            echo ""
+            green_message "✅ Database Created!"
+            echo "  Database: $db_name"
+            echo "  Username: $db_user"  
+            echo "  Password: $db_pass"
+            echo "  Host: mysql (container) / localhost:3306 (host)"
+            echo ""
+        }
+        
+        # ==========================================
+        # Main Command Router  
+        # ==========================================
+        case "$app_action" in
+        
+        # tbs app / tbs app list - List & Select
+        ""|list|ls)
+            _app_select || return 0
+            # Show actions menu
+            while true; do
+                _app_header "$SELECTED_APP" "📦 App"
+                echo "  1) 📂 Open in VS Code      6) 🐘 PHP Config"
+                echo "  2) 🌐 Open in Browser      7) 🔒 SSL Certificates"
+                echo "  3) 💾 Database             8) ⚙️  Settings"
+                echo "  4) 🌍 Domains              9) 🗑️  Delete"
+                echo "  5) 🔑 SSH/SFTP             0) ↩️  Back"
+                echo ""
+                read -p "Select [0-9]: " choice
+                case "$choice" in
+                    1) code "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$SELECTED_APP" ;;
+                    2) local dom=$(get_app_config "$SELECTED_APP" "primary_domain")
+                       open_browser "https://${dom:-$SELECTED_APP.localhost}" ;;
+                    3) tbs app db "$SELECTED_APP" ;;
+                    4) tbs app domain "$SELECTED_APP" ;;
+                    5) tbs app ssh "$SELECTED_APP" ;;
+                    6) tbs app php "$SELECTED_APP" ;;
+                    7) tbs app ssl "$SELECTED_APP" ;;
+                    8) tbs app config "$SELECTED_APP" ;;
+                    9) tbs app rm "$SELECTED_APP"; return 0 ;;
+                    0|"") return 0 ;;
+                esac
+            done
+            ;;
+        
+        # tbs app add <name> [domain] - Create new app
+        add|create|new)
+            local name="$app_arg1" domain="$app_arg2"
+            
+            [[ -z "$name" ]] && { read -p "App name: " name; [[ -z "$name" ]] && { error_message "Name required"; return 1; }; }
+            [[ ! "$name" =~ ^[a-zA-Z0-9_-]+$ ]] && { error_message "Invalid name (use a-z, 0-9, -, _)"; return 1; }
+            
+            # Generate app_user
+            local app_user=$(generate_app_user "$name")
+            local ssh_pass=$(generate_strong_password 22)
+            local uid_hash=$(echo "$app_user$(date +%s)" | md5sum | tr -dc '0-9' | head -c 4)
+            local ssh_uid=$((2000 + ${uid_hash:-1}))
+            
+            [[ -z "$domain" ]] && domain="${app_user}.localhost"
+            
+            info_message "Creating: $name → $app_user"
+            
+            # Create vhost
+            local vhost_file="${VHOSTS_DIR}/${domain}.conf"
+            cat >"$vhost_file" <<EOF
 <VirtualHost *:80>
     ServerName $domain
     ServerAlias www.$domain
-    ServerAdmin webmaster@$domain
-
     DocumentRoot $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user/public_html
-
     Define APP_NAME $app_user
     Include /etc/apache2/sites-enabled/partials/app-common.inc
 </VirtualHost>
-
 <VirtualHost *:443>
     ServerName $domain
     ServerAlias www.$domain
-    ServerAdmin webmaster@$domain
-
     DocumentRoot $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user/public_html
-
     Define APP_NAME $app_user
     Include /etc/apache2/sites-enabled/partials/app-common.inc
-
     SSLEngine on
     SSLCertificateFile /etc/apache2/ssl-sites/cert.pem
     SSLCertificateKeyFile /etc/apache2/ssl-sites/cert-key.pem
 </VirtualHost>
-EOL
+EOF
 
-        # Generate Nginx Configuration
-        # Common configuration for both modes (Frontend -> Varnish)
-        local nginx_config="# HTTP server configuration (Frontend -> Varnish)
+            # Nginx config
+            local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
+            cat >"$nginx_file" <<EOF
 server {
     listen 80;
     server_name $domain www.$domain;
-
     include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
 }
-
-# HTTPS server configuration (Frontend -> Varnish)
 server {
     listen 443 ssl;
     server_name $domain www.$domain;
-
-    # SSL/TLS certificate configuration
     ssl_certificate /etc/nginx/ssl-sites/cert.pem;
     ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-
     include /etc/nginx/includes/common.conf;
     include /etc/nginx/partials/varnish-proxy.conf;
-}"
-
-        # Add PHP-FPM backend for Thunder mode
-        if [[ "$(get_webserver_service)" == "webserver-fpm" ]]; then
-            nginx_config="$nginx_config
-
-# Internal Backend for Varnish (Port 8080)
+}
+EOF
+            [[ "$(get_webserver_service)" == "webserver-fpm" ]] && cat >>"$nginx_file" <<EOF
 server {
     listen 8080;
     server_name $domain www.$domain;
     root $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user/public_html;
-    index index.php index.html index.htm;
-
+    index index.php index.html;
     include /etc/nginx/partials/php-fpm.conf;
-}"
-        fi
-
-        # Write Nginx configuration to file
-        echo "$nginx_config" > "$nginx_file"
-
-        green_message "Vhost configuration file created at: $vhost_file"
-
-        # Reload Nginx to ensure it serves the new domain (required for Let's Encrypt validation)
-        reload_webservers
-
-        # Check if SSL generation is needed
-        local domainUrl
-        if ! generate_ssl_certificates $domain $vhost_file $nginx_file; then
-            domainUrl="http://$domain"
-        else
-            domainUrl="https://$domain"
-        fi
-
-        # Create the application directory structure
-        # Structure:
-        #   /applications/<app_user>/
-        #   ├── public_html/    <- webroot (website files)
-        #   ├── logs/           <- app-specific logs
-        #   ├── tmp/            <- temporary files
-        #   ├── .ssh/           <- SSH keys for deployment
-        #   ├── backup/         <- app backups
-        #   └── data/           <- app data (uploads, cache, etc.)
-        
-        local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
-        local webroot="${app_root}/public_html"
-        
-        if [[ ! -d $app_root ]]; then
-            info_message "Creating application structure at $app_root..."
-            
-            # Create all directories
-            mkdir -p "$webroot"           # Webroot - website files
-            mkdir -p "${app_root}/logs"   # App logs
-            mkdir -p "${app_root}/tmp"    # Temp files
-            mkdir -p "${app_root}/.ssh"   # SSH keys
-            mkdir -p "${app_root}/backup" # Backups
-            mkdir -p "${app_root}/data"   # App data
-            
-            # Set restrictive permissions on .ssh
-            chmod 700 "${app_root}/.ssh"
-            
-            # Create .gitkeep files to preserve empty directories
-            touch "${app_root}/logs/.gitkeep"
-            touch "${app_root}/tmp/.gitkeep"
-            touch "${app_root}/backup/.gitkeep"
-            touch "${app_root}/data/.gitkeep"
-            
-            green_message "Application structure created:"
-            info_message "  $app_user/"
-            info_message "  ├── public_html/  <- webroot"
-            info_message "  ├── logs/"
-            info_message "  ├── tmp/"
-            info_message "  ├── .ssh/"
-            info_message "  ├── backup/"
-            info_message "  └── data/"
-        else
-            yellow_message "Application directory already exists at $app_root"
-            # Ensure all subdirectories exist
-            mkdir -p "$webroot" "${app_root}/logs" "${app_root}/tmp" "${app_root}/.ssh" "${app_root}/backup" "${app_root}/data"
-        fi
-
-        # Create an index.php file in the webroot (public_html)
-        local index_file="${webroot}/index.php"
-        local indexHtml="$tbsPath/data/pages/site-created.html"
-        if [[ -f "$indexHtml" ]]; then
-            sed -e "s|example.com|$domain|g" \
-                -e "s|index.html|index.php|g" \
-                -e "s|/var/www/html|$webroot|g" \
-                -e "s|tbs code|tbs code $app_user|g" \
-                "$indexHtml" > "$index_file" 2>/dev/null || {
-                # Fallback if sed fails
-                cat > "$index_file" <<EOF
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Site Created: $domain</title>
-</head>
-<body>
-    <h1>Site Created Successfully!</h1>
-    <p>Domain: <strong>$domain</strong> is ready to use</p>
-    <p>Run <code>tbs code $app_user</code> to edit files.</p>
-</body>
-</html>
-EOF
-            }
-            info_message "index.php created at $index_file"
-        else
-            yellow_message "Template file not found, creating basic index.php"
-            cat > "$index_file" <<EOF
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Site Created: $domain</title>
-</head>
-<body>
-    <h1>Site Created Successfully!</h1>
-    <p>Domain: <strong>$domain</strong> is ready to use</p>
-    <p>Run <code>tbs code $app_user</code> to edit files.</p>
-</body>
-</html>
-EOF
-        fi
-
-        # Enable the new virtual host and reload Apache
-        yellow_message "Activating the virtual host..."
-        reload_webservers
-
-        # Open the domain in the default web browser
-        open_browser "$domainUrl"
-
-        green_message "App setup complete!"
-        info_message "  App User: $app_user"
-        info_message "  Label: $app_name"
-        info_message "  Domain: $domain"
-        
-        # Initialize app configuration (app_user as primary, app_name as label)
-        local config_file=$(init_app_config "$app_user" "$app_name")
-        
-        # Create SSH user config file (named by app_user for consistency)
-        mkdir -p "$tbsPath/config/ssh/users"
-        local ssh_user_file="$tbsPath/config/ssh/users/${app_user}.json"
-        cat > "$ssh_user_file" <<EOF
-{
-    "app_user": "$app_user",
-    "username": "$app_user",
-    "dir_name": "$app_user",
-    "password": "$ssh_pass",
-    "name": "$app_name",
-    "enabled": true,
-    "uid": $ssh_uid,
-    "gid": $ssh_gid,
-    "created_at": "$(date -Iseconds)"
 }
 EOF
-        
-        # Update app config with SSH info
-        if command_exists jq; then
-            local tmp_file=$(mktemp)
-            jq ". + {
-                \"ssh\": {
-                    \"enabled\": true,
-                    \"username\": \"$app_user\",
-                    \"password\": \"$ssh_pass\",
-                    \"port\": ${HOST_MACHINE_SSH_PORT:-2244},
-                    \"uid\": $ssh_uid,
-                    \"gid\": $ssh_gid
-                },
-                \"permissions\": {
-                    \"owner\": \"$app_user\",
-                    \"group\": \"$app_user\"
-                }
-            }" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
-        fi
-        
-        # Set file ownership to app_user in container (each app has its own user/group)
-        if is_service_running "$WEBSERVER_SERVICE"; then
-            info_message "Setting file ownership to app user ($app_user:$app_user)..."
-            docker compose exec "$WEBSERVER_SERVICE" bash -c "
-                # Create dedicated group for this app
-                groupadd -g $ssh_gid $app_user 2>/dev/null || true
-                
-                # Create dedicated user for this app (home = app directory)
-                useradd -u $ssh_uid -g $ssh_gid -M -d /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -s /bin/bash $app_user 2>/dev/null || true
-                
-                # Add user to www-data group for web server compatibility
-                usermod -aG www-data $app_user 2>/dev/null || true
-                
-                # Add www-data to this user's group (so web server can read files)
-                usermod -aG $app_user www-data 2>/dev/null || true
-                
-                # Change ownership to app user (NOT www-data)
-                chown -R $ssh_uid:$ssh_gid /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user
-                
-                # Set proper permissions: owner full, group read+execute (for admin/www-data)
+
+            # Create directory structure
+            local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
+            mkdir -p "$app_root"/{public_html,logs,tmp,.ssh,backup,data}
+            chmod 700 "$app_root/.ssh"
+            
+            # Create index.php
+            cat > "$app_root/public_html/index.php" <<EOF
+<!DOCTYPE html><html><head><title>$domain</title></head>
+<body><h1>✅ $domain is ready!</h1><p>App: $app_user</p></body></html>
+EOF
+
+            # Generate SSL
+            generate_ssl_certificates "$domain" "$vhost_file" "$nginx_file" 2>/dev/null || true
+            
+            # Init config
+            local config_file=$(init_app_config "$app_user" "$name")
+            
+            # SSH user config
+            mkdir -p "$tbsPath/sites/ssh"
+            cat > "$tbsPath/sites/ssh/${app_user}.json" <<EOF
+{"app_user":"$app_user","username":"$app_user","password":"$ssh_pass","enabled":true,"uid":$ssh_uid,"gid":$ssh_uid}
+EOF
+            
+            # Update app config
+            command_exists jq && {
+                local tmp=$(mktemp)
+                jq ".ssh={\"enabled\":true,\"username\":\"$app_user\",\"password\":\"$ssh_pass\",\"port\":${HOST_MACHINE_SSH_PORT:-2244},\"uid\":$ssh_uid,\"gid\":$ssh_uid}" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+            }
+            
+            # Set permissions in container
+            is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
+                groupadd -g $ssh_uid $app_user 2>/dev/null || true
+                useradd -u $ssh_uid -g $ssh_uid -M -d /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user $app_user 2>/dev/null || true
+                chown -R $ssh_uid:$ssh_uid /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user
                 find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 750 {} \;
                 find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 640 {} \;
-                
-                # Set restrictive permissions on .ssh directory (700 for dir, 600 for files)
-                chmod 700 /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/.ssh 2>/dev/null || true
-                find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/.ssh -type f -exec chmod 600 {} \; 2>/dev/null || true
-                
-                # Make tmp directory writable with sticky bit
-                chmod 1770 /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/tmp 2>/dev/null || true
             " 2>/dev/null
-        fi
-        
-        # Save credentials to a local file for reference
-        local creds_file="$app_root/.ssh-credentials"
-        cat > "$creds_file" <<EOF
-# SSH/SFTP Credentials for $app_user
-# App Label: $app_name
-# Generated: $(date)
-# SECURITY: Delete this file after noting the credentials!
-
-Host: localhost
-Port: ${HOST_MACHINE_SSH_PORT:-2244}
-Username: $app_user
-Password: $ssh_pass
-
-# SSH Connection:
-ssh -p ${HOST_MACHINE_SSH_PORT:-2244} $app_user@localhost
-
-# SFTP Connection:
-sftp -P ${HOST_MACHINE_SSH_PORT:-2244} $app_user@localhost
-EOF
-        chmod 600 "$creds_file"
-        
-        # Display SSH credentials
-        echo ""
-        blue_message "═══════════════════════════════════════════════════"
-        blue_message "         SSH/SFTP Access Credentials"
-        blue_message "═══════════════════════════════════════════════════"
-        echo ""
-        echo "  App User:  $app_user"
-        echo "  Password:  $ssh_pass"
-        echo "  Port:      ${HOST_MACHINE_SSH_PORT:-2244}"
-        echo ""
-        echo "  SSH:  ssh -p ${HOST_MACHINE_SSH_PORT:-2244} $app_user@localhost"
-        echo "  SFTP: sftp -P ${HOST_MACHINE_SSH_PORT:-2244} $app_user@localhost"
-        echo ""
-        blue_message "═══════════════════════════════════════════════════"
-        yellow_message "⚠️  Save these credentials! They won't be shown again."
-        info_message "Credentials also saved to: $creds_file"
-        echo ""
-        
-        # Ask if user wants to create database
-        echo ""
-        if yes_no_prompt "Create dedicated database for this app?"; then
-            tbs appconfig "$app_user" database create
-        else
-            info_message "You can create it later with: tbs appconfig $app_user database create"
-        fi
-        
-        # Ask if user wants to create custom PHP config
-        echo ""
-        if yes_no_prompt "Create custom PHP config (.user.ini) for this app?"; then
-            tbs phpconfig "$app_user" create
-        else
-            info_message "You can create it later with: tbs phpconfig $app_user create"
-        fi
-        
-        echo ""
-        yellow_message "Note: Start SSH service with: docker compose --profile ssh up -d ssh"
-        ;;
-
-    # Remove an application
-    removeapp)
-        if [[ -z $2 ]]; then
-            error_message "Application name or app_user is required."
-            return 1
-        fi
-
-        local input=$2
-        
-        # Resolve input to app_user (accepts app_user or app_name)
-        local app_user=$(resolve_app_user "$input")
-        if [[ -z "$app_user" ]]; then
-            error_message "App '$input' not found."
-            return 1
-        fi
-        
-        # Get display name from config
-        local app_name=$(get_app_config "$app_user" "name")
-        [[ -z "$app_name" || "$app_name" == "null" ]] && app_name="$app_user"
-        
-        # Try to find the domain from config or vhost
-        local domain=$3
-        if [[ -z $domain ]]; then
-            # First check app config
-            domain=$(get_app_config "$app_user" "primary_domain")
             
-            if [[ -z "$domain" || "$domain" == "null" ]]; then
-                # Try to find a vhost file containing the app path
-                found_vhost=$(grep -l "$APPLICATIONS_DIR_NAME/$app_user" "$VHOSTS_DIR"/*.conf 2>/dev/null | head -n 1)
-                if [[ -n "$found_vhost" ]]; then
-                    domain=$(basename "$found_vhost" .conf)
-                    info_message "Found domain $domain for app $app_user"
-                else
-                    domain="${app_user}.localhost"
-                    yellow_message "Domain not provided and not found. Assuming $domain"
-                fi
-            fi
-        fi
-
-        local vhost_file="${VHOSTS_DIR}/${domain}.conf"
-        local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
-        local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
-
-        if [[ ! -f $vhost_file && ! -d $app_root ]]; then
-            error_message "Application $app_user not found."
-            return 1
-        fi
-
-        if yes_no_prompt "Are you sure you want to remove app '$app_name' ($app_user) and domain '$domain'? This will delete configuration files."; then
-            # Remove config files
-            if [[ -f $vhost_file ]]; then
-                rm "$vhost_file"
-                green_message "Removed $vhost_file"
-            fi
-            if [[ -f $nginx_file ]]; then
-                rm "$nginx_file"
-                green_message "Removed $nginx_file"
-            fi
-            
-            # Remove SSL certs if they exist
-            if [[ -f "${SSL_DIR}/$domain-key.pem" ]]; then
-                rm "${SSL_DIR}/$domain-key.pem"
-                rm "${SSL_DIR}/$domain-cert.pem"
-                green_message "Removed SSL certificates for $domain"
-            fi
-
-            # Remove app directory
-            if [[ -d $app_root ]]; then
-                if yes_no_prompt "Do you also want to delete the application files at $app_root?"; then
-                    rm -rf "$app_root"
-                    green_message "Removed application files."
-                else
-                    info_message "Application files kept at $app_root"
-                fi
-            fi
-            
-            # Remove SSH user config (named by app_user)
-            rm -f "$tbsPath/config/ssh/users/${app_user}.json"
-            
-            # Remove app config (named by app_user)
-            rm -f "$tbsPath/sites/apps/${app_user}.json"
-            
-            # Remove cron config
-            rm -f "$tbsPath/config/cron/${app_user}.cron"
-            
-            # Remove supervisor configs
-            rm -f "$tbsPath/config/supervisor/${app_user}_"*.conf 2>/dev/null
-            
-            green_message "App '$app_name' ($app_user) removed completely."
-
-            # Reload servers
             reload_webservers
-        else
-            info_message "Operation cancelled."
-        fi
+            
+            echo ""
+            green_message "✅ App Created!"
+            blue_message "═══════════════════════════════════════════════════════════════"
+            echo "  App User:  $app_user"
+            echo "  Domain:    https://$domain"
+            echo "  SSH User:  $app_user"
+            echo "  SSH Pass:  $ssh_pass"
+            echo "  SSH Port:  ${HOST_MACHINE_SSH_PORT:-2244}"
+            blue_message "═══════════════════════════════════════════════════════════════"
+            echo ""
+            
+            # Ask for database
+            read -p "Create database? (Y/n): " create_db
+            [[ ! "$create_db" =~ ^[Nn]$ ]] && _app_db_create "$app_user"
+            
+            open_browser "https://$domain"
+            ;;
+        
+        # tbs app rm [app] - Delete app
+        rm|delete|remove)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            local app_name=$(get_app_config "$app_user" "name"); [[ -z "$app_name" || "$app_name" == "null" ]] && app_name="$app_user"
+            local domain=$(get_app_config "$app_user" "primary_domain")
+            
+            _app_header "$app_user" "🗑️  Delete App"
+            red_message "⚠️  This cannot be undone!"
+            echo ""
+            echo -e "Type ${CYAN}$app_user${NC} to confirm:"
+            read -p "Confirm: " confirm
+            [[ "$confirm" != "$app_user" ]] && { error_message "Cancelled."; return 1; }
+            
+            # Ask about database & files
+            local del_db="n" del_files="n"
+            local db_name=$(get_app_config "$app_user" "database.name")
+            [[ -n "$db_name" && "$db_name" != "null" ]] && read -p "Delete database '$db_name'? (y/N): " del_db
+            [[ -d "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user" ]] && read -p "Delete files? (y/N): " del_files
+            
+            info_message "Deleting..."
+            
+            # Delete database
+            [[ "$del_db" =~ ^[Yy]$ ]] && is_service_running "mysql" && {
+                local db_user=$(get_app_config "$app_user" "database.user")
+                docker compose exec -T mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -e \
+                    "DROP DATABASE IF EXISTS \`$db_name\`; DROP USER IF EXISTS '$db_user'@'%';" 2>/dev/null
+                green_message "Database deleted"
+            }
+            
+            # Delete configs
+            rm -f "${VHOSTS_DIR}/${domain}.conf" "${NGINX_CONF_DIR}/${domain}.conf"
+            rm -f "${SSL_DIR}/${domain}-key.pem" "${SSL_DIR}/${domain}-cert.pem"
+            rm -f "$tbsPath/sites/ssh/${app_user}.json"
+            rm -f "$tbsPath/sites/apps/${app_user}.json"
+            rm -f "$tbsPath/sites/cron/${app_user}_cron"
+            rm -f "$tbsPath/sites/supervisor/${app_user}_"*.conf 2>/dev/null
+            rm -f "$tbsPath/sites/php/pools/${app_user}.conf"
+            
+            # Delete files
+            [[ "$del_files" =~ ^[Yy]$ ]] && rm -rf "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
+            
+            reload_webservers
+            green_message "✅ App '$app_name' deleted!"
+            ;;
+        
+        # tbs app db [app] - Database management
+        db|database)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            local mysql_pass="${MYSQL_ROOT_PASSWORD:-root}"
+            
+            is_service_running "mysql" || { error_message "MySQL not running"; return 1; }
+            
+            local db=$(get_app_config "$app_user" "database.name")
+            local db_user=$(get_app_config "$app_user" "database.user")
+            local db_created=$(get_app_config "$app_user" "database.created")
+            
+            _app_header "$app_user" "💾 Database"
+            [[ "$db_created" == "true" ]] && echo "  Current: $db (user: $db_user)"
+            echo ""
+            echo "  1) 📋 Show Credentials    4) 📥 Import"
+            echo "  2) ➕ Create Database     5) 📤 Export"
+            echo "  3) 🔄 Reset Password      6) 🗑️  Delete"
+            echo "  0) ↩️  Back"
+            echo ""
+            read -p "Select [0-6]: " choice
+            
+            case "$choice" in
+                1) [[ "$db_created" != "true" ]] && { yellow_message "No database"; return 0; }
+                   local cfg=$(get_app_config_path "$app_user")
+                   echo ""
+                   echo "  Database: $(jq -r '.database.name' "$cfg")"
+                   echo "  Username: $(jq -r '.database.user' "$cfg")"
+                   echo "  Password: $(jq -r '.database.password' "$cfg")"
+                   echo "  Host: mysql / localhost:3306"
+                   ;;
+                2) _app_db_create "$app_user" ;;
+                3) [[ "$db_created" != "true" ]] && { error_message "No database"; return 1; }
+                   local new_pass=$(generate_strong_password 16)
+                   echo -e "  Auto: ${CYAN}$new_pass${NC}"
+                   read -p "New password (Enter=auto): " input_pass
+                   new_pass="${input_pass:-$new_pass}"
+                   docker compose exec -T mysql mysql -uroot -p"$mysql_pass" -e "ALTER USER '$db_user'@'%' IDENTIFIED BY '$new_pass'; FLUSH PRIVILEGES;" 2>/dev/null
+                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".database.password=\"$new_pass\"" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                   green_message "✅ Password: $new_pass"
+                   ;;
+                4) [[ "$db_created" != "true" ]] && { error_message "No database"; return 1; }
+                   read -p "SQL file: " sql_file
+                   [[ ! -f "$sql_file" ]] && { error_message "File not found"; return 1; }
+                   [[ "$sql_file" == *.gz ]] && gunzip -c "$sql_file" | docker compose exec -T mysql mysql -uroot -p"$mysql_pass" "$db" 2>/dev/null || docker compose exec -T mysql mysql -uroot -p"$mysql_pass" "$db" < "$sql_file" 2>/dev/null
+                   green_message "✅ Imported!"
+                   ;;
+                5) [[ "$db_created" != "true" ]] && { error_message "No database"; return 1; }
+                   local out="$tbsPath/data/backup/${db}_$(date +%Y%m%d_%H%M%S).sql"
+                   docker compose exec -T mysql mysqldump -uroot -p"$mysql_pass" "$db" 2>/dev/null > "$out"
+                   green_message "✅ Exported: $out"
+                   ;;
+                6) [[ "$db_created" != "true" ]] && { error_message "No database"; return 1; }
+                   read -p "Type '$db' to delete: " confirm
+                   [[ "$confirm" != "$db" ]] && { info_message "Cancelled"; return 0; }
+                   docker compose exec -T mysql mysql -uroot -p"$mysql_pass" -e "DROP DATABASE IF EXISTS \`$db\`; DROP USER IF EXISTS '$db_user'@'%';" 2>/dev/null
+                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".database={\"name\":\"\",\"user\":\"\",\"password\":\"\",\"created\":false}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                   green_message "✅ Deleted!"
+                   ;;
+            esac
+            ;;
+        
+        # tbs app ssh [app] - SSH management
+        ssh|sftp)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            local ssh_file="$tbsPath/sites/ssh/${app_user}.json"
+            local ssh_enabled=$(get_app_config "$app_user" "ssh.enabled")
+            
+            _app_header "$app_user" "🔑 SSH/SFTP"
+            [[ "$ssh_enabled" == "true" ]] && echo "  Status: ${GREEN}Enabled${NC}" || echo "  Status: ${RED}Disabled${NC}"
+            echo ""
+            echo "  1) 📋 Show Credentials    3) 🔄 Reset Password"
+            echo "  2) ✅ Enable SSH          4) ❌ Disable SSH"
+            echo "  0) ↩️  Back"
+            echo ""
+            read -p "Select [0-4]: " choice
+            
+            case "$choice" in
+                1) [[ "$ssh_enabled" != "true" ]] && { yellow_message "SSH not enabled"; return 0; }
+                   command_exists jq && {
+                       local cfg=$(get_app_config_path "$app_user")
+                       echo ""
+                       echo "  Host: localhost"
+                       echo "  Port: $(jq -r '.ssh.port' "$cfg")"
+                       echo "  User: $(jq -r '.ssh.username' "$cfg")"
+                       echo "  Pass: $(jq -r '.ssh.password' "$cfg")"
+                   }
+                   ;;
+                2) local pass=$(generate_strong_password 22)
+                   local uid=$(get_app_config "$app_user" "ssh.uid")
+                   [[ -z "$uid" || "$uid" == "null" ]] && { local h=$(echo "$app_user$(date +%s)" | md5sum | tr -dc '0-9' | head -c 4); uid=$((2000 + ${h:-1})); }
+                   mkdir -p "$tbsPath/sites/ssh"
+                   echo "{\"app_user\":\"$app_user\",\"username\":\"$app_user\",\"password\":\"$pass\",\"enabled\":true,\"uid\":$uid,\"gid\":$uid}" > "$ssh_file"
+                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh={\"enabled\":true,\"username\":\"$app_user\",\"password\":\"$pass\",\"port\":${HOST_MACHINE_SSH_PORT:-2244},\"uid\":$uid,\"gid\":$uid}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                   green_message "✅ SSH Enabled! Pass: $pass"
+                   ;;
+                3) local pass=$(generate_strong_password 22)
+                   command_exists jq && [[ -f "$ssh_file" ]] && { local tmp=$(mktemp); jq ".password=\"$pass\"|.enabled=true" "$ssh_file" > "$tmp" && mv "$tmp" "$ssh_file"; }
+                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh.password=\"$pass\"|.ssh.enabled=true" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                   green_message "✅ New password: $pass"
+                   ;;
+                4) command_exists jq && [[ -f "$ssh_file" ]] && { local tmp=$(mktemp); jq ".enabled=false" "$ssh_file" > "$tmp" && mv "$tmp" "$ssh_file"; }
+                   set_app_config "$app_user" "ssh.enabled" "false"
+                   yellow_message "SSH Disabled"
+                   ;;
+            esac
+            ;;
+        
+        # tbs app domain [app] - Domain management
+        domain|domains)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            
+            _app_header "$app_user" "🌍 Domains"
+            echo "  Current domains:"
+            command_exists jq && jq -r '.domains[]? // empty' "$(get_app_config_path "$app_user")" 2>/dev/null | while read d; do
+                local p=$(get_app_config "$app_user" "primary_domain")
+                [[ "$d" == "$p" ]] && echo "    • $d (primary)" || echo "    • $d"
+            done
+            echo ""
+            echo "  1) ➕ Add Domain"
+            echo "  2) ➖ Remove Domain"
+            echo "  0) ↩️  Back"
+            echo ""
+            read -p "Select [0-2]: " choice
+            
+            case "$choice" in
+                1) read -p "New domain: " new_dom
+                   [[ -z "$new_dom" ]] && return 0
+                   local primary=$(get_app_config "$app_user" "primary_domain")
+                   local src_vhost="${VHOSTS_DIR}/${primary}.conf"
+                   [[ -f "$src_vhost" ]] && sed "s/$primary/$new_dom/g" "$src_vhost" > "${VHOSTS_DIR}/${new_dom}.conf"
+                   local src_nginx="${NGINX_CONF_DIR}/${primary}.conf"
+                   [[ -f "$src_nginx" ]] && sed "s/$primary/$new_dom/g" "$src_nginx" > "${NGINX_CONF_DIR}/${new_dom}.conf"
+                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".domains+=[\"$new_dom\"]" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                   generate_ssl_certificates "$new_dom" "${VHOSTS_DIR}/${new_dom}.conf" "${NGINX_CONF_DIR}/${new_dom}.conf" 2>/dev/null || true
+                   reload_webservers
+                   green_message "✅ Domain added: $new_dom"
+                   ;;
+                2) read -p "Domain to remove: " rem_dom
+                   local primary=$(get_app_config "$app_user" "primary_domain")
+                   [[ "$rem_dom" == "$primary" ]] && { error_message "Cannot remove primary domain"; return 1; }
+                   rm -f "${VHOSTS_DIR}/${rem_dom}.conf" "${NGINX_CONF_DIR}/${rem_dom}.conf"
+                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".domains-=[\"$rem_dom\"]" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                   reload_webservers
+                   green_message "✅ Domain removed"
+                   ;;
+            esac
+            ;;
+        
+        # tbs app ssl [app] - SSL certificate management
+        ssl|certificate|certs)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            local ssl_dir="$tbsPath/sites/ssl"
+            
+            _app_header "$app_user" "🔒 SSL Certificates"
+            
+            # Get all domains
+            local domains=()
+            if command_exists jq; then
+                mapfile -t domains < <(jq -r '.domains[]? // empty' "$(get_app_config_path "$app_user")" 2>/dev/null)
+            fi
+            [[ ${#domains[@]} -eq 0 ]] && domains=("$(get_app_config "$app_user" "primary_domain")")
+            
+            echo "  App Domains:"
+            local i=1
+            for d in "${domains[@]}"; do
+                [[ -z "$d" || "$d" == "null" ]] && continue
+                local cert="$ssl_dir/${d}.crt"
+                [[ -f "$cert" ]] && echo "    $i) $d ${GREEN}✓${NC}" || echo "    $i) $d ${YELLOW}✗${NC}"
+                ((i++))
+            done
+            echo ""
+            echo "  1) 🔐 Generate SSL for ALL domains"
+            echo "  2) 🔐 Generate SSL for specific domain"
+            echo "  3) 🔍 Check SSL status"
+            echo "  0) ↩️  Back"
+            echo ""
+            read -p "Select [0-3]: " choice
+            
+            case "$choice" in
+                1) # Generate for all domains
+                   echo ""
+                   for d in "${domains[@]}"; do
+                       [[ -z "$d" || "$d" == "null" ]] && continue
+                       info_message "Generating SSL for: $d"
+                       local vf="${VHOSTS_DIR}/${d}.conf"
+                       local nf="${NGINX_CONF_DIR}/${d}.conf"
+                       generate_ssl_certificates "$d" "$vf" "$nf" 2>/dev/null && green_message "  ✅ $d" || yellow_message "  ⚠️  $d (may already exist)"
+                   done
+                   reload_webservers
+                   green_message "✅ SSL generation complete!"
+                   ;;
+                2) # Generate for specific domain
+                   echo "  Enter domain number or name:"
+                   read -p "  Domain: " sel_dom
+                   # Check if it's a number
+                   if [[ "$sel_dom" =~ ^[0-9]+$ ]] && [[ $sel_dom -le ${#domains[@]} ]] && [[ $sel_dom -gt 0 ]]; then
+                       sel_dom="${domains[$((sel_dom-1))]}"
+                   fi
+                   [[ -z "$sel_dom" ]] && return 0
+                   # Verify domain belongs to this app
+                   local found=false
+                   for d in "${domains[@]}"; do [[ "$d" == "$sel_dom" ]] && found=true && break; done
+                   [[ "$found" != "true" ]] && { error_message "Domain not found in this app"; return 1; }
+                   local vf="${VHOSTS_DIR}/${sel_dom}.conf"
+                   local nf="${NGINX_CONF_DIR}/${sel_dom}.conf"
+                   generate_ssl_certificates "$sel_dom" "$vf" "$nf" && reload_webservers && green_message "✅ SSL generated for: $sel_dom" || error_message "Failed to generate SSL"
+                   ;;
+                3) # Check SSL status
+                   echo ""
+                   for d in "${domains[@]}"; do
+                       [[ -z "$d" || "$d" == "null" ]] && continue
+                       local cert="$ssl_dir/${d}.crt"
+                       if [[ -f "$cert" ]]; then
+                           local expiry=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2)
+                           echo "  $d: ${GREEN}Valid${NC} (expires: $expiry)"
+                       else
+                           echo "  $d: ${RED}No certificate${NC}"
+                       fi
+                   done
+                   ;;
+            esac
+            ;;
+        
+        # tbs app php [app] - PHP config
+        php|phpconfig)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
+            local user_ini="$app_root/public_html/.user.ini"
+            local pool_conf="$tbsPath/sites/php/pools/${app_user}.conf"
+            
+            _app_header "$app_user" "🐘 PHP Config"
+            [[ -f "$user_ini" ]] && echo "  .user.ini: ${GREEN}exists${NC}" || echo "  .user.ini: ${YELLOW}not set${NC}"
+            [[ -f "$pool_conf" ]] && echo "  FPM pool: ${GREEN}exists${NC}" || echo "  FPM pool: ${YELLOW}not set${NC}"
+            echo ""
+            echo "  1) 📄 Create .user.ini     4) 📝 Edit .user.ini"
+            echo "  2) ⚙️  Create FPM pool      5) 📝 Edit FPM pool"
+            echo "  3) 🗑️  Delete configs       6) 📋 Show FPM pool"
+            echo "  0) ↩️  Back"
+            echo ""
+            read -p "Select [0-6]: " choice
+            
+            case "$choice" in
+                1) cat > "$user_ini" <<'INI'
+memory_limit = 512M
+max_execution_time = 300
+upload_max_filesize = 64M
+post_max_size = 64M
+INI
+                   green_message "✅ .user.ini created"
+                   ;;
+                2) mkdir -p "$tbsPath/sites/php/pools"
+                   cat > "$pool_conf" <<POOL
+[$app_user]
+user = www-data
+group = www-data
+listen = /var/run/php-fpm-$app_user.sock
+pm = dynamic
+pm.max_children = 20
+pm.start_servers = 5
+POOL
+                   green_message "✅ FPM pool created"
+                   ;;
+                3) rm -f "$user_ini" "$pool_conf"; green_message "✅ Deleted" ;;
+                4) [[ -f "$user_ini" ]] && open_in_editor "$user_ini" || { tbs app php "$app_user"; return; } ;;
+                5) [[ -f "$pool_conf" ]] && open_in_editor "$pool_conf" || { tbs app php "$app_user"; return; } ;;
+                6) [[ -f "$pool_conf" ]] && cat "$pool_conf" || info_message "No pool config" ;;
+            esac
+            ;;
+        
+        # tbs app supervisor [app] [add|rm|list]
+        supervisor)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            local action="${app_arg2:-list}"
+            local name="${app_arg3:-worker}"
+            local sc="$tbsPath/sites/supervisor/${app_user}_${name}.conf"
+            
+            case "$action" in
+                add) read -p "Command: " cmd
+                     echo -e "[program:${app_user}_${name}]\ncommand=$cmd\ndirectory=/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user\nautostart=true\nautorestart=true" > "$sc"
+                     green_message "✅ Added: $sc" ;;
+                rm|remove) rm -f "$sc"; green_message "✅ Removed" ;;
+                list|ls|*) ls "$tbsPath/sites/supervisor/${app_user}_"*.conf 2>/dev/null || echo "None" ;;
+            esac
+            ;;
+
+        # tbs app cron [app] [add|rm|list]
+        cron)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            local action="${app_arg2:-list}"
+            local cf="$tbsPath/sites/cron/${app_user}_cron"
+            
+            case "$action" in
+                add) read -p "Schedule (e.g. * * * * *): " sched; read -p "Command: " cmd
+                     echo "$sched root cd /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user && $cmd" >> "$cf"
+                     green_message "✅ Cron added" ;;
+                rm|remove) [[ -f "$cf" ]] && sed_i "${app_arg3}d" "$cf" && green_message "✅ Removed line ${app_arg3}" ;;
+                list|ls|*) [[ -f "$cf" ]] && cat -n "$cf" || echo "None" ;;
+            esac
+            ;;
+
+        # tbs app logs [app] [enable|disable]
+        logs)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            local action="${app_arg2:-status}"
+            local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
+            
+            case "$action" in
+                enable) mkdir -p "$app_root/logs"; set_app_config "$app_user" "logs.enabled" "true"; green_message "✅ Logs enabled" ;;
+                disable) set_app_config "$app_user" "logs.enabled" "false"; yellow_message "Logs disabled" ;;
+                status|*) info_message "Logs: $(get_app_config "$app_user" "logs.enabled")" ;;
+            esac
+            ;;
+
+        # tbs app config [app] [action] [value] - App settings
+        config|settings)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            local sub_action="$app_arg2"
+            local sub_val="$app_arg3"
+
+            # Non-interactive mode
+            if [[ -n "$sub_action" ]]; then
+                case "$sub_action" in
+                    varnish)
+                        [[ "$sub_val" =~ ^(on|1|true)$ ]] && { set_app_config "$app_user" "varnish" "true"; green_message "Varnish ON"; } || \
+                        [[ "$sub_val" =~ ^(off|0|false)$ ]] && { set_app_config "$app_user" "varnish" "false"; yellow_message "Varnish OFF"; } || \
+                        info_message "Varnish: $(get_app_config "$app_user" "varnish")" ;;
+                    webroot)
+                        [[ -z "$sub_val" ]] && { info_message "Webroot: $(get_app_config "$app_user" "webroot")"; return; }
+                        set_app_config "$app_user" "webroot" "\"$sub_val\""; green_message "Webroot: $sub_val"
+                        local d=$(get_app_config "$app_user" "primary_domain") dr="/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/$sub_val"
+                        [[ -f "${VHOSTS_DIR}/${d}.conf" ]] && sed_i "s|DocumentRoot.*|DocumentRoot $dr|g" "${VHOSTS_DIR}/${d}.conf"
+                        [[ -f "${NGINX_CONF_DIR}/${d}.conf" ]] && sed_i "s|root.*applications/$app_user.*|root $dr;|g" "${NGINX_CONF_DIR}/${d}.conf"
+                        info_message "Restart to apply: tbs restart" ;;
+                    perms|permissions)
+                        is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
+                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
+                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
+                        " 2>/dev/null && green_message "✅ Permissions reset" ;;
+                    show) command_exists jq && jq '.' "$(get_app_config_path "$app_user")" || cat "$(get_app_config_path "$app_user")" ;;
+                    *) error_message "Unknown config action: $sub_action" ;;
+                esac
+                return 0
+            fi
+            
+            _app_header "$app_user" "⚙️  Settings"
+            local varnish=$(get_app_config "$app_user" "varnish")
+            local webroot=$(get_app_config "$app_user" "webroot")
+            echo "  Varnish: ${varnish:-true}"
+            echo "  Webroot: ${webroot:-public_html}"
+            echo ""
+            echo "  1) 🔄 Toggle Varnish"
+            echo "  2) 📁 Change Webroot"
+            echo "  3) 🔐 Reset Permissions"
+            echo "  4) 📋 Show Full Config"
+            echo "  0) ↩️  Back"
+            echo ""
+            read -p "Select [0-4]: " choice
+            
+            case "$choice" in
+                1) [[ "$varnish" == "false" ]] && set_app_config "$app_user" "varnish" "true" && green_message "Varnish ON" || { set_app_config "$app_user" "varnish" "false"; yellow_message "Varnish OFF"; } ;;
+                2) read -p "Webroot (e.g., public, web): " new_wr
+                   [[ -n "$new_wr" ]] && { set_app_config "$app_user" "webroot" "\"$new_wr\""; green_message "Webroot: $new_wr"; } ;;
+                3) is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
+                       find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
+                       find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
+                   " 2>/dev/null && green_message "✅ Permissions reset" ;;
+                4) command_exists jq && jq '.' "$(get_app_config_path "$app_user")" || cat "$(get_app_config_path "$app_user")" ;;
+            esac
+            ;;
+        
+        # tbs app code [app] - Open in VS Code
+        code|edit)
+            _app_get "$app_arg1" || return 1
+            code "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$SELECTED_APP"
+            green_message "Opening in VS Code..."
+            ;;
+        
+        # tbs app open [app] - Open in browser  
+        open|browse)
+            _app_get "$app_arg1" || return 1
+            local dom=$(get_app_config "$SELECTED_APP" "primary_domain")
+            open_browser "https://${dom:-$SELECTED_APP.localhost}"
+            ;;
+        
+        # tbs app info [app] - Show app info
+        info|show)
+            _app_get "$app_arg1" || return 1
+            _app_header "$SELECTED_APP" "ℹ️  Info"
+            command_exists jq && jq '.' "$(get_app_config_path "$SELECTED_APP")"
+            ;;
+        
+        # Help
+        help|--help|-h)
+            echo ""
+            blue_message "╔══════════════════════════════════════════════════════════════╗"
+            blue_message "║                    📦 tbs app - Help                         ║"
+            blue_message "╚══════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "  ${CYAN}tbs app${NC}                    Interactive app manager"
+            echo "  ${CYAN}tbs app add <name>${NC}         Create new app"
+            echo "  ${CYAN}tbs app rm [app]${NC}           Delete app"
+            echo "  ${CYAN}tbs app db [app]${NC}           Database management"
+            echo "  ${CYAN}tbs app ssh [app]${NC}          SSH/SFTP settings"
+            echo "  ${CYAN}tbs app domain [app]${NC}       Manage domains"
+            echo "  ${CYAN}tbs app ssl [app]${NC}          SSL certificates"
+            echo "  ${CYAN}tbs app php [app]${NC}          PHP configuration"
+            echo "  ${CYAN}tbs app config [app]${NC}       App settings"
+            echo "  ${CYAN}tbs app code [app]${NC}         Open in VS Code"
+            echo "  ${CYAN}tbs app open [app]${NC}         Open in browser"
+            echo "  ${CYAN}tbs app info [app]${NC}         Show app config"
+            echo ""
+            ;;
+        
+        # Direct app access: tbs app <app_user>
+        *)
+            local maybe_app=$(resolve_app_user "$app_action")
+            if [[ -n "$maybe_app" ]]; then
+                SELECTED_APP="$maybe_app"
+                tbs app
+            else
+                error_message "Unknown: $app_action"
+                info_message "Run: tbs app help"
+            fi
+            ;;
+        esac
         ;;
 
     # Show logs
     logs)
-        local service=$2
-        if [[ -z $service ]]; then
-            docker compose logs -f
-        else
-            docker compose logs -f "$service"
-        fi
+        [[ -n "$2" ]] && docker compose logs -f "$2" || docker compose logs -f
         ;;
 
-    # Show status
-    status)
-        docker compose ps
-        ;;
+    status) docker compose ps ;;
 
-    # Handle 'code' command to open application directories
+    # Handle 'code' command - Open in VS Code
     code)
-        if [[ $2 == "root" || $2 == "tbs" ]]; then
-            code "$tbsPath"
-        else
-            # If no argument is provided, list application directories and prompt for selection
-            local apps_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
-            local app_dir
-            if [[ -z $2 ]]; then
-                if [[ -d $apps_dir ]]; then
-                    echo "Available applications:"
-                    local app_list=($(ls "$apps_dir" | grep -v '^tbs$')) # Exclude 'tbs' from listing
-                    if [[ ${#app_list[@]} -eq 0 ]]; then
-                        error_message "No applications found."
-                        return
-                    fi
-                    local i
-                    for i in "${!app_list[@]}"; do
-                        blue_message "$((i + 1)). ${app_list[$i]}"
-                    done
-                    local app_num
-                    read -p "Choose an application number: " app_num
-                    if [[ "$app_num" -gt 0 && "$app_num" -le "${#app_list[@]}" ]]; then
-                        local selected_app="${app_list[$((app_num - 1))]}"
-                        app_dir="$apps_dir/$selected_app"
-                        code "$app_dir"
-                    else
-                        error_message "Invalid selection."
-                    fi
-                else
-                    error_message "Applications directory not found: $apps_dir"
-                fi
-            else
-                local app_dir="$apps_dir/$2"
-                if [[ -d $app_dir ]]; then
-                    code "$app_dir"
-                else
-                    error_message "Application directory does not exist: $app_dir"
-                fi
-            fi
-        fi
+        [[ "$2" == "root" || "$2" == "tbs" ]] && { code "$tbsPath"; return; }
+        [[ -n "$2" ]] && { local d="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$2"; [[ -d "$d" ]] && code "$d" || error_message "App not found: $2"; return; }
+        tbs app code
         ;;
     config)
         tbs_config
@@ -2179,1583 +2369,92 @@ EOF
         green_message "Restore completed from $selected_backup"
         ;;
 
-    # Generate SSL certificates for a domain
-    ssl)
-        local domain=$2
-        if [[ -z $domain ]]; then
-            error_message "Domain name is required."
-            return 1
-        fi
+    # SSL commands - redirect to app ssl
+    ssl) tbs app ssl "$2" ;;
+    ssl-localhost) generate_default_ssl ;;
+    mail) open_browser "http://localhost:8025" ;;
+    pma) open_browser "http://localhost:${HOST_MACHINE_PMA_PORT}" ;;
+    redis-cli) docker compose exec redis redis-cli ;;
 
-        local vhost_file="${VHOSTS_DIR}/${domain}.conf"
-        local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
-
-        if [[ ! -f $vhost_file ]]; then
-            error_message "Domain name invalid. Vhost configuration file not found for $domain."
-            return 1
-        fi
-
-        if generate_ssl_certificates $domain $vhost_file $nginx_file; then
-            # Reload web servers to apply changes
-            reload_webservers
-        fi
-        ;;
-
-    # Generate Default SSL (localhost)
-    ssl-localhost)
-        generate_default_ssl
-        ;;
-
-    # Open Mailpit
-    mail)
-        open_browser "http://localhost:8025"
-        ;;
-
-    # Open phpMyAdmin
-    pma)
-        open_browser "http://localhost:${HOST_MACHINE_PMA_PORT}"
-        ;;
-
-    # Open Redis CLI
-    redis-cli)
-        docker compose exec redis redis-cli
-        ;;
-
-    # Shell access to containers
+    # Shell access
     shell)
-        local service="${2:-}"
-        
-        if [[ -z "$service" ]]; then
-            echo ""
-            info_message "Available services:"
-            echo "  php        - PHP/Webserver container (default shell)"
-            echo "  mysql      - MySQL/MariaDB container"
-            echo "  redis      - Redis container"
-            echo "  nginx      - Nginx container"
-            echo "  varnish    - Varnish container"
-            echo "  memcached  - Memcached container"
-            echo "  mailpit    - Mailpit container"
-            echo ""
-            read -p "Enter service name: " service
-        fi
-        
-        # Map service aliases to actual container names
-        local container_name="$service"
-        case "$service" in
-            php|webserver) container_name="$WEBSERVER_SERVICE" ;;
-            mysql|mariadb|db|database) container_name="mysql" ;;
-            mail) container_name="mailpit" ;;
-        esac
-        
-        # Check if container is running
-        if ! is_service_running "$container_name"; then
-            error_message "Container '$container_name' is not running. Start the stack first: tbs start"
-            return 1
-        fi
-        
-        case "$service" in
-            php|webserver)
-                docker compose exec "$WEBSERVER_SERVICE" bash
-                ;;
-            mysql|mariadb|db|database)
-                docker compose exec mysql bash
-                ;;
-            redis)
-                docker compose exec redis sh
-                ;;
-            nginx)
-                docker compose exec nginx sh
-                ;;
-            varnish)
-                docker compose exec varnish sh
-                ;;
-            memcached)
-                docker compose exec memcached sh
-                ;;
-            mailpit|mail)
-                docker compose exec mailpit sh
-                ;;
-            *)
-                error_message "Unknown service: $service"
-                info_message "Available: php, mysql, redis, nginx, varnish, memcached, mailpit"
-                return 1
-                ;;
+        local s="${2:-php}"
+        case "$s" in
+            php|web*) docker compose exec "$WEBSERVER_SERVICE" bash ;;
+            mysql|maria*|db) docker compose exec mysql bash ;;
+            redis) docker compose exec redis sh ;;
+            nginx|varnish|memcached|mailpit) docker compose exec "$s" sh ;;
+            *) error_message "Unknown: $s (php/mysql/redis/nginx/varnish/memcached/mailpit)" ;;
         esac
         ;;
 
-    # Database management commands
+    # Database management
     db)
-        local db_action="${2:-}"
-        local db_name="${3:-}"
-        local db_file="${4:-}"
-        
-        # Get MySQL root credentials from .env
-        local mysql_root_pass="${MYSQL_ROOT_PASSWORD:-root}"
-        
-        # Check if MySQL container is running
-        if ! is_service_running "mysql"; then
-            error_message "MySQL container is not running. Start the stack first: tbs start"
-            return 1
-        fi
-        
-        case "$db_action" in
-            list|ls)
-                info_message "Databases:"
-                docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "SHOW DATABASES;" 2>/dev/null | grep -v -E "^(Database|information_schema|performance_schema|mysql|sys)$"
-                ;;
-            create)
-                if [[ -z "$db_name" ]]; then
-                    read -p "Enter database name: " db_name
-                fi
-                if [[ -z "$db_name" ]]; then
-                    error_message "Database name required"
-                    return 1
-                fi
-                docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
-                if [[ $? -eq 0 ]]; then
-                    green_message "Database '$db_name' created successfully!"
-                else
-                    error_message "Failed to create database"
-                fi
-                ;;
-            drop)
-                if [[ -z "$db_name" ]]; then
-                    read -p "Enter database name to drop: " db_name
-                fi
-                if [[ -z "$db_name" ]]; then
-                    error_message "Database name required"
-                    return 1
-                fi
-                read -p "Are you sure you want to drop database '$db_name'? (y/N): " confirm
-                if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                    docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "DROP DATABASE IF EXISTS \`$db_name\`;" 2>/dev/null
-                    green_message "Database '$db_name' dropped!"
-                else
-                    info_message "Cancelled."
-                fi
-                ;;
-            import)
-                if [[ -z "$db_name" ]]; then
-                    read -p "Enter database name: " db_name
-                fi
-                if [[ -z "$db_file" ]]; then
-                    db_file="${4:-}"
-                    if [[ -z "$db_file" ]]; then
-                        read -p "Enter SQL file path: " db_file
-                    fi
-                fi
-                if [[ ! -f "$db_file" ]]; then
-                    error_message "File not found: $db_file"
-                    return 1
-                fi
-                info_message "Importing $db_file into $db_name..."
-                if [[ "$db_file" == *.gz ]]; then
-                    gunzip -c "$db_file" | docker compose exec -T mysql mysql -uroot -p"$mysql_root_pass" "$db_name" 2>/dev/null
-                else
-                    docker compose exec -T mysql mysql -uroot -p"$mysql_root_pass" "$db_name" < "$db_file" 2>/dev/null
-                fi
-                if [[ $? -eq 0 ]]; then
-                    green_message "Import completed!"
-                else
-                    error_message "Import failed"
-                fi
-                ;;
-            export)
-                if [[ -z "$db_name" ]]; then
-                    read -p "Enter database name: " db_name
-                fi
-                if [[ -z "$db_name" ]]; then
-                    error_message "Database name required"
-                    return 1
-                fi
-                local export_file="${BACKUP_DIR:-$tbsPath/data/backup}/${db_name}_$(date +%Y%m%d_%H%M%S).sql"
-                info_message "Exporting $db_name to $export_file..."
-                docker compose exec mysql mysqldump -uroot -p"$mysql_root_pass" "$db_name" 2>/dev/null > "$export_file"
-                if [[ $? -eq 0 && -s "$export_file" ]]; then
-                    green_message "Exported to: $export_file"
-                else
-                    error_message "Export failed"
-                    rm -f "$export_file"
-                fi
-                ;;
-            user)
-                local username="${3:-}"
-                local user_pass="${4:-}"
-                local user_db="${5:-}"
-                
-                if [[ -z "$username" ]]; then
-                    read -p "Enter username: " username
-                fi
-                if [[ -z "$username" ]]; then
-                    error_message "Username required"
-                    return 1
-                fi
-                if [[ -z "$user_pass" ]]; then
-                    user_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16)
-                fi
-                if [[ -z "$user_db" ]]; then
-                    read -p "Grant access to database (leave empty for same as username): " user_db
-                    user_db="${user_db:-$username}"
-                fi
-                docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "CREATE USER IF NOT EXISTS '$username'@'%' IDENTIFIED BY '$user_pass'; GRANT ALL PRIVILEGES ON \`$user_db\`.* TO '$username'@'%'; FLUSH PRIVILEGES;" 2>/dev/null
-                if [[ $? -eq 0 ]]; then
-                    green_message "User created:"
-                    echo "  Username: $username"
-                    echo "  Password: $user_pass"
-                    echo "  Database: $user_db"
-                else
-                    error_message "Failed to create user"
-                fi
-                ;;
-            *)
-                echo ""
-                info_message "Database Management Commands:"
-                echo "  tbs db list              - List all databases"
-                echo "  tbs db create <name>     - Create a new database"
-                echo "  tbs db drop <name>       - Drop a database"
-                echo "  tbs db import <name> <file> - Import SQL file"
-                echo "  tbs db export <name>     - Export database to SQL"
-                echo "  tbs db user <name> [pass] [db] - Create user with access"
-                echo ""
-                ;;
+        local a="${2:-}" n="${3:-}" f="${4:-}" p="${MYSQL_ROOT_PASSWORD:-root}"
+        is_service_running "mysql" || { error_message "MySQL not running"; return 1; }
+        case "$a" in
+            list|ls) docker compose exec mysql mysql -uroot -p"$p" -e "SHOW DATABASES;" 2>/dev/null | grep -vE "^(Database|information_schema|performance_schema|mysql|sys)$" ;;
+            create) [[ -z "$n" ]] && read -p "Database name: " n; [[ -z "$n" ]] && { error_message "Name required"; return 1; }
+                    docker compose exec mysql mysql -uroot -p"$p" -e "CREATE DATABASE IF NOT EXISTS \`$n\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null && green_message "Created: $n" || error_message "Failed" ;;
+            drop) [[ -z "$n" ]] && read -p "Database to drop: " n; [[ -z "$n" ]] && { error_message "Name required"; return 1; }
+                  read -p "Drop '$n'? (y/N): " c; [[ "$c" =~ ^[Yy]$ ]] && docker compose exec mysql mysql -uroot -p"$p" -e "DROP DATABASE IF EXISTS \`$n\`;" 2>/dev/null && green_message "Dropped: $n" || info_message "Cancelled" ;;
+            import) [[ -z "$n" ]] && read -p "Database: " n; [[ -z "$f" ]] && read -p "SQL file: " f; [[ ! -f "$f" ]] && { error_message "File not found"; return 1; }
+                    [[ "$f" == *.gz ]] && gunzip -c "$f" | docker compose exec -T mysql mysql -uroot -p"$p" "$n" 2>/dev/null || docker compose exec -T mysql mysql -uroot -p"$p" "$n" < "$f" 2>/dev/null
+                    [[ $? -eq 0 ]] && green_message "Imported!" || error_message "Failed" ;;
+            export) [[ -z "$n" ]] && read -p "Database: " n; [[ -z "$n" ]] && { error_message "Name required"; return 1; }
+                    local o="$tbsPath/data/backup/${n}_$(date +%Y%m%d_%H%M%S).sql"
+                    docker compose exec mysql mysqldump -uroot -p"$p" "$n" 2>/dev/null > "$o" && [[ -s "$o" ]] && green_message "Exported: $o" || { error_message "Failed"; rm -f "$o"; } ;;
+            user) local u="${3:-}" up="${4:-}" ud="${5:-}"; [[ -z "$u" ]] && read -p "Username: " u; [[ -z "$u" ]] && { error_message "Required"; return 1; }
+                  [[ -z "$up" ]] && up=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16); [[ -z "$ud" ]] && ud="$u"
+                  docker compose exec mysql mysql -uroot -p"$p" -e "CREATE USER IF NOT EXISTS '$u'@'%' IDENTIFIED BY '$up'; GRANT ALL ON \`$ud\`.* TO '$u'@'%'; FLUSH PRIVILEGES;" 2>/dev/null && echo "User: $u | Pass: $up | DB: $ud" || error_message "Failed" ;;
+            *) info_message "tbs db [list|create|drop|import|export|user] <name>" ;;
         esac
         ;;
 
     # Quick project creators
     create)
-        local project_type="${2:-}"
-        local app_name="${3:-}"
+        local t="${2:-}" n="${3:-}"
+        is_service_running "$WEBSERVER_SERVICE" || { yellow_message "Starting stack..."; tbs_start; }
+        [[ -z "$t" ]] && { info_message "Types: laravel, wordpress, symfony, blank"; read -p "Type: " t; }
+        [[ -z "$n" ]] && read -p "App name: " n; [[ -z "$n" ]] && { error_message "Name required"; return 1; }
         
-        # Check if stack is running
-        if ! is_service_running "$WEBSERVER_SERVICE"; then
-            yellow_message "Stack is not running. Starting..."
-            tbs_start
-        fi
+        tbs app add "$n"
+        local u=$(find_app_user_by_name "$n"); [[ -z "$u" ]] && { error_message "App not found"; return 1; }
         
-        if [[ -z "$project_type" ]]; then
-            echo ""
-            info_message "Available project types:"
-            echo "  laravel     - Create a new Laravel project"
-            echo "  wordpress   - Create a new WordPress installation"
-            echo "  symfony     - Create a new Symfony project"
-            echo "  blank       - Create a blank PHP project"
-            echo ""
-            read -p "Select project type: " project_type
-        fi
-        
-        if [[ -z "$app_name" ]]; then
-            read -p "Enter application name: " app_name
-        fi
-        
-        if [[ -z "$app_name" ]]; then
-            error_message "Application name required"
-            return 1
-        fi
-        
-        case "$project_type" in
-            laravel)
-                info_message "Creating Laravel project: $app_name"
-                tbs addapp "$app_name"
-                
-                # Find the app_user that was just created
-                local app_user=$(find_app_user_by_name "$app_name")
-                if [[ -z "$app_user" ]]; then
-                    error_message "Failed to find created app"
-                    return 1
-                fi
-                
-                # Install Laravel in public_html
-                docker compose exec "$WEBSERVER_SERVICE" bash -c "
-                    cd /var/www/html/applications/$app_user
-                    rm -rf public_html/*
-                    composer create-project --no-interaction laravel/laravel temp_laravel
-                    mv temp_laravel/* temp_laravel/.* public_html/ 2>/dev/null || true
-                    rm -rf temp_laravel
-                "
-                
-                tbs appconfig "$app_user" webroot "public_html/public"
-                green_message "Laravel project created at: https://${app_user}.localhost"
-                ;;
-            wordpress)
-                info_message "Creating WordPress project: $app_name"
-                tbs addapp "$app_name"
-                
-                # Find the app_user that was just created
-                local app_user=$(find_app_user_by_name "$app_name")
-                if [[ -z "$app_user" ]]; then
-                    error_message "Failed to find created app"
-                    return 1
-                fi
-                
-                # Download WordPress and create database
-                docker compose exec "$WEBSERVER_SERVICE" bash -c "
-                    cd /var/www/html/applications/$app_user/public_html
-                    rm -f index.php
-                    wp core download --allow-root
-                "
-                tbs db create "$app_user"
-                docker compose exec "$WEBSERVER_SERVICE" bash -c "
-                    cd /var/www/html/applications/$app_user/public_html
-                    wp config create --dbname=$app_user --dbuser=docker --dbpass=docker --dbhost=mysql --allow-root
-                "
-                
-                green_message "WordPress installed at: https://${app_user}.localhost"
-                info_message "Database: $app_user | Run WordPress installer to complete."
-                ;;
-            symfony)
-                info_message "Creating Symfony project: $app_name"
-                tbs addapp "$app_name"
-                
-                # Find the app_user that was just created
-                local app_user=$(find_app_user_by_name "$app_name")
-                if [[ -z "$app_user" ]]; then
-                    error_message "Failed to find created app"
-                    return 1
-                fi
-                
-                # Install Symfony in public_html
-                docker compose exec "$WEBSERVER_SERVICE" bash -c "
-                    cd /var/www/html/applications/$app_user
-                    rm -rf public_html/*
-                    composer create-project --no-interaction symfony/skeleton temp_symfony
-                    mv temp_symfony/* temp_symfony/.* public_html/ 2>/dev/null || true
-                    rm -rf temp_symfony
-                "
-                
-                tbs appconfig "$app_user" webroot "public_html/public"
-                green_message "Symfony project created at: https://${app_user}.localhost"
-                ;;
-            blank|empty)
-                info_message "Creating blank project: $app_name"
-                tbs addapp "$app_name"
-                
-                local app_user=$(find_app_user_by_name "$app_name")
-                green_message "Blank project created at: https://${app_user}.localhost"
-                ;;
-            *)
-                error_message "Unknown project type: $project_type"
-                info_message "Available: laravel, wordpress, symfony, blank"
-                return 1
-                ;;
+        case "$t" in
+            laravel) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u && rm -rf public_html/* && composer create-project --no-interaction laravel/laravel public_html"
+                     tbs app config "$u" webroot "public_html/public"; green_message "Laravel: https://${u}.localhost" ;;
+            wordpress) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u/public_html && rm -f index.php && wp core download --allow-root"
+                       tbs db create "$u"; docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u/public_html && wp config create --dbname=$u --dbuser=docker --dbpass=docker --dbhost=mysql --allow-root"
+                       green_message "WordPress: https://${u}.localhost" ;;
+            symfony) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u && rm -rf public_html/* && composer create-project --no-interaction symfony/skeleton public_html"
+                     tbs app config "$u" webroot "public_html/public"; green_message "Symfony: https://${u}.localhost" ;;
+            blank|empty) green_message "Blank: https://${u}.localhost" ;;
+            *) error_message "Unknown: $t. Available: laravel, wordpress, symfony, blank" ;;
         esac
         ;;
 
-    # Application Configuration Management
-    appconfig)
-        local input="${2:-}"
-        local action="${3:-}"
-        local param1="${4:-}"
-        local param2="${5:-}"
-        
-        # List all apps if no app name provided
-        if [[ -z "$input" ]]; then
-            echo ""
-            blue_message "=== Application Configuration ==="
-            echo ""
-            info_message "Available Applications:"
-            
-            local apps_found=false
-            local apps_base="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
-            for app_dir in "$apps_base"/*/; do
-                if [[ -d "$app_dir" ]]; then
-                    local app_user=$(basename "$app_dir")
-                    local config_file=$(get_app_config_path "$app_user")
-                    local status="⚪ No config"
-                    
-                    if [[ -f "$config_file" ]]; then
-                        local app_name=$(get_app_config "$app_user" "name")
-                        local varnish=$(get_app_config "$app_user" "varnish")
-                        local db_created=$(get_app_config "$app_user" "database.created")
-                        local ssh_enabled=$(get_app_config "$app_user" "ssh.enabled")
-                        status="✅ Configured"
-                        [[ "$varnish" == "false" ]] && status="$status | Varnish: OFF"
-                        [[ "$db_created" == "true" ]] && status="$status | DB: ✓"
-                        [[ "$ssh_enabled" == "true" ]] && status="$status | SSH: ✓"
-                    fi
-                    
-                    echo "  • $app_user - $status"
-                    apps_found=true
-                fi
-            done
-            
-            if ! $apps_found; then
-                yellow_message "No applications found. Create one with: tbs addapp <name>"
-            fi
-            
-            echo ""
-            info_message "Usage: tbs appconfig <app_user> <action>"
-            echo ""
-            echo "Actions:"
-            echo "  show                    - Show app configuration"
-            echo "  varnish on|off          - Enable/disable Varnish caching"
-            echo "  webroot <path>          - Set custom webroot (public, web, public_html)"
-            echo "  domain add <domain>     - Add a domain alias"
-            echo "  domain remove <domain>  - Remove a domain alias"
-            echo "  domain list             - List all domains"
-            echo "  database create         - Create dedicated database & user"
-            echo "  database show           - Show database credentials"
-            echo "  permissions reset       - Reset file/folder permissions"
-            echo "  ssh enable              - Create SSH/SFTP user for app"
-            echo "  ssh disable             - Disable SSH access"
-            echo "  ssh reset               - Regenerate SSH password"
-            echo "  ssh delete              - Remove SSH user completely"
-            echo "  supervisor add <name>   - Add supervisor program"
-            echo "  supervisor remove <name> - Remove supervisor program"
-            echo "  supervisor list         - List supervisor programs"
-            echo "  cron add '<schedule>' '<command>' - Add cron job"
-            echo "  cron remove <index>     - Remove cron job"
-            echo "  cron list               - List cron jobs"
-            echo "  logs enable|disable     - Enable/disable app-specific logs"
-            echo ""
-            return 0
-        fi
-        
-        # Resolve input to app_user (accepts app_user or app_name)
-        local app_user=$(resolve_app_user "$input")
-        if [[ -z "$app_user" ]]; then
-            error_message "App '$input' not found."
-            info_message "Available apps:"
-            ls -1 "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME" 2>/dev/null | grep -v "^index.php$" | sed 's/^/  /'
-            return 1
-        fi
-        
-        local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
-        
-        if [[ ! -d "$app_root" ]]; then
-            error_message "Application '$app_user' not found at $app_root"
-            info_message "Available apps:"
-            ls -1 "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME" 2>/dev/null | grep -v "^index.php$" | sed 's/^/  /'
-            return 1
-        fi
-        
-        # Get config file (app_user is the primary key)
-        local config_file=$(get_app_config_path "$app_user")
-        
-        case "$action" in
-            # Show app configuration
-            show|"")
-                echo ""
-                blue_message "=== Configuration: $app_user ==="
-                echo ""
-                
-                if command_exists jq; then
-                    jq '.' "$config_file"
-                else
-                    cat "$config_file"
-                fi
-                echo ""
-                ;;
-            
-            # Varnish toggle
-            varnish)
-                local varnish_state="${param1:-}"
-                case "$varnish_state" in
-                    on|enable|true|1)
-                        set_app_config "$app_user" "varnish" "true"
-                        green_message "Varnish caching ENABLED for $app_user"
-                        info_message "Restart stack to apply: tbs restart"
-                        ;;
-                    off|disable|false|0)
-                        set_app_config "$app_user" "varnish" "false"
-                        yellow_message "Varnish caching DISABLED for $app_user"
-                        info_message "Restart stack to apply: tbs restart"
-                        ;;
-                    *)
-                        local current=$(get_app_config "$app_user" "varnish")
-                        info_message "Varnish caching: ${current:-true}"
-                        echo "Usage: tbs appconfig $app_user varnish on|off"
-                        ;;
-                esac
-                ;;
-            
-            # Webroot configuration
-            webroot)
-                local new_webroot="${param1:-}"
-                if [[ -z "$new_webroot" ]]; then
-                    local current=$(get_app_config "$app_user" "webroot")
-                    info_message "Current webroot: ${current:-'(default - app root)'}"
-                    echo ""
-                    echo "Common options: public, web, public_html, htdocs, www"
-                    echo "Usage: tbs appconfig $app_user webroot <path>"
-                else
-                    # Validate webroot exists or is a known Laravel/Symfony path
-                    local full_path="$app_root/$new_webroot"
-                    if [[ ! -d "$full_path" && "$new_webroot" != "public" && "$new_webroot" != "web" ]]; then
-                        yellow_message "Warning: Directory '$new_webroot' doesn't exist yet."
-                        read -p "Create it? (y/N): " create_dir
-                        if [[ "$create_dir" =~ ^[Yy]$ ]]; then
-                            mkdir -p "$full_path"
-                            green_message "Created: $full_path"
-                        fi
-                    fi
-                    
-                    set_app_config "$app_user" "webroot" "\"$new_webroot\""
-                    green_message "Webroot set to: $new_webroot"
-                    
-                    # Update vhost files
-                    local domain=$(get_app_config "$app_user" "primary_domain")
-                    local vhost_file="${VHOSTS_DIR}/${domain}.conf"
-                    local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
-                    
-                    if [[ -f "$vhost_file" ]]; then
-                        local new_docroot="/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/$new_webroot"
-                        sed_i "s|DocumentRoot.*|DocumentRoot $new_docroot|g" "$vhost_file"
-                        info_message "Updated Apache vhost"
-                    fi
-                    
-                    if [[ -f "$nginx_file" ]]; then
-                        local new_docroot="/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/$new_webroot"
-                        sed_i "s|root.*applications/$app_user.*|root $new_docroot;|g" "$nginx_file"
-                        info_message "Updated Nginx config"
-                    fi
-                    
-                    info_message "Reload webservers to apply: tbs restart"
-                fi
-                ;;
-            
-            # Domain management
-            domain)
-                local domain_action="${param1:-list}"
-                local domain_name="${param2:-}"
-                
-                case "$domain_action" in
-                    add)
-                        if [[ -z "$domain_name" ]]; then
-                            error_message "Domain name required"
-                            echo "Usage: tbs appconfig $app_user domain add <domain>"
-                            return 1
-                        fi
-                        
-                        # Add domain to config
-                        if command_exists jq; then
-                            local tmp_file=$(mktemp)
-                            jq ".domains += [\"$domain_name\"]" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
-                        fi
-                        
-                        # Create vhost for new domain
-                        local primary_domain=$(get_app_config "$app_user" "primary_domain")
-                        local source_vhost="${VHOSTS_DIR}/${primary_domain}.conf"
-                        local new_vhost="${VHOSTS_DIR}/${domain_name}.conf"
-                        
-                        if [[ -f "$source_vhost" ]]; then
-                            sed "s/$primary_domain/$domain_name/g" "$source_vhost" > "$new_vhost"
-                            info_message "Created Apache vhost for $domain_name"
-                        fi
-                        
-                        # Create Nginx config
-                        local source_nginx="${NGINX_CONF_DIR}/${primary_domain}.conf"
-                        local new_nginx="${NGINX_CONF_DIR}/${domain_name}.conf"
-                        
-                        if [[ -f "$source_nginx" ]]; then
-                            sed "s/$primary_domain/$domain_name/g" "$source_nginx" > "$new_nginx"
-                            info_message "Created Nginx config for $domain_name"
-                        fi
-                        
-                        # Generate SSL
-                        tbs ssl "$domain_name"
-                        
-                        green_message "Domain '$domain_name' added to $app_user"
-                        info_message "Restart stack to apply: tbs restart"
-                        ;;
-                    
-                    remove)
-                        if [[ -z "$domain_name" ]]; then
-                            error_message "Domain name required"
-                            return 1
-                        fi
-                        
-                        local primary=$(get_app_config "$app_user" "primary_domain")
-                        if [[ "$domain_name" == "$primary" ]]; then
-                            error_message "Cannot remove primary domain. Change primary first."
-                            return 1
-                        fi
-                        
-                        # Remove from config
-                        if command_exists jq; then
-                            local tmp_file=$(mktemp)
-                            jq ".domains -= [\"$domain_name\"]" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
-                        fi
-                        
-                        # Remove vhost files
-                        rm -f "${VHOSTS_DIR}/${domain_name}.conf"
-                        rm -f "${NGINX_CONF_DIR}/${domain_name}.conf"
-                        
-                        green_message "Domain '$domain_name' removed from $app_user"
-                        ;;
-                    
-                    list|*)
-                        echo ""
-                        info_message "Domains for $app_user:"
-                        if command_exists jq; then
-                            jq -r '.domains[]' "$config_file" 2>/dev/null | while read d; do
-                                local primary=$(get_app_config "$app_user" "primary_domain")
-                                if [[ "$d" == "$primary" ]]; then
-                                    echo "  • $d (primary)"
-                                else
-                                    echo "  • $d"
-                                fi
-                            done
-                        else
-                            grep -o '"[^"]*\.localhost"' "$config_file" | tr -d '"' | while read d; do
-                                echo "  • $d"
-                            done
-                        fi
-                        echo ""
-                        ;;
-                esac
-                ;;
-            
-            # Database management
-            database|db)
-                local db_action="${param1:-show}"
-                
-                case "$db_action" in
-                    create)
-                        # Use app_user for database naming (consistent with everything else)
-                        local db_name="${app_user//-/_}"
-                        local db_user="${db_name}_user"
-                        local db_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16)
-                        
-                        if ! is_service_running "mysql"; then
-                            error_message "MySQL is not running. Start stack first: tbs start"
-                            return 1
-                        fi
-                        
-                        local mysql_root_pass="${MYSQL_ROOT_PASSWORD:-root}"
-                        
-                        # Create database
-                        docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
-                        
-                        # Create user
-                        docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "CREATE USER IF NOT EXISTS '$db_user'@'%' IDENTIFIED BY '$db_pass'; GRANT ALL PRIVILEGES ON \`$db_name\`.* TO '$db_user'@'%'; FLUSH PRIVILEGES;" 2>/dev/null
-                        
-                        # Save to config
-                        if command_exists jq; then
-                            local tmp_file=$(mktemp)
-                            jq ".database = {\"name\": \"$db_name\", \"user\": \"$db_user\", \"password\": \"$db_pass\", \"host\": \"mysql\", \"created\": true}" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
-                        fi
-                        
-                        green_message "Database created for $app_user:"
-                        echo ""
-                        echo "  Database: $db_name"
-                        echo "  Username: $db_user"
-                        echo "  Password: $db_pass"
-                        echo "  Host:     mysql (from container) / localhost:3306 (from host)"
-                        echo ""
-                        ;;
-                    
-                    show|*)
-                        local db_created=$(get_app_config "$app_user" "database.created")
-                        if [[ "$db_created" == "true" ]]; then
-                            echo ""
-                            info_message "Database credentials for $app_user:"
-                            if command_exists jq; then
-                                jq '.database' "$config_file"
-                            else
-                                grep -A5 '"database"' "$config_file"
-                            fi
-                            echo ""
-                        else
-                            yellow_message "No database created for $app_user yet."
-                            echo "Create with: tbs appconfig $app_user database create"
-                        fi
-                        ;;
-                esac
-                ;;
-            
-            # Permission reset
-            permissions|perms)
-                local perm_action="${param1:-reset}"
-                
-                case "$perm_action" in
-                    reset)
-                        info_message "Resetting permissions for $app_user..."
-                        
-                        # Get the owner from config (SSH user or www-data)
-                        local owner=$(get_app_config "$app_user" "permissions.owner")
-                        local group=$(get_app_config "$app_user" "permissions.group")
-                        owner=${owner:-www-data}
-                        group=${group:-www-data}
-                        
-                        # Get SSH user info if exists
-                        local ssh_uid=$(get_app_config "$app_user" "ssh.uid")
-                        local ssh_gid=$(get_app_config "$app_user" "ssh.gid")
-                        
-                        docker compose exec "$WEBSERVER_SERVICE" bash -c "
-                            # Reset ownership to app's user
-                            if [[ -n '$ssh_uid' && '$ssh_uid' != 'null' && '$ssh_uid' != '0' ]]; then
-                                chown -R $ssh_uid:$ssh_gid /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user
-                            else
-                                chown -R $owner:$group /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user
-                            fi
-                            
-                            # Set directory permissions
-                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
-                            
-                            # Set file permissions  
-                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
-                            
-                            # Make common executable files executable
-                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user \( -name 'artisan' -o -name '*.sh' \) -exec chmod +x {} \; 2>/dev/null
-                            
-                            # Set restrictive permissions on .ssh directory
-                            chmod 700 /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/.ssh 2>/dev/null || true
-                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/.ssh -type f -exec chmod 600 {} \; 2>/dev/null || true
-                            
-                            # Make tmp directory writable
-                            chmod 1777 /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user/tmp 2>/dev/null || true
-                        " 2>/dev/null
-                        
-                        green_message "Permissions reset for $app_user"
-                        echo "  Owner: $owner:$group"
-                        echo "  Directories: 755"
-                        echo "  Files: 644"
-                        echo "  .ssh: 700 (dir), 600 (files)"
-                        echo "  tmp: 1777"
-                        ;;
-                    *)
-                        echo "Usage: tbs appconfig $app_user permissions reset"
-                        ;;
-                esac
-                ;;
-            
-            # Supervisor management
-            supervisor)
-                local sup_action="${param1:-list}"
-                local sup_name="${param2:-}"
-                
-                case "$sup_action" in
-                    add)
-                        if [[ -z "$sup_name" ]]; then
-                            error_message "Program name required"
-                            return 1
-                        fi
-                        
-                        echo ""
-                        read -p "Enter command to run: " sup_command
-                        read -p "Number of processes (default: 1): " sup_numprocs
-                        sup_numprocs=${sup_numprocs:-1}
-                        
-                        # Create supervisor config
-                        local sup_conf="$tbsPath/config/supervisor/${app_user}_${sup_name}.conf"
-                        cat > "$sup_conf" <<EOF
-[program:${app_user}_${sup_name}]
-command=$sup_command
-directory=/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user
-user=www-data
-numprocs=$sup_numprocs
-autostart=true
-autorestart=true
-startsecs=5
-startretries=3
-stdout_logfile=/var/log/supervisor/${app_user}_${sup_name}.log
-stderr_logfile=/var/log/supervisor/${app_user}_${sup_name}_error.log
-EOF
-                        
-                        # Update config
-                        if command_exists jq; then
-                            local tmp_file=$(mktemp)
-                            jq ".supervisor.enabled = true | .supervisor.programs += [\"$sup_name\"]" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
-                        fi
-                        
-                        green_message "Supervisor program '$sup_name' added"
-                        info_message "Rebuild stack to apply: tbs build"
-                        ;;
-                    
-                    remove)
-                        if [[ -z "$sup_name" ]]; then
-                            error_message "Program name required"
-                            return 1
-                        fi
-                        
-                        rm -f "$tbsPath/config/supervisor/${app_user}_${sup_name}.conf"
-                        
-                        if command_exists jq; then
-                            local tmp_file=$(mktemp)
-                            jq ".supervisor.programs -= [\"$sup_name\"]" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
-                        fi
-                        
-                        green_message "Supervisor program '$sup_name' removed"
-                        ;;
-                    
-                    list|*)
-                        echo ""
-                        info_message "Supervisor programs for $app_user:"
-                        ls "$tbsPath/config/supervisor/${app_user}_"*.conf 2>/dev/null | while read f; do
-                            local name=$(basename "$f" .conf | sed "s/${app_user}_//")
-                            echo "  • $name"
-                        done
-                        if [[ -z "$(ls "$tbsPath/config/supervisor/${app_user}_"*.conf 2>/dev/null)" ]]; then
-                            echo "  (none)"
-                        fi
-                        echo ""
-                        ;;
-                esac
-                ;;
-            
-            # Cron management
-            cron)
-                local cron_action="${param1:-list}"
-                local cron_file="$tbsPath/config/cron/${app_user}.cron"
-                
-                case "$cron_action" in
-                    add)
-                        echo ""
-                        read -p "Enter cron schedule (e.g., '* * * * *' for every minute): " cron_schedule
-                        read -p "Enter command: " cron_command
-                        
-                        # Create cron file if not exists
-                        touch "$cron_file"
-                        
-                        # Add cron job
-                        echo "$cron_schedule cd /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user && $cron_command" >> "$cron_file"
-                        
-                        # Update config
-                        if command_exists jq; then
-                            local tmp_file=$(mktemp)
-                            jq ".cron.enabled = true" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
-                        fi
-                        
-                        green_message "Cron job added"
-                        info_message "Rebuild stack to apply: tbs build"
-                        ;;
-                    
-                    remove)
-                        local job_index="${param2:-}"
-                        if [[ -z "$job_index" ]]; then
-                            error_message "Job index required (use 'tbs appconfig $app_user cron list' to see indexes)"
-                            return 1
-                        fi
-                        
-                        if [[ -f "$cron_file" ]]; then
-                            sed_i "${job_index}d" "$cron_file"
-                            green_message "Cron job #$job_index removed"
-                        fi
-                        ;;
-                    
-                    list|*)
-                        echo ""
-                        info_message "Cron jobs for $app_user:"
-                        if [[ -f "$cron_file" && -s "$cron_file" ]]; then
-                            local i=1
-                            while IFS= read -r line; do
-                                echo "  $i) $line"
-                                ((i++))
-                            done < "$cron_file"
-                        else
-                            echo "  (none)"
-                        fi
-                        echo ""
-                        ;;
-                esac
-                ;;
-            
-            # App-specific logs
-            logs)
-                local logs_action="${param1:-}"
-                local logs_dir="$app_root/logs"
-                
-                case "$logs_action" in
-                    enable)
-                        mkdir -p "$logs_dir"
-                        set_app_config "$app_user" "logs.enabled" "true"
-                        green_message "App-specific logs enabled"
-                        info_message "Logs will be stored in: $logs_dir"
-                        ;;
-                    disable)
-                        set_app_config "$app_user" "logs.enabled" "false"
-                        yellow_message "App-specific logs disabled"
-                        ;;
-                    *)
-                        local enabled=$(get_app_config "$app_user" "logs.enabled")
-                        info_message "App logs: ${enabled:-false}"
-                        if [[ -d "$logs_dir" ]]; then
-                            echo "Log files:"
-                            ls -la "$logs_dir" 2>/dev/null | tail -n +2
-                        fi
-                        echo ""
-                        echo "Usage: tbs appconfig $app_user logs enable|disable"
-                        ;;
-                esac
-                ;;
-            
-            # SSH/SFTP user management
-            ssh|sftp)
-                local ssh_action="${param1:-show}"
-                local ssh_user_file="$tbsPath/config/ssh/users/${app_user}.json"
-                
-                case "$ssh_action" in
-                    enable|create)
-                        # app_user IS the SSH user (already created during addapp)
-                        # This re-enables or regenerates password if needed
-                        local ssh_pass=$(generate_strong_password 22)
-                        
-                        # Get existing UID/GID or generate new
-                        local ssh_uid=$(get_app_config "$app_user" "ssh.uid")
-                        local ssh_gid=$(get_app_config "$app_user" "ssh.gid")
-                        
-                        if [[ -z "$ssh_uid" || "$ssh_uid" == "null" || "$ssh_uid" == "0" ]]; then
-                            local uid_hash=$(echo "$app_user$(date +%s)" | md5sum | tr -dc '0-9' | head -c 4)
-                            ssh_uid=$((2000 + ${uid_hash:-1}))
-                            ssh_gid=$ssh_uid
-                        fi
-                        
-                        # Create/update SSH user config file
-                        mkdir -p "$tbsPath/config/ssh/users"
-                        cat > "$ssh_user_file" <<EOF
-{
-    "app_user": "$app_user",
-    "username": "$app_user",
-    "dir_name": "$app_user",
-    "password": "$ssh_pass",
-    "enabled": true,
-    "uid": $ssh_uid,
-    "gid": $ssh_gid,
-    "created_at": "$(date -Iseconds)"
-}
-EOF
-                        
-                        # Update app config
-                        if command_exists jq; then
-                            local tmp_file=$(mktemp)
-                            jq ".ssh = {\"enabled\": true, \"username\": \"$app_user\", \"password\": \"$ssh_pass\", \"port\": ${HOST_MACHINE_SSH_PORT:-2244}, \"uid\": $ssh_uid, \"gid\": $ssh_gid}" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
-                        fi
-                        
-                        # Update file ownership in app directory to app_user
-                        if is_service_running "$WEBSERVER_SERVICE"; then
-                            info_message "Updating file ownership to app user..."
-                            docker compose exec "$WEBSERVER_SERVICE" bash -c "
-                                # Create group and user if they don't exist
-                                groupadd -g $ssh_gid $app_user 2>/dev/null || true
-                                useradd -u $ssh_uid -g $ssh_gid -M -d /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user $app_user 2>/dev/null || true
-                                
-                                # Change ownership
-                                chown -R $ssh_uid:$ssh_gid /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user
-                            " 2>/dev/null
-                            
-                            # Update permissions config
-                            set_app_config "$app_user" "permissions.owner" "\"$app_user\""
-                            set_app_config "$app_user" "permissions.group" "\"$app_user\""
-                        fi
-                        
-                        echo ""
-                        green_message "SSH/SFTP access ENABLED for $app_user"
-                        echo ""
-                        echo "  ╔════════════════════════════════════════════════╗"
-                        echo "  ║            SSH/SFTP Credentials                ║"
-                        echo "  ╠════════════════════════════════════════════════╣"
-                        echo "  ║  Host:     localhost                           ║"
-                        echo "  ║  Port:     ${HOST_MACHINE_SSH_PORT:-2244}                              ║"
-                        echo "  ║  Username: $app_user                           "
-                        echo "  ║  Password: $ssh_pass                           "
-                        echo "  ╚════════════════════════════════════════════════╝"
-                        echo ""
-                        info_message "Connect using:"
-                        echo "  SSH:  ssh -p ${HOST_MACHINE_SSH_PORT:-2244} $app_user@localhost"
-                        echo "  SFTP: sftp -P ${HOST_MACHINE_SSH_PORT:-2244} $app_user@localhost"
-                        echo ""
-                        yellow_message "Note: Start SSH service with: docker compose --profile ssh up -d ssh"
-                        echo ""
-                        
-                        # Save credentials to a local file for reference
-                        local creds_file="$app_root/.ssh-credentials"
-                        cat > "$creds_file" <<EOF
-# SSH/SFTP Credentials for $app_user
-# Generated: $(date)
-# SECURITY: Delete this file after noting the credentials!
-
-Host: localhost
-Port: ${HOST_MACHINE_SSH_PORT:-2244}
-Username: $app_user
-Password: $ssh_pass
-
-# SSH Connection:
-ssh -p ${HOST_MACHINE_SSH_PORT:-2244} $app_user@localhost
-
-# SFTP Connection:
-sftp -P ${HOST_MACHINE_SSH_PORT:-2244} $app_user@localhost
-EOF
-                        chmod 600 "$creds_file"
-                        info_message "Credentials saved to: $creds_file"
-                        ;;
-                    
-                    disable)
-                        if [[ -f "$ssh_user_file" ]]; then
-                            if command_exists jq; then
-                                local tmp_file=$(mktemp)
-                                jq '.enabled = false' "$ssh_user_file" > "$tmp_file" && mv "$tmp_file" "$ssh_user_file"
-                            fi
-                        fi
-                        
-                        # Update app config
-                        set_app_config "$app_user" "ssh.enabled" "false"
-                        
-                        yellow_message "SSH/SFTP access DISABLED for $app_user"
-                        info_message "User still exists but cannot login. Use 'ssh enable' to re-enable."
-                        ;;
-                    
-                    reset|regenerate)
-                        # Generate new strong password (22 chars, safe symbols)
-                        local new_pass=$(generate_strong_password 22)
-                        
-                        # Update SSH user file
-                        if [[ -f "$ssh_user_file" ]] && command_exists jq; then
-                            local tmp_file=$(mktemp)
-                            jq ".password = \"$new_pass\" | .enabled = true" "$ssh_user_file" > "$tmp_file" && mv "$tmp_file" "$ssh_user_file"
-                        fi
-                        
-                        # Update app config
-                        set_app_config "$app_user" "ssh.password" "\"$new_pass\""
-                        set_app_config "$app_user" "ssh.enabled" "true"
-                        
-                        green_message "SSH password regenerated for $app_user"
-                        echo ""
-                        echo "  App User: $app_user"
-                        echo "  Password: $new_pass"
-                        echo ""
-                        info_message "Restart SSH container to apply: docker compose --profile ssh restart ssh"
-                        ;;
-                    
-                    delete)
-                        read -p "Are you sure you want to delete SSH access for $app_user? (y/N): " confirm
-                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                            # Remove SSH user file
-                            rm -f "$ssh_user_file"
-                            
-                            # Reset ownership back to www-data
-                            if is_service_running "$WEBSERVER_SERVICE"; then
-                                docker compose exec "$WEBSERVER_SERVICE" chown -R www-data:www-data "/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user" 2>/dev/null
-                            fi
-                            
-                            # Clear SSH config
-                            if command_exists jq; then
-                                local tmp_file=$(mktemp)
-                                jq '.ssh = {"enabled": false, "username": "", "password": "", "port": 2244}' "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
-                            fi
-                            
-                            set_app_config "$app_user" "permissions.owner" '"www-data"'
-                            set_app_config "$app_user" "permissions.group" '"www-data"'
-                            
-                            # Remove credentials file
-                            rm -f "$app_root/.ssh-credentials"
-                            rm -f "$app_root/.ssh-credentials"
-                            
-                            green_message "SSH access deleted for $app_user"
-                            info_message "Ownership reset to www-data:www-data"
-                        fi
-                        ;;
-                    
-                    show|*)
-                        echo ""
-                        local ssh_enabled=$(get_app_config "$app_user" "ssh.enabled")
-                        
-                        if [[ "$ssh_enabled" == "true" ]]; then
-                            blue_message "=== SSH/SFTP Access: $app_user ==="
-                            echo ""
-                            if command_exists jq; then
-                                jq '.ssh' "$config_file"
-                            fi
-                            echo ""
-                            info_message "SSH Service: $(is_service_running 'ssh' && echo 'Running' || echo 'Not running')"
-                            echo ""
-                        else
-                            yellow_message "SSH/SFTP not configured for $app_user"
-                            echo ""
-                            echo "Enable with: tbs appconfig $app_user ssh enable"
-                        fi
-                        echo ""
-                        echo "Available commands:"
-                        echo "  tbs appconfig $app_user ssh enable    - Create SSH user"
-                        echo "  tbs appconfig $app_user ssh disable   - Disable SSH access"
-                        echo "  tbs appconfig $app_user ssh reset     - Regenerate password"
-                        echo "  tbs appconfig $app_user ssh delete    - Remove SSH user"
-                        echo ""
-                        ;;
-                esac
-                ;;
-            
-            *)
-                error_message "Unknown action: $action"
-                echo "Run 'tbs appconfig' for available actions"
-                return 1
-                ;;
-        esac
-        ;;
-
-    # System info command
-    info)
-        local info_type="${2:-all}"
-        
-        case "$info_type" in
-            php)
-                echo ""
-                blue_message "=== PHP Information ==="
-                if is_service_running "$WEBSERVER_SERVICE"; then
-                    docker compose exec "$WEBSERVER_SERVICE" php -v 2>/dev/null | head -1
-                    echo ""
-                    info_message "Loaded Extensions:"
-                    docker compose exec "$WEBSERVER_SERVICE" php -m 2>/dev/null | grep -v "^\[" | sort | tr '\n' ', ' | sed 's/,$/\n/'
-                else
-                    yellow_message "PHP container is not running"
-                fi
-                echo ""
-                ;;
-            mysql|db)
-                echo ""
-                blue_message "=== MySQL/MariaDB Information ==="
-                if is_service_running "mysql"; then
-                    docker compose exec mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -e "SELECT VERSION();" 2>/dev/null | tail -1
-                    echo ""
-                    info_message "Databases:"
-                    docker compose exec mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -e "SHOW DATABASES;" 2>/dev/null | grep -v -E "^(Database|information_schema|performance_schema|mysql|sys)$"
-                else
-                    yellow_message "MySQL container is not running"
-                fi
-                echo ""
-                ;;
-            redis)
-                echo ""
-                blue_message "=== Redis Information ==="
-                if is_service_running "redis"; then
-                    docker compose exec redis redis-cli INFO server 2>/dev/null | grep -E "^(redis_version|uptime_in_seconds|connected_clients)"
-                else
-                    yellow_message "Redis container is not running"
-                fi
-                echo ""
-                ;;
-            all|*)
-                echo ""
-                print_header
-                
-                blue_message "=== Stack Configuration ==="
-                echo "  Stack Mode:    ${STACK_MODE:-hybrid}"
-                echo "  Environment:   ${APP_ENV:-development}"
-                echo "  Installation:  ${INSTALLATION_TYPE:-local}"
-                echo "  PHP Version:   ${PHPVERSION:-php8.2}"
-                echo "  Database:      ${DATABASE:-mariadb10.11}"
-                echo ""
-                
-                blue_message "=== Running Services ==="
-                docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null
-                echo ""
-                
-                blue_message "=== URLs ==="
-                echo "  Web:        http://localhost"
-                echo "  phpMyAdmin: http://localhost:${HOST_MACHINE_PMA_PORT:-8080}"
-                echo "  Mailpit:    http://localhost:8025"
-                echo ""
-                ;;
-        esac
-        ;;
-
-    # PHP Config - Per Application
-    phpconfig)
-        local app_name=$2
-        local action=$3
-        
-        # Template paths (templates in /config, per-app configs in /sites for gitignore)
-        local user_ini_template="$tbsPath/config/php/templates/app.user.ini.template"
-        local pool_template="$tbsPath/config/php/templates/app.fpm-pool.conf.template"
-        local pools_dir="$tbsPath/sites/php/pools"
-        local apps_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
-        
-        # Helper: List all apps with config status
-        _phpconfig_list() {
-            blue_message "Applications PHP Config Status:"
-            echo ""
-            if [[ -d "$apps_dir" ]]; then
-                local found=0
-                for app_dir in "$apps_dir"/*/; do
-                    if [[ -d "$app_dir" ]]; then
-                        found=1
-                        local app=$(basename "$app_dir")
-                        local status=""
-                        
-                        # Check .user.ini in public_html
-                        [[ -f "$app_dir/public_html/.user.ini" ]] && status="${status}📄.user.ini "
-                        
-                        # Check FPM pool
-                        [[ -f "$pools_dir/$app.conf" ]] && status="${status}⚙️pool.conf "
-                        
-                        if [[ -n "$status" ]]; then
-                            green_message "  ✅ $app - $status"
-                        else
-                            info_message "  ⚪ $app - Using default PHP config"
-                        fi
-                    fi
-                done
-                [[ $found -eq 0 ]] && info_message "  No applications found."
-            else
-                error_message "Applications directory not found: $apps_dir"
-            fi
-        }
-        
-        # Helper: Show usage
-        _phpconfig_usage() {
-            echo ""
-            blue_message "Current Mode: ${STACK_MODE:-hybrid}"
-            echo ""
-            blue_message "📄 .user.ini Commands (Works in BOTH modes - Hybrid & Thunder):"
-            info_message "  tbs phpconfig <app_user> create      - Create .user.ini"
-            info_message "  tbs phpconfig <app_user> edit        - Edit .user.ini"
-            info_message "  tbs phpconfig <app_user> show        - Show .user.ini"
-            info_message "  tbs phpconfig <app_user> delete      - Delete .user.ini"
-            echo ""
-            blue_message "⚙️ FPM Pool Commands (Thunder mode ONLY - PHP-FPM + Nginx):"
-            if [[ "${STACK_MODE:-hybrid}" == "thunder" ]]; then
-                info_message "  tbs phpconfig <app_user> create-pool - Create FPM pool"
-                info_message "  tbs phpconfig <app_user> edit-pool   - Edit FPM pool config"
-                info_message "  tbs phpconfig <app_user> show-pool   - Show FPM pool config"
-                info_message "  tbs phpconfig <app_user> delete-pool - Delete FPM pool config"
-            else
-                yellow_message "  ⚠️  Not available in Hybrid mode (Apache mod_php)"
-                info_message "  Use .user.ini for per-app config in Hybrid mode"
-                info_message "  Or switch to Thunder mode: STACK_MODE=thunder in .env"
-            fi
-        }
-        
-        # No app name or 'list' - show list and usage
-        if [[ -z "$app_name" ]] || [[ "$app_name" == "list" ]]; then
-            _phpconfig_list
-            _phpconfig_usage
-            return 0
-        fi
-        
-        # Resolve input to app_user
-        local app_user=$(resolve_app_user "$app_name")
-        if [[ -z "$app_user" ]]; then
-            error_message "App '$app_name' not found."
-            return 1
-        fi
-        local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
-        
-        if [[ ! -d "$app_root" ]]; then
-            error_message "Application '$app_user' not found."
-            return 1
-        fi
-        
-        # .user.ini goes in public_html (webroot)
-        local webroot="$app_root/public_html"
-        local user_ini="$webroot/.user.ini"
-        local pool_conf="$pools_dir/$app_user.conf"
-        
-        case "${action:-show}" in
-            # ========== .user.ini commands ==========
-            create)
-                if [[ -f "$user_ini" ]]; then
-                    yellow_message ".user.ini already exists for $app_user"
-                    if ! yes_no_prompt "Overwrite existing config?"; then
-                        return 0
-                    fi
-                fi
-                
-                # Use template if exists, otherwise create inline
-                if [[ -f "$user_ini_template" ]]; then
-                    cp "$user_ini_template" "$user_ini"
-                    green_message "Created .user.ini from template for $app_user"
-                else
-                    cat > "$user_ini" <<'USERINI'
-; ============================================
-; Application-Specific PHP Configuration
-; ============================================
-; Only PHP_INI_PERDIR and PHP_INI_USER settings can be set here.
-; Changes take effect within user_ini.cache_ttl (default: 300 seconds)
-
-memory_limit = 512M
-max_execution_time = 300
-max_input_time = 300
-upload_max_filesize = 64M
-post_max_size = 64M
-max_file_uploads = 20
-
-; Session
-session.gc_maxlifetime = 1440
-
-; Add your app-specific settings below
-
-USERINI
-                    green_message "Created basic .user.ini for $app_user"
-                fi
-                info_message "Edit with: tbs phpconfig $app_user edit"
-                ;;
-            
-            edit)
-                if [[ ! -f "$user_ini" ]]; then
-                    yellow_message ".user.ini not found. Creating from template..."
-                    tbs phpconfig "$app_user" create
-                    # Verify creation succeeded
-                    [[ ! -f "$user_ini" ]] && return 0
-                fi
-                open_in_editor "$user_ini"
-                ;;
-            
-            show)
-                if [[ -f "$user_ini" ]]; then
-                    blue_message "📄 .user.ini for $app_user:"
-                    echo ""
-                    cat "$user_ini"
-                else
-                    info_message "No .user.ini for $app_user"
-                    info_message "Create with: tbs phpconfig $app_user create"
-                fi
-                ;;
-            
-            delete)
-                if [[ -f "$user_ini" ]]; then
-                    if yes_no_prompt "Delete .user.ini for $app_user?"; then
-                        rm "$user_ini"
-                        green_message "Deleted .user.ini for $app_user"
-                    fi
-                else
-                    info_message "No .user.ini exists for $app_user"
-                fi
-                ;;
-            
-            # ========== FPM Pool commands ==========
-            create-pool)
-                if [[ "${STACK_MODE:-hybrid}" != "thunder" ]]; then
-                    echo ""
-                    red_message "⚠️  FPM pools are NOT supported in Hybrid mode!"
-                    echo ""
-                    info_message "Hybrid mode uses Apache with mod_php, not PHP-FPM."
-                    info_message "For per-app PHP config in Hybrid mode, use:"
-                    green_message "  tbs phpconfig $app_user create"
-                    echo ""
-                    info_message "Or switch to Thunder mode in .env:"
-                    green_message "  STACK_MODE=thunder"
-                    echo ""
-                    if ! yes_no_prompt "Create pool config anyway (for future Thunder mode use)?"; then
-                        return 0
-                    fi
-                fi
-                
-                if [[ -f "$pool_conf" ]]; then
-                    yellow_message "Pool config already exists for $app_user"
-                    if ! yes_no_prompt "Overwrite existing config?"; then
-                        return 0
-                    fi
-                fi
-                
-                mkdir -p "$pools_dir"
-                
-                if [[ -f "$pool_template" ]]; then
-                    # Replace placeholders in template
-                    sed "s/{{APP_NAME}}/$app_user/g" "$pool_template" > "$pool_conf"
-                    green_message "Created FPM pool config from template for $app_user"
-                else
-                    cat > "$pool_conf" <<POOLCONF
-; FPM Pool for: $app_user
-; Location: sites/php/pools/$app_user.conf
-[$app_user]
-user = www-data
-group = www-data
-listen = /var/run/php-fpm-$app_user.sock
-listen.owner = www-data
-listen.group = www-data
-listen.mode = 0660
-
-pm = dynamic
-pm.max_children = 20
-pm.start_servers = 5
-pm.min_spare_servers = 2
-pm.max_spare_servers = 10
-pm.max_requests = 500
-
-; Security
-security.limit_extensions = .php
-
-; PHP Settings (can be overridden by .user.ini)
-php_value[memory_limit] = 512M
-php_value[max_execution_time] = 300
-php_value[upload_max_filesize] = 64M
-php_value[post_max_size] = 64M
-
-; Admin Settings (cannot be overridden)
-php_admin_flag[log_errors] = on
-php_admin_value[error_log] = /var/log/php-fpm/$app_user-error.log
-POOLCONF
-                    green_message "Created basic FPM pool config for $app_user"
-                fi
-                
-                info_message "Edit with: tbs phpconfig $app_user edit-pool"
-                yellow_message "Restart stack to apply: tbs restart"
-                ;;
-            
-            edit-pool)
-                if [[ ! -f "$pool_conf" ]]; then
-                    yellow_message "Pool config not found. Creating..."
-                    tbs phpconfig "$app_user" create-pool
-                    # Check again after create attempt
-                    if [[ ! -f "$pool_conf" ]]; then
-                        info_message "Pool config creation was cancelled."
-                        return 0
-                    fi
-                fi
-                open_in_editor "$pool_conf"
-                ;;
-            
-            show-pool)
-                if [[ -f "$pool_conf" ]]; then
-                    blue_message "⚙️ FPM Pool config for $app_user:"
-                    echo ""
-                    cat "$pool_conf"
-                else
-                    info_message "No FPM pool config for $app_user"
-                    info_message "Create with: tbs phpconfig $app_user create-pool"
-                fi
-                ;;
-            
-            delete-pool)
-                if [[ -f "$pool_conf" ]]; then
-                    if yes_no_prompt "Delete FPM pool config for $app_user?"; then
-                        rm "$pool_conf"
-                        green_message "Deleted pool config for $app_user"
-                        yellow_message "Restart stack to apply: tbs restart"
-                    fi
-                else
-                    info_message "No pool config exists for $app_user"
-                fi
-                ;;
-            
-            *)
-                error_message "Unknown action: $action"
-                info_message "Run 'tbs phpconfig' for usage"
-                ;;
-        esac
-        ;;
-
-    # SSH Admin Management (access to all apps)
+    # SSH Admin Management - uses TBS_ADMIN_* from .env
     sshadmin)
         local action="${2:-show}"
-        local admin_config="$tbsPath/config/ssh/admin.json"
-        
-        mkdir -p "$tbsPath/config/ssh"
+        local admin_user="${TBS_ADMIN_USER:-tbsadmin}"
+        local admin_pass="${TBS_ADMIN_PASSWORD:-tbsadmin123}"
+        local admin_email="${TBS_ADMIN_EMAIL:-admin@localhost}"
         
         case "$action" in
             show|status)
-                echo ""
-                blue_message "=== SSH Admin Configuration ==="
-                echo ""
-                if [[ -f "$admin_config" ]]; then
-                    if command_exists jq; then
-                        local admin_user=$(jq -r '.username // "not set"' "$admin_config")
-                        local admin_enabled=$(jq -r '.enabled // false' "$admin_config")
-                        info_message "Username: $admin_user"
-                        info_message "Enabled:  $admin_enabled"
-                        info_message "Access:   All applications"
-                        info_message "Port:     ${HOST_MACHINE_SSH_PORT:-2244}"
-                        echo ""
-                        if [[ "$admin_enabled" == "true" ]]; then
-                            yellow_message "SSH Command: ssh -p ${HOST_MACHINE_SSH_PORT:-2244} $admin_user@localhost"
-                        fi
-                    else
-                        cat "$admin_config"
-                    fi
-                else
-                    yellow_message "Admin SSH not configured."
-                    info_message "Create with: tbs sshadmin create"
-                fi
-                ;;
-            
-            create|setup)
-                echo ""
-                blue_message "=== Create SSH Admin Account ==="
-                echo ""
-                info_message "This account will have access to ALL applications."
-                echo ""
-                
-                local admin_user="${3:-}"
-                if [[ -z "$admin_user" ]]; then
-                    read -p "Admin username (default: tbsadmin): " admin_user
-                    admin_user="${admin_user:-tbsadmin}"
-                fi
-                
-                # Validate username
-                if [[ ! "$admin_user" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
-                    error_message "Invalid username. Use lowercase letters, numbers, underscore, hyphen."
-                    return 1
-                fi
-                
-                # Generate strong password
-                local admin_pass=$(generate_strong_password 22)
-                
-                # Create admin config
-                cat > "$admin_config" <<EOF
-{
-    "username": "$admin_user",
-    "password": "$admin_pass",
-    "enabled": true,
-    "access": "all",
-    "created_at": "$(date -Iseconds)"
-}
-EOF
-                chmod 600 "$admin_config"
-                
-                echo ""
-                blue_message "═══════════════════════════════════════════════════"
-                blue_message "         SSH Admin Account Created"
-                blue_message "═══════════════════════════════════════════════════"
-                echo ""
-                echo "  Username:  $admin_user"
-                echo "  Password:  $admin_pass"
-                echo "  Port:      ${HOST_MACHINE_SSH_PORT:-2244}"
-                echo "  Access:    ALL applications"
-                echo ""
-                echo "  SSH:  ssh -p ${HOST_MACHINE_SSH_PORT:-2244} $admin_user@localhost"
-                echo ""
-                blue_message "═══════════════════════════════════════════════════"
-                yellow_message "⚠️  Save these credentials! They won't be shown again."
-                echo ""
-                info_message "Start SSH service: docker compose --profile ssh up -d ssh"
-                ;;
-            
+                echo ""; blue_message "TBS Admin (Master User)"
+                echo "  User:  $admin_user"
+                echo "  Email: $admin_email"
+                echo "  Port:  ${HOST_MACHINE_SSH_PORT:-2244}"
+                echo ""; info_message "SSH: ssh -p ${HOST_MACHINE_SSH_PORT:-2244} $admin_user@localhost"
+                echo ""; yellow_message "Password is in .env (TBS_ADMIN_PASSWORD)" ;;
             password|reset)
-                if [[ ! -f "$admin_config" ]]; then
-                    error_message "Admin not configured. Create first: tbs sshadmin create"
-                    return 1
-                fi
-                
                 local new_pass=$(generate_strong_password 22)
-                local tmp_file=$(mktemp)
-                jq ".password = \"$new_pass\"" "$admin_config" > "$tmp_file" && mv "$tmp_file" "$admin_config"
-                chmod 600 "$admin_config"
-                
-                echo ""
-                green_message "Admin password reset!"
-                echo ""
-                echo "  New Password: $new_pass"
-                echo ""
-                yellow_message "Restart SSH service to apply: docker compose --profile ssh restart ssh"
-                ;;
-            
-            enable)
-                if [[ ! -f "$admin_config" ]]; then
-                    error_message "Admin not configured. Create first: tbs sshadmin create"
-                    return 1
-                fi
-                local tmp_file=$(mktemp)
-                jq ".enabled = true" "$admin_config" > "$tmp_file" && mv "$tmp_file" "$admin_config"
-                green_message "Admin SSH enabled!"
-                yellow_message "Restart SSH service to apply: docker compose --profile ssh restart ssh"
-                ;;
-            
-            disable)
-                if [[ ! -f "$admin_config" ]]; then
-                    error_message "Admin not configured."
-                    return 1
-                fi
-                local tmp_file=$(mktemp)
-                jq ".enabled = false" "$admin_config" > "$tmp_file" && mv "$tmp_file" "$admin_config"
-                green_message "Admin SSH disabled!"
-                yellow_message "Restart SSH service to apply: docker compose --profile ssh restart ssh"
-                ;;
-            
-            *)
-                error_message "Unknown action: $action"
-                echo ""
-                info_message "Usage: tbs sshadmin [action]"
-                info_message "Actions: show, create, password, enable, disable"
-                ;;
+                sed_i "s|^TBS_ADMIN_PASSWORD=.*|TBS_ADMIN_PASSWORD=$new_pass|" "$tbsPath/.env"
+                green_message "New password: $new_pass"
+                yellow_message "Restart SSH to apply: docker compose --profile ssh restart ssh" ;;
+            *) info_message "tbs sshadmin [show|password]" ;;
         esac
         ;;
 
@@ -3766,102 +2465,22 @@ EOF
             print_header
             echo "Usage: tbs [command] [args]"
             echo ""
-            echo "Stack Commands:"
-            echo "  start       Start the Turbo Stack"
-            echo "  stop        Stop the Turbo Stack"
-            echo "  restart     Restart the Turbo Stack"
-            echo "  build       Rebuild and start the Turbo Stack"
-            echo "  status      Show stack status"
-            echo "  config      Configure the environment"
-            echo "  info        Show system info (usage: tbs info [php|mysql|redis|all])"
-            echo ""
-            echo "Application Commands:"
-            echo "  addapp      Add a new application (usage: tbs addapp <name> [domain])"
-            echo "  removeapp   Remove an application (usage: tbs removeapp <name> [domain])"
-            echo "  create      Quick project setup:"
-            echo "              tbs create laravel <name>    - Create Laravel project"
-            echo "              tbs create wordpress <name>  - Create WordPress site"
-            echo "              tbs create symfony <name>    - Create Symfony project"
-            echo "              tbs create blank <name>      - Create blank project"
-            echo "  code        Open VS Code for an app (usage: tbs code [name])"
-            echo ""
-            echo "PHP Configuration:"
-            echo "  phpconfig   Manage per-app PHP config:"
-            echo "              tbs phpconfig                    - List all apps config status"
-            echo "              tbs phpconfig <app> create       - Create .user.ini"
-            echo "              tbs phpconfig <app> edit         - Edit .user.ini"
-            echo "              tbs phpconfig <app> create-pool  - Create FPM pool (Thunder mode)"
-            echo "              tbs phpconfig <app> edit-pool    - Edit FPM pool config"
-            echo ""
-            echo "Application Configuration:"
-            echo "  appconfig   Manage per-app settings:"
-            echo "              tbs appconfig                    - List all apps with config status"
-            echo "              tbs appconfig <app> show         - Show app configuration"
-            echo "              tbs appconfig <app> varnish on|off - Toggle Varnish caching"
-            echo "              tbs appconfig <app> webroot <path> - Set custom webroot"
-            echo "              tbs appconfig <app> domain add|remove|list - Manage domains"
-            echo "              tbs appconfig <app> database create|show - Manage app database"
-            echo "              tbs appconfig <app> permissions reset - Reset file permissions"
-            echo "              tbs appconfig <app> supervisor add|remove|list - Manage workers"
-            echo "              tbs appconfig <app> cron add|remove|list - Manage cron jobs"
-            echo "              tbs appconfig <app> logs enable|disable - Toggle app logs"
-            echo ""
-            echo "Database Commands:"
-            echo "  db          Database management:"
-            echo "              tbs db list              - List all databases"
-            echo "              tbs db create <name>     - Create a database"
-            echo "              tbs db drop <name>       - Drop a database"
-            echo "              tbs db import <name> <file> - Import SQL file"
-            echo "              tbs db export <name>     - Export database to SQL"
-            echo "              tbs db user <name> [pass] [db] - Create user with access"
-            echo ""
-            echo "Shell & Tools:"
-            echo "  shell       Access container shell (usage: tbs shell [php|mysql|redis|nginx])"
-            echo "  cmd         Open bash shell in webserver container"
-            echo "  redis-cli   Open Redis CLI"
-            echo "  pma         Open phpMyAdmin"
-            echo "  mail        Open Mailpit"
-            echo ""
-            echo "SSH Management:"
-            echo "  sshadmin    Manage admin SSH (access all apps)"
-            echo "              tbs sshadmin show       - Show admin config"
-            echo "              tbs sshadmin create     - Create admin account"
-            echo "              tbs sshadmin password   - Reset admin password"
-            echo "              tbs sshadmin enable     - Enable admin SSH"
-            echo "              tbs sshadmin disable    - Disable admin SSH"
-            echo ""
-            echo "Backup & SSL:"
-            echo "  backup      Backup databases and applications"
-            echo "  restore     Restore from a backup"
-            echo "  ssl         Generate SSL certificates (usage: tbs ssl <domain>)"
-            echo "  ssl-localhost Generate default localhost SSL certificates"
-            echo ""
-            echo "Logs:"
-            echo "  logs        Show logs (usage: tbs logs [service])"
-            echo ""
+            echo "Stack:    start, stop, restart, build, status, config, info"
+            echo "Apps:     tbs app [add|rm|db|ssh|domain|ssl|php|config|code|open] <app>"
+            echo "Projects: tbs create [laravel|wordpress|symfony|blank] <name>"
+            echo "Database: tbs db [list|create|drop|import|export|user] <name>"
+            echo "Tools:    shell [php|mysql|redis], pma, mail, code, logs [service]"
+            echo "SSH:      sshadmin [show|password]"
+            echo "Other:    backup, restore, ssl-localhost"
             ;;
         *)
-            print_header
-            error_message "Unknown command: $1"
-            echo "Run 'tbs help' for usage or 'tbs' for the interactive menu."
+            error_message "Unknown: $1 | Run: tbs help"
             ;;
     esac
 }
 
-# Check if required commands are available
-required_commands=("docker" "sed" "curl")
-for cmd in "${required_commands[@]}"; do
-    if ! command_exists "$cmd"; then
-        error_message "Required command '$cmd' is not installed."
-        exit 1
-    fi
-done
+# Check requirements
+for c in docker sed curl; do command_exists "$c" || { error_message "$c not found"; exit 1; }; done
+docker compose version >/dev/null 2>&1 || { error_message "Docker Compose missing"; exit 1; }
 
-# Ensure Docker Compose v2 plugin is available
-if ! docker compose version >/dev/null 2>&1; then
-    error_message "Docker Compose plugin is missing. Please install Docker Desktop or the compose plugin."
-    exit 1
-fi
-
-# Run tbs with all arguments
 tbs "$@"

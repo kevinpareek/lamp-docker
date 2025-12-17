@@ -14,7 +14,6 @@ x-webserver-common: &webserver-common
     APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
     APP_ENV: "${APP_ENV:-development}"
     APP_DEBUG: "${APP_DEBUG:-true}"
-    TZ: "Asia/Kolkata"
   depends_on:
     database:
       condition: service_healthy
@@ -61,7 +60,8 @@ services:
         aliases:
           - reverse-proxy
     depends_on:
-      - varnish
+      varnish:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/nginx-health"]
       interval: 30s
@@ -102,6 +102,8 @@ services:
       - "./config/vhosts/partials:/etc/apache2/sites-enabled/partials:ro"
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
       - "./config/php/supervisord.conf:/etc/supervisor/supervisord.conf:ro"
+      - "./sites/cron:/etc/cron.d:ro"
+      - "./sites/supervisor:/etc/supervisor/conf.d:ro"
       - "${APACHE_LOG_DIR}:/var/log/apache2"
       - "${SSL_DIR}:/etc/apache2/ssl-sites:rw"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
@@ -129,6 +131,8 @@ services:
       - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:rw"
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
       - "./config/php/supervisord.fpm.conf:/etc/supervisor/supervisord.conf:ro"
+      - "./sites/cron:/etc/cron.d:ro"
+      - "./sites/supervisor:/etc/supervisor/conf.d:ro"
       - "./config/php/www.conf:/usr/local/etc/php-fpm.d/www.conf:ro"
       - "./sites/php/pools:/usr/local/etc/php-fpm.d/pools:ro"
       - "${APACHE_LOG_DIR}:/var/log/php-fpm"
@@ -161,7 +165,6 @@ services:
       MYSQL_DATABASE: "${MYSQL_DATABASE}"
       MYSQL_USER: "${MYSQL_USER}"
       MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
-      TZ: "Asia/Kolkata"
     networks:
       - backend
     healthcheck:
@@ -210,8 +213,6 @@ services:
     ports:
       - "127.0.0.1:8025:8025"
       - "127.0.0.1:1025:1025"
-    environment:
-      TZ: "Asia/Kolkata"
     networks:
       - backend
     profiles:
@@ -292,9 +293,11 @@ services:
       - "${HOST_MACHINE_SSH_PORT:-2244}:22"
     volumes:
       - "${DOCUMENT_ROOT}:/var/www/html:rw"
-      - "./config/ssh:/etc/ssh.d:ro"
+      - "./sites/ssh:/etc/ssh.d/users:ro"
     environment:
-      TZ: "Asia/Kolkata"
+      TBS_ADMIN_USER: "${TBS_ADMIN_USER:-tbsadmin}"
+      TBS_ADMIN_PASSWORD: "${TBS_ADMIN_PASSWORD:-tbsadmin123}"
+      APPLICATIONS_DIR_NAME: "${APPLICATIONS_DIR_NAME:-applications}"
     networks:
       - backend
     profiles:
