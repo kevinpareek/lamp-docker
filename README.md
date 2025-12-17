@@ -388,7 +388,7 @@ Each app's configuration is stored as JSON in `sites/apps/<app_name>.json`:
     "enabled": true,
     "username": "myapp_ssh",
     "password": "auto_generated",
-    "port": 2222
+    "port": 2244
   },
   "permissions": {
     "owner": "myapp_ssh",
@@ -422,10 +422,10 @@ tbs appconfig myapp ssh enable
 # Output:
 #   Username: myapp_ssh
 #   Password: <random_16_char>
-#   Port:     2222
+#   Port:     2244
 
 # Connect via SFTP
-sftp -P 2222 myapp_ssh@localhost
+sftp -P 2244 myapp_ssh@localhost
 
 # Regenerate password
 tbs appconfig myapp ssh reset
@@ -442,7 +442,7 @@ tbs appconfig myapp ssh delete
 - **File ownership** - app files owned by SSH user (not www-data)
 - **Toggle on/off** without deleting credentials
 
-> **Note:** Start SFTP service with: `docker compose --profile sftp up -d sftp`
+> **Note:** Start SSH service with: `docker compose --profile ssh up -d ssh`
 
 ---
 

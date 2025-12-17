@@ -23,14 +23,14 @@ RUN apk add --no-cache \
 RUN addgroup -g 82 -S www-data 2>/dev/null || true
 
 # User management scripts directory
-RUN mkdir -p /etc/sftp.d /var/run/sshd
+RUN mkdir -p /etc/ssh.d /var/run/sshd
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Users config directory (mounted from host)
-VOLUME /etc/sftp.d
+VOLUME /etc/ssh.d
 
 EXPOSE 22
 

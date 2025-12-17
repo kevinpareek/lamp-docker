@@ -281,24 +281,24 @@ services:
     logging: *default-logging
 
   # ============================================
-  # SFTP Server (Per-App SSH Access)
+  # SSH Server (Per-App SSH/SFTP Access)
   # ============================================
-  sftp:
+  ssh:
     build:
-      context: ./bin/sftp
-    container_name: "${COMPOSE_PROJECT_NAME}-sftp"
+      context: ./bin/ssh
+    container_name: "${COMPOSE_PROJECT_NAME}-ssh"
     restart: unless-stopped
     ports:
-      - "${HOST_MACHINE_SFTP_PORT:-2222}:22"
+      - "${HOST_MACHINE_SSH_PORT:-2244}:22"
     volumes:
       - "${DOCUMENT_ROOT}:/var/www/html:rw"
-      - "./config/sftp/users:/etc/sftp.d/users:ro"
+      - "./config/ssh:/etc/ssh.d:ro"
     environment:
       TZ: "Asia/Kolkata"
     networks:
       - backend
     profiles:
-      - sftp
+      - ssh
     logging: *default-logging
 
 # ============================================
