@@ -58,6 +58,31 @@ yellow_message() {
     echo -e "  ${YELLOW}$1${NC}"
 }
 
+# Open file in available editor (respects EDITOR env var)
+open_in_editor() {
+    local file="$1"
+    if [[ ! -f "$file" ]]; then
+        error_message "File not found: $file"
+        return 1
+    fi
+    
+    if [[ -n "$EDITOR" ]] && command_exists "$EDITOR"; then
+        "$EDITOR" "$file"
+    elif command_exists code; then
+        code "$file"
+    elif command_exists nano; then
+        nano "$file"
+    elif command_exists vim; then
+        vim "$file"
+    elif command_exists vi; then
+        vi "$file"
+    else
+        error_message "No editor found. Set EDITOR env var or install code/nano/vim."
+        info_message "Edit manually: $file"
+        return 1
+    fi
+}
+
 # Function to check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -581,9 +606,9 @@ generate_default_ssl() {
 }
 
 generate_ssl_certificates() {
-    domain=$1
-    vhost_file=$2
-    nginx_file=$3
+    local domain=$1
+    local vhost_file=$2
+    local nginx_file=$3
 
     local use_mkcert=false
     local ssl_generated=false
@@ -618,7 +643,7 @@ generate_ssl_certificates() {
             # Note: In docker-compose, we mapped ./data/certbot/conf to /etc/letsencrypt
             
             # The path inside the host machine (relative to tbs.sh)
-            cert_path="$tbsPath/data/certbot/conf/live/$domain"
+            local cert_path="$tbsPath/data/certbot/conf/live/$domain"
             
             # Ensure SSL_DIR exists
             ensure_directories
@@ -1077,21 +1102,22 @@ interactive_menu() {
         echo "   7) Add New App"
         echo "   8) Remove App"
         echo "   9) Open App Code"
+        echo "   10) App PHP Config"
 
         echo -e "\n${BLUE}⚙️ Configuration & Tools${NC}"
-        echo "   10) Configure Environment"
-        echo "   11) Backup Data"
-        echo "   12) Restore Data"
-        echo "   13) SSL Certificates"
-        echo "   14) Open Mailpit"
-        echo "   15) Open phpMyAdmin"
-        echo "   16) Redis CLI"
-        echo "   17) Shell Access (Bash)"
+        echo "   11) Configure Environment"
+        echo "   12) Backup Data"
+        echo "   13) Restore Data"
+        echo "   14) SSL Certificates"
+        echo "   15) Open Mailpit"
+        echo "   16) Open phpMyAdmin"
+        echo "   17) Redis CLI"
+        echo "   18) Shell Access (Bash)"
 
         echo -e "\n   ${RED}0) Exit${NC}"
         
         echo ""
-        read -p "Enter your choice [0-17]: " choice
+        read -p "Enter your choice [0-18]: " choice
 
         local wait_needed=true
         case $choice in
@@ -1118,18 +1144,29 @@ interactive_menu() {
                 read -p "Enter application name (optional): " app_name
                 tbs code "$app_name"
                 ;;
-            10) tbs config ;;
-            11) tbs backup ;;
-            12) tbs restore ;;
-            13) 
+            10)
+                echo ""
+                tbs phpconfig
+                echo ""
+                read -p "Enter app name to configure (or press Enter to skip): " app_name
+                if [[ -n "$app_name" ]]; then
+                    read -p "Action [create/edit/show/delete] (Default: show): " action
+                    action=${action:-show}
+                    tbs phpconfig "$app_name" "$action"
+                fi
+                ;;
+            11) tbs config ;;
+            12) tbs backup ;;
+            13) tbs restore ;;
+            14) 
                 echo ""
                 read -p "Enter domain name: " domain
                 tbs ssl "$domain"
                 ;;
-            14) tbs mail ;;
-            15) tbs pma ;;
-            16) tbs redis-cli ;;
-            17) tbs cmd ;;
+            15) tbs mail ;;
+            16) tbs pma ;;
+            17) tbs redis-cli ;;
+            18) tbs cmd ;;
             0) echo "Bye!"; exit 0 ;;
             *) red_message "Invalid choice. Please try again."; sleep 1; wait_needed=false ;;
         esac
@@ -1220,8 +1257,8 @@ tbs() {
             return 1
         fi
 
-        app_name=$2
-        domain=$3
+        local app_name=$2
+        local domain=$3
 
         # Validate application name (alphanumeric, hyphens, underscores only)
         if [[ ! $app_name =~ ^[a-zA-Z0-9_-]+$ ]]; then
@@ -1247,8 +1284,8 @@ tbs() {
         fi
 
         # Define vhost directory and file using .env variables
-        vhost_file="${VHOSTS_DIR}/${domain}.conf"
-        nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
+        local vhost_file="${VHOSTS_DIR}/${domain}.conf"
+        local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
 
         # Ensure required directories exist
         ensure_directories
@@ -1285,7 +1322,7 @@ EOL
 
         # Generate Nginx Configuration
         # Common configuration for both modes (Frontend -> Varnish)
-        nginx_config="# HTTP server configuration (Frontend -> Varnish)
+        local nginx_config="# HTTP server configuration (Frontend -> Varnish)
 server {
     listen 80;
     server_name $domain www.$domain;
@@ -1332,6 +1369,7 @@ server {
         reload_webservers
 
         # Check if SSL generation is needed
+        local domainUrl
         if ! generate_ssl_certificates $domain $vhost_file $nginx_file; then
             domainUrl="http://$domain"
         else
@@ -1339,7 +1377,7 @@ server {
         fi
 
         # Create the application document root directory
-        app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name"
+        local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name"
         if [[ ! -d $app_root ]]; then
             mkdir -p $app_root
             info_message "Created document root at $app_root"
@@ -1348,8 +1386,8 @@ server {
         fi
 
         # Create an index.php file in the app's document root
-        index_file="${app_root}/index.php"
-        indexHtml="$tbsPath/data/pages/site-created.html"
+        local index_file="${app_root}/index.php"
+        local indexHtml="$tbsPath/data/pages/site-created.html"
         if [[ -f "$indexHtml" ]]; then
             sed -e "s|example.com|$domain|g" \
                 -e "s|index.html|index.php|g" \
@@ -1397,6 +1435,14 @@ EOF
         open_browser "$domainUrl"
 
         green_message "App setup complete: $app_name with domain $domain"
+        
+        # Ask if user wants to create custom PHP config
+        echo ""
+        if yes_no_prompt "Create custom PHP config (.user.ini) for this app?"; then
+            tbs phpconfig "$app_name" create
+        else
+            info_message "You can create it later with: tbs phpconfig $app_name create"
+        fi
         ;;
 
     # Remove an application
@@ -1406,7 +1452,7 @@ EOF
             return 1
         fi
 
-        app_name=$2
+        local app_name=$2
         
         # Validate application name format
         if [[ ! $app_name =~ ^[a-zA-Z0-9_-]+$ ]]; then
@@ -1419,7 +1465,7 @@ EOF
         # We can search for the app_name in the vhosts directory.
         
         # Simple approach: Ask for domain or assume default
-        domain=$3
+        local domain=$3
         if [[ -z $domain ]]; then
              # Try to find a vhost file containing the app path
              found_vhost=$(grep -l "$APPLICATIONS_DIR_NAME/$app_name" "$VHOSTS_DIR"/*.conf 2>/dev/null | head -n 1)
@@ -1432,9 +1478,9 @@ EOF
              fi
         fi
 
-        vhost_file="${VHOSTS_DIR}/${domain}.conf"
-        nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
-        app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name"
+        local vhost_file="${VHOSTS_DIR}/${domain}.conf"
+        local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
+        local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name"
 
         if [[ ! -f $vhost_file && ! -d $app_root ]]; then
             error_message "Application $app_name not found."
@@ -1478,7 +1524,7 @@ EOF
 
     # Show logs
     logs)
-        service=$2
+        local service=$2
         if [[ -z $service ]]; then
             docker compose logs -f
         else
@@ -1497,21 +1543,24 @@ EOF
             code "$tbsPath"
         else
             # If no argument is provided, list application directories and prompt for selection
-            apps_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
+            local apps_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
+            local app_dir
             if [[ -z $2 ]]; then
                 if [[ -d $apps_dir ]]; then
                     echo "Available applications:"
-                    app_list=($(ls "$apps_dir" | grep -v '^tbs$')) # Exclude 'tbs' from listing
+                    local app_list=($(ls "$apps_dir" | grep -v '^tbs$')) # Exclude 'tbs' from listing
                     if [[ ${#app_list[@]} -eq 0 ]]; then
                         error_message "No applications found."
                         return
                     fi
+                    local i
                     for i in "${!app_list[@]}"; do
                         blue_message "$((i + 1)). ${app_list[$i]}"
                     done
+                    local app_num
                     read -p "Choose an application number: " app_num
                     if [[ "$app_num" -gt 0 && "$app_num" -le "${#app_list[@]}" ]]; then
-                        selected_app="${app_list[$((app_num - 1))]}"
+                        local selected_app="${app_list[$((app_num - 1))]}"
                         app_dir="$apps_dir/$selected_app"
                         code "$app_dir"
                     else
@@ -1521,7 +1570,7 @@ EOF
                     error_message "Applications directory not found: $apps_dir"
                 fi
             else
-                app_dir="$apps_dir/$2"
+                local app_dir="$apps_dir/$2"
                 if [[ -d $app_dir ]]; then
                     code "$app_dir"
                 else
@@ -1536,10 +1585,10 @@ EOF
 
     # Backup the Turbo Stack
     backup)
-        backup_dir="$tbsPath/data/backup"
+        local backup_dir="$tbsPath/data/backup"
         mkdir -p "$backup_dir"
-        timestamp=$(date +"%Y%m%d%H%M%S")
-        backup_file="$backup_dir/tbs_backup_$timestamp.tgz"
+        local timestamp=$(date +"%Y%m%d%H%M%S")
+        local backup_file="$backup_dir/tbs_backup_$timestamp.tgz"
 
         info_message "Backing up Turbo Stack to $backup_file..."
         
@@ -1548,20 +1597,20 @@ EOF
             return 1
         fi
         
-        databases=$(execute_mysql_command "-e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)" || true)
+        local databases=$(execute_mysql_command "-e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)" || true)
 
         if [[ -z "$databases" ]]; then
             yellow_message "No databases found to backup."
         fi
 
         # Create temporary directories for SQL and app data
-        temp_sql_dir="$backup_dir/sql"
-        temp_app_dir="$backup_dir/app"
+        local temp_sql_dir="$backup_dir/sql"
+        local temp_app_dir="$backup_dir/app"
         mkdir -p "$temp_sql_dir" "$temp_app_dir"
 
         for db in $databases; do
             if [[ -n "$db" ]]; then
-                backup_sql_file="$temp_sql_dir/db_backup_$db.sql"
+                local backup_sql_file="$temp_sql_dir/db_backup_$db.sql"
                 if ! execute_mysqldump "$db" "$backup_sql_file"; then
                     yellow_message "Failed to backup database: $db"
                     rm -f "$backup_sql_file"
@@ -1591,13 +1640,13 @@ EOF
 
     # Restore the Turbo Stack
     restore)
-        backup_dir="$tbsPath/data/backup"
+        local backup_dir="$tbsPath/data/backup"
         if [[ ! -d $backup_dir ]]; then
             error_message "Backup directory not found: $backup_dir"
             return 1
         fi
 
-        backup_files=($(ls -t "$backup_dir"/*.tgz 2>/dev/null))
+        local backup_files=($(ls -t "$backup_dir"/*.tgz 2>/dev/null))
         if [[ ${#backup_files[@]} -eq 0 ]]; then
             error_message "No backup files found in $backup_dir"
             return 1
@@ -1605,7 +1654,8 @@ EOF
 
         echo "Available backups:"
         for i in "${!backup_files[@]}"; do
-            backup_file="${backup_files[$i]}"
+            local backup_file="${backup_files[$i]}"
+            local backup_time
             # Cross-platform date command
             if [[ "$(get_os_type)" == "mac" ]]; then
                 backup_time=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$backup_file" 2>/dev/null || date -r "$backup_file" +"%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "unknown")
@@ -1618,6 +1668,7 @@ EOF
             echo "$((i + 1)). $(basename "$backup_file") (created on $backup_time)"
         done
 
+        local backup_num
         read -p "Choose a backup number to restore: " backup_num
         # Validate input is numeric and within range
         if [[ ! "$backup_num" =~ ^[0-9]+$ ]] || [[ "$backup_num" -lt 1 ]] || [[ "$backup_num" -gt "${#backup_files[@]}" ]]; then
@@ -1625,7 +1676,7 @@ EOF
             return 1
         fi
         
-        selected_backup="${backup_files[$((backup_num - 1))]}"
+        local selected_backup="${backup_files[$((backup_num - 1))]}"
 
         info_message "Restoring Turbo Stack from $selected_backup..."
         
@@ -1635,7 +1686,7 @@ EOF
         fi
         
         # Create temp directory for extraction
-        temp_restore_dir="$backup_dir/restore_temp"
+        local temp_restore_dir="$backup_dir/restore_temp"
         mkdir -p "$temp_restore_dir"
         
         # Extract backup with error handling
@@ -1680,14 +1731,14 @@ EOF
 
     # Generate SSL certificates for a domain
     ssl)
-        domain=$2
+        local domain=$2
         if [[ -z $domain ]]; then
             error_message "Domain name is required."
             return 1
         fi
 
-        vhost_file="${VHOSTS_DIR}/${domain}.conf"
-        nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
+        local vhost_file="${VHOSTS_DIR}/${domain}.conf"
+        local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
 
         if [[ ! -f $vhost_file ]]; then
             error_message "Domain name invalid. Vhost configuration file not found for $domain."
@@ -1720,6 +1771,273 @@ EOF
         docker compose exec redis redis-cli
         ;;
 
+    # PHP Config - Per Application
+    phpconfig)
+        local app_name=$2
+        local action=$3
+        
+        # Template paths (templates in /config, per-app configs in /sites for gitignore)
+        local user_ini_template="$tbsPath/config/php/templates/app.user.ini.template"
+        local pool_template="$tbsPath/config/php/templates/app.fpm-pool.conf.template"
+        local pools_dir="$tbsPath/sites/php/pools"
+        local apps_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
+        
+        # Helper: List all apps with config status
+        _phpconfig_list() {
+            blue_message "Applications PHP Config Status:"
+            echo ""
+            if [[ -d "$apps_dir" ]]; then
+                local found=0
+                for app_dir in "$apps_dir"/*/; do
+                    if [[ -d "$app_dir" ]]; then
+                        found=1
+                        local app=$(basename "$app_dir")
+                        local status=""
+                        
+                        # Check .user.ini
+                        [[ -f "$app_dir/.user.ini" ]] && status="${status}📄.user.ini "
+                        
+                        # Check FPM pool
+                        [[ -f "$pools_dir/$app.conf" ]] && status="${status}⚙️pool.conf "
+                        
+                        if [[ -n "$status" ]]; then
+                            green_message "  ✅ $app - $status"
+                        else
+                            info_message "  ⚪ $app - Using default PHP config"
+                        fi
+                    fi
+                done
+                [[ $found -eq 0 ]] && info_message "  No applications found."
+            else
+                error_message "Applications directory not found: $apps_dir"
+            fi
+        }
+        
+        # Helper: Show usage
+        _phpconfig_usage() {
+            echo ""
+            blue_message "Current Mode: ${STACK_MODE:-hybrid}"
+            echo ""
+            blue_message "📄 .user.ini Commands (Works in BOTH modes - Hybrid & Thunder):"
+            info_message "  tbs phpconfig <app> create      - Create .user.ini"
+            info_message "  tbs phpconfig <app> edit        - Edit .user.ini"
+            info_message "  tbs phpconfig <app> show        - Show .user.ini"
+            info_message "  tbs phpconfig <app> delete      - Delete .user.ini"
+            echo ""
+            blue_message "⚙️ FPM Pool Commands (Thunder mode ONLY - PHP-FPM + Nginx):"
+            if [[ "${STACK_MODE:-hybrid}" == "thunder" ]]; then
+                info_message "  tbs phpconfig <app> create-pool - Create FPM pool"
+                info_message "  tbs phpconfig <app> edit-pool   - Edit FPM pool config"
+                info_message "  tbs phpconfig <app> show-pool   - Show FPM pool config"
+                info_message "  tbs phpconfig <app> delete-pool - Delete FPM pool config"
+            else
+                yellow_message "  ⚠️  Not available in Hybrid mode (Apache mod_php)"
+                info_message "  Use .user.ini for per-app config in Hybrid mode"
+                info_message "  Or switch to Thunder mode: STACK_MODE=thunder in .env"
+            fi
+        }
+        
+        # No app name or 'list' - show list and usage
+        if [[ -z "$app_name" ]] || [[ "$app_name" == "list" ]]; then
+            _phpconfig_list
+            _phpconfig_usage
+            return 0
+        fi
+        
+        local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_name"
+        local user_ini="$app_root/.user.ini"
+        local pool_conf="$pools_dir/$app_name.conf"
+        
+        if [[ ! -d "$app_root" ]]; then
+            error_message "Application '$app_name' not found."
+            return 1
+        fi
+        
+        case "${action:-show}" in
+            # ========== .user.ini commands ==========
+            create)
+                if [[ -f "$user_ini" ]]; then
+                    yellow_message ".user.ini already exists for $app_name"
+                    if ! yes_no_prompt "Overwrite existing config?"; then
+                        return 0
+                    fi
+                fi
+                
+                # Use template if exists, otherwise create inline
+                if [[ -f "$user_ini_template" ]]; then
+                    cp "$user_ini_template" "$user_ini"
+                    green_message "Created .user.ini from template for $app_name"
+                else
+                    cat > "$user_ini" <<'USERINI'
+; ============================================
+; Application-Specific PHP Configuration
+; ============================================
+; Only PHP_INI_PERDIR and PHP_INI_USER settings can be set here.
+; Changes take effect within user_ini.cache_ttl (default: 300 seconds)
+
+memory_limit = 512M
+max_execution_time = 300
+max_input_time = 300
+upload_max_filesize = 64M
+post_max_size = 64M
+max_file_uploads = 20
+
+; Session
+session.gc_maxlifetime = 1440
+
+; Add your app-specific settings below
+
+USERINI
+                    green_message "Created basic .user.ini for $app_name"
+                fi
+                info_message "Edit with: tbs phpconfig $app_name edit"
+                ;;
+            
+            edit)
+                if [[ ! -f "$user_ini" ]]; then
+                    yellow_message ".user.ini not found. Creating from template..."
+                    tbs phpconfig "$app_name" create
+                    # Verify creation succeeded
+                    [[ ! -f "$user_ini" ]] && return 0
+                fi
+                open_in_editor "$user_ini"
+                ;;
+            
+            show)
+                if [[ -f "$user_ini" ]]; then
+                    blue_message "📄 .user.ini for $app_name:"
+                    echo ""
+                    cat "$user_ini"
+                else
+                    info_message "No .user.ini for $app_name"
+                    info_message "Create with: tbs phpconfig $app_name create"
+                fi
+                ;;
+            
+            delete)
+                if [[ -f "$user_ini" ]]; then
+                    if yes_no_prompt "Delete .user.ini for $app_name?"; then
+                        rm "$user_ini"
+                        green_message "Deleted .user.ini for $app_name"
+                    fi
+                else
+                    info_message "No .user.ini exists for $app_name"
+                fi
+                ;;
+            
+            # ========== FPM Pool commands ==========
+            create-pool)
+                if [[ "${STACK_MODE:-hybrid}" != "thunder" ]]; then
+                    echo ""
+                    red_message "⚠️  FPM pools are NOT supported in Hybrid mode!"
+                    echo ""
+                    info_message "Hybrid mode uses Apache with mod_php, not PHP-FPM."
+                    info_message "For per-app PHP config in Hybrid mode, use:"
+                    green_message "  tbs phpconfig $app_name create"
+                    echo ""
+                    info_message "Or switch to Thunder mode in .env:"
+                    green_message "  STACK_MODE=thunder"
+                    echo ""
+                    if ! yes_no_prompt "Create pool config anyway (for future Thunder mode use)?"; then
+                        return 0
+                    fi
+                fi
+                
+                if [[ -f "$pool_conf" ]]; then
+                    yellow_message "Pool config already exists for $app_name"
+                    if ! yes_no_prompt "Overwrite existing config?"; then
+                        return 0
+                    fi
+                fi
+                
+                mkdir -p "$pools_dir"
+                
+                if [[ -f "$pool_template" ]]; then
+                    # Replace placeholders in template
+                    sed "s/{{APP_NAME}}/$app_name/g" "$pool_template" > "$pool_conf"
+                    green_message "Created FPM pool config from template for $app_name"
+                else
+                    cat > "$pool_conf" <<POOLCONF
+; FPM Pool for: $app_name
+; Location: sites/php/pools/$app_name.conf
+[$app_name]
+user = www-data
+group = www-data
+listen = /var/run/php-fpm-$app_name.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+
+pm = dynamic
+pm.max_children = 20
+pm.start_servers = 5
+pm.min_spare_servers = 2
+pm.max_spare_servers = 10
+pm.max_requests = 500
+
+; Security
+security.limit_extensions = .php
+
+; PHP Settings (can be overridden by .user.ini)
+php_value[memory_limit] = 512M
+php_value[max_execution_time] = 300
+php_value[upload_max_filesize] = 64M
+php_value[post_max_size] = 64M
+
+; Admin Settings (cannot be overridden)
+php_admin_flag[log_errors] = on
+php_admin_value[error_log] = /var/log/php-fpm/$app_name-error.log
+POOLCONF
+                    green_message "Created basic FPM pool config for $app_name"
+                fi
+                
+                info_message "Edit with: tbs phpconfig $app_name edit-pool"
+                yellow_message "Restart stack to apply: tbs restart"
+                ;;
+            
+            edit-pool)
+                if [[ ! -f "$pool_conf" ]]; then
+                    yellow_message "Pool config not found. Creating..."
+                    tbs phpconfig "$app_name" create-pool
+                    # Check again after create attempt
+                    if [[ ! -f "$pool_conf" ]]; then
+                        info_message "Pool config creation was cancelled."
+                        return 0
+                    fi
+                fi
+                open_in_editor "$pool_conf"
+                ;;
+            
+            show-pool)
+                if [[ -f "$pool_conf" ]]; then
+                    blue_message "⚙️ FPM Pool config for $app_name:"
+                    echo ""
+                    cat "$pool_conf"
+                else
+                    info_message "No FPM pool config for $app_name"
+                    info_message "Create with: tbs phpconfig $app_name create-pool"
+                fi
+                ;;
+            
+            delete-pool)
+                if [[ -f "$pool_conf" ]]; then
+                    if yes_no_prompt "Delete FPM pool config for $app_name?"; then
+                        rm "$pool_conf"
+                        green_message "Deleted pool config for $app_name"
+                        yellow_message "Restart stack to apply: tbs restart"
+                    fi
+                else
+                    info_message "No pool config exists for $app_name"
+                fi
+                ;;
+            
+            *)
+                error_message "Unknown action: $action"
+                info_message "Run 'tbs phpconfig' for usage"
+                ;;
+        esac
+        ;;
+
     "")
         interactive_menu
         ;;
@@ -1741,6 +2059,12 @@ EOF
             echo "  restore     Restore from a backup"
             echo "  ssl         Generate SSL certificates (usage: tbs ssl <domain>)"
             echo "  ssl-localhost Generate default localhost SSL certificates"
+            echo "  phpconfig   Manage per-app PHP config:"
+            echo "              tbs phpconfig                    - List all apps config status"
+            echo "              tbs phpconfig <app> create       - Create .user.ini"
+            echo "              tbs phpconfig <app> edit         - Edit .user.ini"
+            echo "              tbs phpconfig <app> create-pool  - Create FPM pool (Thunder mode)"
+            echo "              tbs phpconfig <app> edit-pool    - Edit FPM pool config"
             echo "  logs        Show logs (usage: tbs logs [service])"
             echo "  status      Show stack status"
             echo "  mail        Open Mailpit"

@@ -16,3 +16,5 @@
 !/sites/nginx/.gitkeep
 /sites/ssl/*
 !/sites/ssl/.gitkeep
+/sites/php/pools/*
+!/sites/php/pools/.gitkeep

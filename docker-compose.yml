@@ -130,6 +130,7 @@ services:
       - "./config/php/php.${APP_ENV:-development}.ini:/usr/local/etc/php/php.ini:ro"
       - "./config/php/supervisord.fpm.conf:/etc/supervisor/supervisord.conf:ro"
       - "./config/php/www.conf:/usr/local/etc/php-fpm.d/www.conf:ro"
+      - "./sites/php/pools:/usr/local/etc/php-fpm.d/pools:ro"
       - "${APACHE_LOG_DIR}:/var/log/php-fpm"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
     healthcheck:
@@ -189,6 +190,7 @@ services:
       --maxmemory-policy allkeys-lru
       --tcp-keepalive 300
       --timeout 0
+      --requirepass ${REDIS_PASSWORD:-}
     networks:
       - backend
     healthcheck:

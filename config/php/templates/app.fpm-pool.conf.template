@@ -1,0 +1,81 @@
+; ============================================
+; PHP-FPM Pool Configuration for: {{APP_NAME}}
+; ============================================
+; This file provides per-application PHP settings with FULL control
+; including php_admin_value directives (disable_functions, etc.)
+;
+; Location: sites/php/pools/{{APP_NAME}}.conf
+; Mount: Automatically loaded by PHP-FPM in Thunder mode
+; 
+; NOTE: To use this pool, update your Nginx config to use the socket:
+;       fastcgi_pass unix:/var/run/php-fpm-{{APP_NAME}}.sock;
+; ============================================
+
+[{{APP_NAME}}]
+; Pool identification
+user = www-data
+group = www-data
+
+; Listen on unique socket for this app
+listen = /var/run/php-fpm-{{APP_NAME}}.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+
+; Process Manager
+pm = dynamic
+pm.max_children = 20
+pm.start_servers = 5
+pm.min_spare_servers = 2
+pm.max_spare_servers = 10
+pm.max_requests = 500
+
+; Security
+security.limit_extensions = .php
+
+; Logging
+access.log = /var/log/php-fpm/{{APP_NAME}}-access.log
+slowlog = /var/log/php-fpm/{{APP_NAME}}-slow.log
+request_slowlog_timeout = 5s
+
+; ============================================
+; PHP Settings (php_value / php_flag)
+; ============================================
+; These can be overridden by .user.ini in app directory
+
+php_value[memory_limit] = 512M
+php_value[max_execution_time] = 300
+php_value[max_input_time] = 300
+php_value[max_input_vars] = 5000
+php_value[post_max_size] = 64M
+php_value[upload_max_filesize] = 64M
+php_value[max_file_uploads] = 20
+php_value[date.timezone] = Asia/Kolkata
+
+php_flag[display_errors] = off
+php_flag[log_errors] = on
+
+; ============================================
+; PHP Admin Settings (php_admin_value / php_admin_flag)
+; ============================================
+; These CANNOT be overridden - use for security settings
+
+php_admin_flag[log_errors] = on
+php_admin_value[error_log] = /var/log/php-fpm/{{APP_NAME}}-error.log
+
+; Security: Restrict to app directory
+; php_admin_value[open_basedir] = /var/www/html/applications/{{APP_NAME}}:/tmp:/usr/share/php
+
+; Security: Disable dangerous functions (customize per app)
+; Uncomment and modify as needed for this specific app
+; php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen,curl_exec,curl_multi_exec,show_source,highlight_file,pcntl_exec,pcntl_fork,pcntl_signal,pcntl_alarm,putenv,symlink,link,chgrp,chown
+
+; Session
+php_admin_value[session.save_handler] = redis
+php_admin_value[session.save_path] = "tcp://redis:6379"
+
+; ============================================
+; Custom App Settings
+; ============================================
+; Add application-specific settings below
+
