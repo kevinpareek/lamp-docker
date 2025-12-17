@@ -410,6 +410,95 @@ check_containers_running() {
     return 0
 }
 
+# ============================================
+# App Configuration Helpers
+# ============================================
+
+# Get app config file path
+get_app_config_path() {
+    local app_name="$1"
+    echo "$tbsPath/sites/apps/${app_name}.json"
+}
+
+# Initialize app config with defaults
+init_app_config() {
+    local app_name="$1"
+    local config_file=$(get_app_config_path "$app_name")
+    
+    if [[ ! -f "$config_file" ]]; then
+        cat > "$config_file" <<EOF
+{
+    "name": "$app_name",
+    "domains": ["${app_name}.localhost"],
+    "primary_domain": "${app_name}.localhost",
+    "webroot": "",
+    "varnish": true,
+    "database": {
+        "name": "",
+        "user": "",
+        "created": false
+    },
+    "logs": {
+        "enabled": false,
+        "path": "logs"
+    },
+    "supervisor": {
+        "enabled": false,
+        "programs": []
+    },
+    "cron": {
+        "enabled": false,
+        "jobs": []
+    },
+    "permissions": {
+        "owner": "www-data",
+        "group": "www-data"
+    },
+    "created_at": "$(date -Iseconds)"
+}
+EOF
+    fi
+    echo "$config_file"
+}
+
+# Read app config value using jq or grep fallback
+get_app_config() {
+    local app_name="$1"
+    local key="$2"
+    local config_file=$(get_app_config_path "$app_name")
+    
+    if [[ ! -f "$config_file" ]]; then
+        return 1
+    fi
+    
+    if command_exists jq; then
+        jq -r ".$key // empty" "$config_file" 2>/dev/null
+    else
+        # Fallback: simple grep for basic keys
+        grep "\"$key\":" "$config_file" | head -1 | sed 's/.*: *"\?\([^",}]*\)"\?.*/\1/'
+    fi
+}
+
+# Set app config value
+set_app_config() {
+    local app_name="$1"
+    local key="$2"
+    local value="$3"
+    local config_file=$(get_app_config_path "$app_name")
+    
+    if [[ ! -f "$config_file" ]]; then
+        init_app_config "$app_name"
+    fi
+    
+    if command_exists jq; then
+        local tmp_file=$(mktemp)
+        jq ".$key = $value" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+    else
+        error_message "jq is required for modifying app config. Install with: brew install jq"
+        return 1
+    fi
+}
+
 # Execute MySQL command through webserver container
 execute_mysql_command() {
     local mysql_command="$1"
@@ -1109,31 +1198,32 @@ interactive_menu() {
         echo "   8) Remove App"
         echo "   9) Open App Code"
         echo "   10) App PHP Config"
-        echo "   11) Create Project (Laravel/WordPress/Symfony)"
+        echo "   11) App Configuration (varnish, domain, db, perms)"
+        echo "   12) Create Project (Laravel/WordPress/Symfony)"
 
         echo -e "\n${BLUE}💾 Database${NC}"
-        echo "   12) List Databases"
-        echo "   13) Create Database"
-        echo "   14) Import Database"
-        echo "   15) Export Database"
+        echo "   13) List Databases"
+        echo "   14) Create Database"
+        echo "   15) Import Database"
+        echo "   16) Export Database"
 
         echo -e "\n${BLUE}⚙️ Configuration & Tools${NC}"
-        echo "   16) Configure Environment"
-        echo "   17) System Info"
-        echo "   18) Backup Data"
-        echo "   19) Restore Data"
-        echo "   20) SSL Certificates"
+        echo "   17) Configure Environment"
+        echo "   18) System Info"
+        echo "   19) Backup Data"
+        echo "   20) Restore Data"
+        echo "   21) SSL Certificates"
         
         echo -e "\n${BLUE}🔧 Shell & Tools${NC}"
-        echo "   21) Container Shell"
-        echo "   22) Open Mailpit"
-        echo "   23) Open phpMyAdmin"
-        echo "   24) Redis CLI"
+        echo "   22) Container Shell"
+        echo "   23) Open Mailpit"
+        echo "   24) Open phpMyAdmin"
+        echo "   25) Redis CLI"
 
         echo -e "\n   ${RED}0) Exit${NC}"
         
         echo ""
-        read -p "Enter your choice [0-24]: " choice
+        read -p "Enter your choice [0-25]: " choice
 
         local wait_needed=true
         case $choice in
@@ -1173,43 +1263,56 @@ interactive_menu() {
                 ;;
             11)
                 echo ""
+                tbs appconfig
+                echo ""
+                read -p "Enter app name to configure (or press Enter to skip): " app_name
+                if [[ -n "$app_name" ]]; then
+                    echo ""
+                    echo "Actions: show, varnish, webroot, domain, database, permissions, supervisor, cron, logs"
+                    read -p "Action (Default: show): " action
+                    action=${action:-show}
+                    tbs appconfig "$app_name" "$action"
+                fi
+                ;;
+            12)
+                echo ""
                 read -p "Project type [laravel/wordpress/symfony/blank]: " project_type
                 read -p "Enter application name: " app_name
                 tbs create "$project_type" "$app_name"
                 ;;
-            12) tbs db list ;;
-            13)
+            13) tbs db list ;;
+            14)
                 echo ""
                 read -p "Enter database name: " db_name
                 tbs db create "$db_name"
                 ;;
-            14)
+            15)
                 echo ""
                 read -p "Enter database name: " db_name
                 read -p "Enter SQL file path: " sql_file
                 tbs db import "$db_name" "$sql_file"
                 ;;
-            15)
+            16)
                 echo ""
                 read -p "Enter database name: " db_name
                 tbs db export "$db_name"
                 ;;
-            16) tbs config ;;
-            17) tbs info ;;
-            18) tbs backup ;;
-            19) tbs restore ;;
-            20) 
+            17) tbs config ;;
+            18) tbs info ;;
+            19) tbs backup ;;
+            20) tbs restore ;;
+            21) 
                 echo ""
                 read -p "Enter domain name: " domain
                 tbs ssl "$domain"
                 ;;
-            21)
+            22)
                 echo ""
                 tbs shell
                 ;;
-            22) tbs mail ;;
-            23) tbs pma ;;
-            24) tbs redis-cli ;;
+            23) tbs mail ;;
+            24) tbs pma ;;
+            25) tbs redis-cli ;;
             0) echo "Bye!"; exit 0 ;;
             *) red_message "Invalid choice. Please try again."; sleep 1; wait_needed=false ;;
         esac
@@ -1478,6 +1581,17 @@ EOF
         open_browser "$domainUrl"
 
         green_message "App setup complete: $app_name with domain $domain"
+        
+        # Initialize app configuration
+        init_app_config "$app_name" >/dev/null
+        
+        # Ask if user wants to create database
+        echo ""
+        if yes_no_prompt "Create dedicated database for this app?"; then
+            tbs appconfig "$app_name" database create
+        else
+            info_message "You can create it later with: tbs appconfig $app_name database create"
+        fi
         
         # Ask if user wants to create custom PHP config
         echo ""
@@ -2093,6 +2207,513 @@ EOF
         esac
         ;;
 
+    # Application Configuration Management
+    appconfig)
+        local app_name="${2:-}"
+        local action="${3:-}"
+        local param1="${4:-}"
+        local param2="${5:-}"
+        
+        # List all apps if no app name provided
+        if [[ -z "$app_name" ]]; then
+            echo ""
+            blue_message "=== Application Configuration ==="
+            echo ""
+            info_message "Available Applications:"
+            
+            local apps_found=false
+            for app_dir in "$APPLICATIONS_DIR"/*/; do
+                if [[ -d "$app_dir" ]]; then
+                    local app=$(basename "$app_dir")
+                    local config_file=$(get_app_config_path "$app")
+                    local status="⚪ No config"
+                    
+                    if [[ -f "$config_file" ]]; then
+                        local varnish=$(get_app_config "$app" "varnish")
+                        local db_created=$(get_app_config "$app" "database.created")
+                        status="✅ Configured"
+                        [[ "$varnish" == "false" ]] && status="$status | Varnish: OFF"
+                        [[ "$db_created" == "true" ]] && status="$status | DB: ✓"
+                    fi
+                    
+                    echo "  • $app - $status"
+                    apps_found=true
+                fi
+            done
+            
+            if ! $apps_found; then
+                yellow_message "No applications found. Create one with: tbs addapp <name>"
+            fi
+            
+            echo ""
+            info_message "Usage: tbs appconfig <app_name> <action>"
+            echo ""
+            echo "Actions:"
+            echo "  show                    - Show app configuration"
+            echo "  varnish on|off          - Enable/disable Varnish caching"
+            echo "  webroot <path>          - Set custom webroot (public, web, public_html)"
+            echo "  domain add <domain>     - Add a domain alias"
+            echo "  domain remove <domain>  - Remove a domain alias"
+            echo "  domain list             - List all domains"
+            echo "  database create         - Create dedicated database & user"
+            echo "  database show           - Show database credentials"
+            echo "  permissions reset       - Reset file/folder permissions"
+            echo "  supervisor add <name>   - Add supervisor program"
+            echo "  supervisor remove <name> - Remove supervisor program"
+            echo "  supervisor list         - List supervisor programs"
+            echo "  cron add '<schedule>' '<command>' - Add cron job"
+            echo "  cron remove <index>     - Remove cron job"
+            echo "  cron list               - List cron jobs"
+            echo "  logs enable|disable     - Enable/disable app-specific logs"
+            echo ""
+            return 0
+        fi
+        
+        # Validate app exists
+        local app_root="$APPLICATIONS_DIR/$app_name"
+        if [[ ! -d "$app_root" ]]; then
+            error_message "Application '$app_name' not found."
+            info_message "Available apps:"
+            ls -1 "$APPLICATIONS_DIR" 2>/dev/null | grep -v "^index.php$" | sed 's/^/  /'
+            return 1
+        fi
+        
+        # Initialize config if needed
+        local config_file=$(init_app_config "$app_name")
+        
+        case "$action" in
+            # Show app configuration
+            show|"")
+                echo ""
+                blue_message "=== Configuration: $app_name ==="
+                echo ""
+                
+                if command_exists jq; then
+                    jq '.' "$config_file"
+                else
+                    cat "$config_file"
+                fi
+                echo ""
+                ;;
+            
+            # Varnish toggle
+            varnish)
+                local varnish_state="${param1:-}"
+                case "$varnish_state" in
+                    on|enable|true|1)
+                        set_app_config "$app_name" "varnish" "true"
+                        green_message "Varnish caching ENABLED for $app_name"
+                        info_message "Restart stack to apply: tbs restart"
+                        ;;
+                    off|disable|false|0)
+                        set_app_config "$app_name" "varnish" "false"
+                        yellow_message "Varnish caching DISABLED for $app_name"
+                        info_message "Restart stack to apply: tbs restart"
+                        ;;
+                    *)
+                        local current=$(get_app_config "$app_name" "varnish")
+                        info_message "Varnish caching: ${current:-true}"
+                        echo "Usage: tbs appconfig $app_name varnish on|off"
+                        ;;
+                esac
+                ;;
+            
+            # Webroot configuration
+            webroot)
+                local new_webroot="${param1:-}"
+                if [[ -z "$new_webroot" ]]; then
+                    local current=$(get_app_config "$app_name" "webroot")
+                    info_message "Current webroot: ${current:-'(default - app root)'}"
+                    echo ""
+                    echo "Common options: public, web, public_html, htdocs, www"
+                    echo "Usage: tbs appconfig $app_name webroot <path>"
+                else
+                    # Validate webroot exists or is a known Laravel/Symfony path
+                    local full_path="$app_root/$new_webroot"
+                    if [[ ! -d "$full_path" && "$new_webroot" != "public" && "$new_webroot" != "web" ]]; then
+                        yellow_message "Warning: Directory '$new_webroot' doesn't exist yet."
+                        read -p "Create it? (y/N): " create_dir
+                        if [[ "$create_dir" =~ ^[Yy]$ ]]; then
+                            mkdir -p "$full_path"
+                            green_message "Created: $full_path"
+                        fi
+                    fi
+                    
+                    set_app_config "$app_name" "webroot" "\"$new_webroot\""
+                    green_message "Webroot set to: $new_webroot"
+                    
+                    # Update vhost files
+                    local domain=$(get_app_config "$app_name" "primary_domain")
+                    local vhost_file="${VHOSTS_DIR}/${domain}.conf"
+                    local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
+                    
+                    if [[ -f "$vhost_file" ]]; then
+                        local new_docroot="/var/www/html/${APPLICATIONS_DIR_NAME}/$app_name/$new_webroot"
+                        sed -i.bak "s|DocumentRoot.*|DocumentRoot $new_docroot|g" "$vhost_file"
+                        rm -f "${vhost_file}.bak"
+                        info_message "Updated Apache vhost"
+                    fi
+                    
+                    if [[ -f "$nginx_file" ]]; then
+                        local new_docroot="/var/www/html/${APPLICATIONS_DIR_NAME}/$app_name/$new_webroot"
+                        sed -i.bak "s|root.*applications/$app_name.*|root $new_docroot;|g" "$nginx_file"
+                        rm -f "${nginx_file}.bak"
+                        info_message "Updated Nginx config"
+                    fi
+                    
+                    info_message "Reload webservers to apply: tbs restart"
+                fi
+                ;;
+            
+            # Domain management
+            domain)
+                local domain_action="${param1:-list}"
+                local domain_name="${param2:-}"
+                
+                case "$domain_action" in
+                    add)
+                        if [[ -z "$domain_name" ]]; then
+                            error_message "Domain name required"
+                            echo "Usage: tbs appconfig $app_name domain add <domain>"
+                            return 1
+                        fi
+                        
+                        # Add domain to config
+                        if command_exists jq; then
+                            local tmp_file=$(mktemp)
+                            jq ".domains += [\"$domain_name\"]" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+                        fi
+                        
+                        # Create vhost for new domain
+                        local primary_domain=$(get_app_config "$app_name" "primary_domain")
+                        local source_vhost="${VHOSTS_DIR}/${primary_domain}.conf"
+                        local new_vhost="${VHOSTS_DIR}/${domain_name}.conf"
+                        
+                        if [[ -f "$source_vhost" ]]; then
+                            sed "s/$primary_domain/$domain_name/g" "$source_vhost" > "$new_vhost"
+                            info_message "Created Apache vhost for $domain_name"
+                        fi
+                        
+                        # Create Nginx config
+                        local source_nginx="${NGINX_CONF_DIR}/${primary_domain}.conf"
+                        local new_nginx="${NGINX_CONF_DIR}/${domain_name}.conf"
+                        
+                        if [[ -f "$source_nginx" ]]; then
+                            sed "s/$primary_domain/$domain_name/g" "$source_nginx" > "$new_nginx"
+                            info_message "Created Nginx config for $domain_name"
+                        fi
+                        
+                        # Generate SSL
+                        tbs ssl "$domain_name"
+                        
+                        green_message "Domain '$domain_name' added to $app_name"
+                        info_message "Restart stack to apply: tbs restart"
+                        ;;
+                    
+                    remove)
+                        if [[ -z "$domain_name" ]]; then
+                            error_message "Domain name required"
+                            return 1
+                        fi
+                        
+                        local primary=$(get_app_config "$app_name" "primary_domain")
+                        if [[ "$domain_name" == "$primary" ]]; then
+                            error_message "Cannot remove primary domain. Change primary first."
+                            return 1
+                        fi
+                        
+                        # Remove from config
+                        if command_exists jq; then
+                            local tmp_file=$(mktemp)
+                            jq ".domains -= [\"$domain_name\"]" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+                        fi
+                        
+                        # Remove vhost files
+                        rm -f "${VHOSTS_DIR}/${domain_name}.conf"
+                        rm -f "${NGINX_CONF_DIR}/${domain_name}.conf"
+                        
+                        green_message "Domain '$domain_name' removed from $app_name"
+                        ;;
+                    
+                    list|*)
+                        echo ""
+                        info_message "Domains for $app_name:"
+                        if command_exists jq; then
+                            jq -r '.domains[]' "$config_file" 2>/dev/null | while read d; do
+                                local primary=$(get_app_config "$app_name" "primary_domain")
+                                if [[ "$d" == "$primary" ]]; then
+                                    echo "  • $d (primary)"
+                                else
+                                    echo "  • $d"
+                                fi
+                            done
+                        else
+                            grep -o '"[^"]*\.localhost"' "$config_file" | tr -d '"' | while read d; do
+                                echo "  • $d"
+                            done
+                        fi
+                        echo ""
+                        ;;
+                esac
+                ;;
+            
+            # Database management
+            database|db)
+                local db_action="${param1:-show}"
+                
+                case "$db_action" in
+                    create)
+                        local db_name="${app_name//-/_}"
+                        local db_user="${db_name}_user"
+                        local db_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16)
+                        
+                        if ! is_service_running "mysql"; then
+                            error_message "MySQL is not running. Start stack first: tbs start"
+                            return 1
+                        fi
+                        
+                        local mysql_root_pass="${MYSQL_ROOT_PASSWORD:-root}"
+                        
+                        # Create database
+                        docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
+                        
+                        # Create user
+                        docker compose exec mysql mysql -uroot -p"$mysql_root_pass" -e "CREATE USER IF NOT EXISTS '$db_user'@'%' IDENTIFIED BY '$db_pass'; GRANT ALL PRIVILEGES ON \`$db_name\`.* TO '$db_user'@'%'; FLUSH PRIVILEGES;" 2>/dev/null
+                        
+                        # Save to config
+                        if command_exists jq; then
+                            local tmp_file=$(mktemp)
+                            jq ".database = {\"name\": \"$db_name\", \"user\": \"$db_user\", \"password\": \"$db_pass\", \"host\": \"mysql\", \"created\": true}" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+                        fi
+                        
+                        green_message "Database created for $app_name:"
+                        echo ""
+                        echo "  Database: $db_name"
+                        echo "  Username: $db_user"
+                        echo "  Password: $db_pass"
+                        echo "  Host:     mysql (from container) / localhost:3306 (from host)"
+                        echo ""
+                        ;;
+                    
+                    show|*)
+                        local db_created=$(get_app_config "$app_name" "database.created")
+                        if [[ "$db_created" == "true" ]]; then
+                            echo ""
+                            info_message "Database credentials for $app_name:"
+                            if command_exists jq; then
+                                jq '.database' "$config_file"
+                            else
+                                grep -A5 '"database"' "$config_file"
+                            fi
+                            echo ""
+                        else
+                            yellow_message "No database created for $app_name yet."
+                            echo "Create with: tbs appconfig $app_name database create"
+                        fi
+                        ;;
+                esac
+                ;;
+            
+            # Permission reset
+            permissions|perms)
+                local perm_action="${param1:-reset}"
+                
+                case "$perm_action" in
+                    reset)
+                        info_message "Resetting permissions for $app_name..."
+                        
+                        # Reset ownership
+                        docker compose exec "$WEBSERVER_SERVICE" chown -R www-data:www-data "/var/www/html/${APPLICATIONS_DIR_NAME}/$app_name" 2>/dev/null
+                        
+                        # Set directory permissions
+                        docker compose exec "$WEBSERVER_SERVICE" find "/var/www/html/${APPLICATIONS_DIR_NAME}/$app_name" -type d -exec chmod 755 {} \; 2>/dev/null
+                        
+                        # Set file permissions  
+                        docker compose exec "$WEBSERVER_SERVICE" find "/var/www/html/${APPLICATIONS_DIR_NAME}/$app_name" -type f -exec chmod 644 {} \; 2>/dev/null
+                        
+                        # Make common executable files executable
+                        docker compose exec "$WEBSERVER_SERVICE" bash -c "find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_name -name 'artisan' -o -name '*.sh' | xargs chmod +x 2>/dev/null" 2>/dev/null
+                        
+                        green_message "Permissions reset for $app_name"
+                        echo "  Owner: www-data:www-data"
+                        echo "  Directories: 755"
+                        echo "  Files: 644"
+                        ;;
+                    *)
+                        echo "Usage: tbs appconfig $app_name permissions reset"
+                        ;;
+                esac
+                ;;
+            
+            # Supervisor management
+            supervisor)
+                local sup_action="${param1:-list}"
+                local sup_name="${param2:-}"
+                
+                case "$sup_action" in
+                    add)
+                        if [[ -z "$sup_name" ]]; then
+                            error_message "Program name required"
+                            return 1
+                        fi
+                        
+                        echo ""
+                        read -p "Enter command to run: " sup_command
+                        read -p "Number of processes (default: 1): " sup_numprocs
+                        sup_numprocs=${sup_numprocs:-1}
+                        
+                        # Create supervisor config
+                        local sup_conf="$tbsPath/config/supervisor/${app_name}_${sup_name}.conf"
+                        cat > "$sup_conf" <<EOF
+[program:${app_name}_${sup_name}]
+command=$sup_command
+directory=/var/www/html/${APPLICATIONS_DIR_NAME}/$app_name
+user=www-data
+numprocs=$sup_numprocs
+autostart=true
+autorestart=true
+startsecs=5
+startretries=3
+stdout_logfile=/var/log/supervisor/${app_name}_${sup_name}.log
+stderr_logfile=/var/log/supervisor/${app_name}_${sup_name}_error.log
+EOF
+                        
+                        # Update config
+                        if command_exists jq; then
+                            local tmp_file=$(mktemp)
+                            jq ".supervisor.enabled = true | .supervisor.programs += [\"$sup_name\"]" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+                        fi
+                        
+                        green_message "Supervisor program '$sup_name' added"
+                        info_message "Rebuild stack to apply: tbs build"
+                        ;;
+                    
+                    remove)
+                        if [[ -z "$sup_name" ]]; then
+                            error_message "Program name required"
+                            return 1
+                        fi
+                        
+                        rm -f "$tbsPath/config/supervisor/${app_name}_${sup_name}.conf"
+                        
+                        if command_exists jq; then
+                            local tmp_file=$(mktemp)
+                            jq ".supervisor.programs -= [\"$sup_name\"]" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+                        fi
+                        
+                        green_message "Supervisor program '$sup_name' removed"
+                        ;;
+                    
+                    list|*)
+                        echo ""
+                        info_message "Supervisor programs for $app_name:"
+                        ls "$tbsPath/config/supervisor/${app_name}_"*.conf 2>/dev/null | while read f; do
+                            local name=$(basename "$f" .conf | sed "s/${app_name}_//")
+                            echo "  • $name"
+                        done
+                        if [[ -z "$(ls "$tbsPath/config/supervisor/${app_name}_"*.conf 2>/dev/null)" ]]; then
+                            echo "  (none)"
+                        fi
+                        echo ""
+                        ;;
+                esac
+                ;;
+            
+            # Cron management
+            cron)
+                local cron_action="${param1:-list}"
+                local cron_file="$tbsPath/config/cron/${app_name}.cron"
+                
+                case "$cron_action" in
+                    add)
+                        echo ""
+                        read -p "Enter cron schedule (e.g., '* * * * *' for every minute): " cron_schedule
+                        read -p "Enter command: " cron_command
+                        
+                        # Create cron file if not exists
+                        touch "$cron_file"
+                        
+                        # Add cron job
+                        echo "$cron_schedule cd /var/www/html/${APPLICATIONS_DIR_NAME}/$app_name && $cron_command" >> "$cron_file"
+                        
+                        # Update config
+                        if command_exists jq; then
+                            local tmp_file=$(mktemp)
+                            jq ".cron.enabled = true" "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+                        fi
+                        
+                        green_message "Cron job added"
+                        info_message "Rebuild stack to apply: tbs build"
+                        ;;
+                    
+                    remove)
+                        local job_index="${param2:-}"
+                        if [[ -z "$job_index" ]]; then
+                            error_message "Job index required (use 'tbs appconfig $app_name cron list' to see indexes)"
+                            return 1
+                        fi
+                        
+                        if [[ -f "$cron_file" ]]; then
+                            sed -i.bak "${job_index}d" "$cron_file"
+                            rm -f "${cron_file}.bak"
+                            green_message "Cron job #$job_index removed"
+                        fi
+                        ;;
+                    
+                    list|*)
+                        echo ""
+                        info_message "Cron jobs for $app_name:"
+                        if [[ -f "$cron_file" && -s "$cron_file" ]]; then
+                            local i=1
+                            while IFS= read -r line; do
+                                echo "  $i) $line"
+                                ((i++))
+                            done < "$cron_file"
+                        else
+                            echo "  (none)"
+                        fi
+                        echo ""
+                        ;;
+                esac
+                ;;
+            
+            # App-specific logs
+            logs)
+                local logs_action="${param1:-}"
+                local logs_dir="$app_root/logs"
+                
+                case "$logs_action" in
+                    enable)
+                        mkdir -p "$logs_dir"
+                        set_app_config "$app_name" "logs.enabled" "true"
+                        green_message "App-specific logs enabled"
+                        info_message "Logs will be stored in: $logs_dir"
+                        ;;
+                    disable)
+                        set_app_config "$app_name" "logs.enabled" "false"
+                        yellow_message "App-specific logs disabled"
+                        ;;
+                    *)
+                        local enabled=$(get_app_config "$app_name" "logs.enabled")
+                        info_message "App logs: ${enabled:-false}"
+                        if [[ -d "$logs_dir" ]]; then
+                            echo "Log files:"
+                            ls -la "$logs_dir" 2>/dev/null | tail -n +2
+                        fi
+                        echo ""
+                        echo "Usage: tbs appconfig $app_name logs enable|disable"
+                        ;;
+                esac
+                ;;
+            
+            *)
+                error_message "Unknown action: $action"
+                echo "Run 'tbs appconfig' for available actions"
+                return 1
+                ;;
+        esac
+        ;;
+
     # System info command
     info)
         local info_type="${2:-all}"
@@ -2459,6 +3080,19 @@ POOLCONF
             echo "              tbs phpconfig <app> edit         - Edit .user.ini"
             echo "              tbs phpconfig <app> create-pool  - Create FPM pool (Thunder mode)"
             echo "              tbs phpconfig <app> edit-pool    - Edit FPM pool config"
+            echo ""
+            echo "Application Configuration:"
+            echo "  appconfig   Manage per-app settings:"
+            echo "              tbs appconfig                    - List all apps with config status"
+            echo "              tbs appconfig <app> show         - Show app configuration"
+            echo "              tbs appconfig <app> varnish on|off - Toggle Varnish caching"
+            echo "              tbs appconfig <app> webroot <path> - Set custom webroot"
+            echo "              tbs appconfig <app> domain add|remove|list - Manage domains"
+            echo "              tbs appconfig <app> database create|show - Manage app database"
+            echo "              tbs appconfig <app> permissions reset - Reset file permissions"
+            echo "              tbs appconfig <app> supervisor add|remove|list - Manage workers"
+            echo "              tbs appconfig <app> cron add|remove|list - Manage cron jobs"
+            echo "              tbs appconfig <app> logs enable|disable - Toggle app logs"
             echo ""
             echo "Database Commands:"
             echo "  db          Database management:"

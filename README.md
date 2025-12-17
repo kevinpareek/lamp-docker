@@ -309,6 +309,103 @@ tbs phpconfig
 
 ---
 
+## 🎛️ Per-Application Configuration
+
+Turbo Stack provides comprehensive per-application control through the `tbs appconfig` command.
+
+### Using `tbs appconfig`
+
+```bash
+# Show all apps and their configuration status
+tbs appconfig
+
+# View configuration for a specific app
+tbs appconfig myapp show
+
+# Toggle Varnish caching for an app
+tbs appconfig myapp varnish enable
+tbs appconfig myapp varnish disable
+
+# Change webroot (e.g., for Laravel's public folder)
+tbs appconfig myapp webroot public
+
+# Domain management
+tbs appconfig myapp domain add staging.example.com
+tbs appconfig myapp domain remove staging.example.com
+tbs appconfig myapp domain primary www.example.com
+
+# Create dedicated database for app
+tbs appconfig myapp database
+
+# Reset file permissions
+tbs appconfig myapp permissions
+
+# Supervisor (background workers/queues)
+tbs appconfig myapp supervisor add laravel-queue "php artisan queue:work"
+tbs appconfig myapp supervisor remove laravel-queue
+tbs appconfig myapp supervisor list
+
+# Cron jobs
+tbs appconfig myapp cron add "every-minute" "* * * * *" "php artisan schedule:run"
+tbs appconfig myapp cron remove "every-minute"
+tbs appconfig myapp cron list
+
+# Application logs
+tbs appconfig myapp logs enable
+tbs appconfig myapp logs disable
+tbs appconfig myapp logs tail
+```
+
+### Configuration Storage
+
+Each app's configuration is stored as JSON in `sites/apps/<app_name>.json`:
+
+```json
+{
+  "name": "myapp",
+  "domains": ["myapp.localhost", "www.myapp.com"],
+  "primary_domain": "myapp.localhost",
+  "webroot": "public",
+  "varnish": true,
+  "database": {
+    "name": "myapp_db",
+    "user": "myapp_user",
+    "created": true
+  },
+  "logs": {
+    "enabled": true,
+    "path": "logs"
+  },
+  "supervisor": {
+    "enabled": true,
+    "programs": ["laravel-queue"]
+  },
+  "cron": {
+    "enabled": true,
+    "jobs": ["scheduler"]
+  },
+  "permissions": {
+    "owner": "www-data",
+    "group": "www-data"
+  }
+}
+```
+
+### Feature Overview
+
+| Feature | Command | Description |
+| :--- | :--- | :--- |
+| **Varnish Toggle** | `varnish enable/disable` | Enable/disable caching per app |
+| **Custom Webroot** | `webroot <path>` | Change document root (e.g., `public`) |
+| **Domain Management** | `domain add/remove/primary` | Manage multiple domains |
+| **Database per App** | `database` | Create dedicated MySQL user & database |
+| **Permissions Reset** | `permissions` | Reset ownership to www-data |
+| **Supervisor Jobs** | `supervisor add/remove/list` | Manage background workers |
+| **Cron Jobs** | `cron add/remove/list` | Manage scheduled tasks |
+| **App Logs** | `logs enable/disable/tail` | Per-app logging configuration |
+
+---
+
 ## 🔒 Security Features
 
 Turbo Stack includes built-in security rules to protect your applications from common attack vectors.
@@ -425,60 +522,60 @@ We're constantly improving Turbo Stack! Here's what's on our roadmap:
 
 ### 🐘 PHP Enhancements
 
-| Feature | Description | Priority |
+| Feature | Description | Status |
 | :--- | :--- | :---: |
-| **PHP 8.5** | Support for upcoming PHP 8.5 release | 🔴 High |
-| **ionCube Loader** | ionCube PHP Encoder support for encoded applications | 🟡 Medium |
+| **PHP 8.5** | Support for upcoming PHP 8.5 release | 🔜 Planned |
+| **ionCube Loader** | ionCube PHP Encoder support for encoded applications | 🔜 Planned |
 
 ### 🎛️ Per-Application Controls
 
-| Feature | Description | Priority |
+| Feature | Description | Status |
 | :--- | :--- | :---: |
-| **Varnish Toggle** | Enable/disable Varnish caching per application | 🔴 High |
-| **SSH Shell Access** | Secure shell access to individual app containers | 🔴 High |
-| **Supervisord Jobs** | Per-app background process management (queues, workers) | 🔴 High |
-| **Cron Jobs** | Application-specific scheduled tasks | 🔴 High |
-| **Custom Webroot** | Change document root path (e.g., `public`, `web`, `public_html`) | 🟡 Medium |
-| **Permission Reset** | One-click file/folder ownership & permission reset | 🟡 Medium |
+| **Varnish Toggle** | Enable/disable Varnish caching per application | ✅ Done |
+| **SSH Shell Access** | Secure shell access to individual app containers | ✅ Done |
+| **Supervisord Jobs** | Per-app background process management (queues, workers) | ✅ Done |
+| **Cron Jobs** | Application-specific scheduled tasks | ✅ Done |
+| **Custom Webroot** | Change document root path (e.g., `public`, `web`, `public_html`) | ✅ Done |
+| **Permission Reset** | One-click file/folder ownership & permission reset | ✅ Done |
 
 ### 🌐 Domain & Routing
 
-| Feature | Description | Priority |
+| Feature | Description | Status |
 | :--- | :--- | :---: |
-| **Multi-Domain Support** | Add multiple domains/aliases per application | 🔴 High |
-| **Domain Management** | Add, remove, change domains (with primary domain protection) | 🔴 High |
-| **Web Rules** | Custom header rules and URL rewrite rules per app | 🟡 Medium |
+| **Multi-Domain Support** | Add multiple domains/aliases per application | ✅ Done |
+| **Domain Management** | Add, remove, change domains (with primary domain protection) | ✅ Done |
+| **Web Rules** | Custom header rules and URL rewrite rules per app | 🔜 Planned |
 
 ### 📁 Application Structure Improvements
 
-| Feature | Description | Priority |
+| Feature | Description | Status |
 | :--- | :--- | :---: |
-| **App-Specific Logs** | Logs stored in `applications/<app>/logs/` | 🔴 High |
-| **New Webroot Standard** | Document root at `applications/<app>/public_html/` | 🔴 High |
-| **App Data Directory** | Dedicated data storage at `applications/<app>/app_data/` | 🟡 Medium |
+| **App-Specific Logs** | Logs stored in `applications/<app>/logs/` | ✅ Done |
+| **New Webroot Standard** | Document root at `applications/<app>/public_html/` | 🔜 Planned |
+| **App Data Directory** | Dedicated data storage at `applications/<app>/app_data/` | 🔜 Planned |
 
 ### 💾 Database Enhancements
 
-| Feature | Description | Priority |
+| Feature | Description | Status |
 | :--- | :--- | :---: |
-| **Per-App Database** | Auto-create MySQL database & user per application | 🔴 High |
-| **MongoDB Support** | Full MongoDB integration | 🟡 Medium |
-| **PostgreSQL Support** | Full PostgreSQL integration | 🟡 Medium |
+| **Per-App Database** | Auto-create MySQL database & user per application | ✅ Done |
+| **MongoDB Support** | Full MongoDB integration | 🔜 Planned |
+| **PostgreSQL Support** | Full PostgreSQL integration | 🔜 Planned |
 
 ### 🚀 Stack Modes
 
-| Feature | Description | Priority |
+| Feature | Description | Status |
 | :--- | :--- | :---: |
-| **Node.js Mode** | Full Node.js application support with PM2 | 🟡 Medium |
+| **Node.js Mode** | Full Node.js application support with PM2 | 🔜 Planned |
 
 ### 📊 Monitoring & Observability
 
-| Feature | Description | Priority |
+| Feature | Description | Status |
 | :--- | :--- | :---: |
-| **New Relic APM** | Application Performance Monitoring (optional, paid) | 🟢 Low |
-| **Prometheus + Grafana** | Self-hosted metrics & beautiful dashboards | 🟡 Medium |
-| **Sentry** | Error tracking & crash reporting | 🟡 Medium |
-| **Health Checks** | Automated service health monitoring | 🟡 Medium |
+| **New Relic APM** | Application Performance Monitoring (optional, paid) | 🔜 Planned |
+| **Prometheus + Grafana** | Self-hosted metrics & beautiful dashboards | 🔜 Planned |
+| **Sentry** | Error tracking & crash reporting | 🔜 Planned |
+| **Health Checks** | Automated service health monitoring | 🔜 Planned |
 
 ---
 
