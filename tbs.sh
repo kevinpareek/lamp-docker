@@ -136,77 +136,191 @@ prepare_windows_path_handling() {
 }
 
 install_tbs_command() {
-    # Always target a user-writable bin dir
-    local bin_dir="${HOME}/.local/bin"
+    local bin_dir="${HOME}/.tbs/bin"
     local wrapper_path="${bin_dir}/tbs"
+    local config_file="${HOME}/.tbs/config"
+    local marker="# tbs-cli-path"
+    local needs_shell_restart=false
 
     mkdir -p "$bin_dir" 2>/dev/null || true
 
-    # Bash shim (works on Linux/mac/Git Bash)
-    cat > "$wrapper_path" <<EOF
-#!/bin/bash
-exec "$tbsFile" "\$@"
-EOF
+    # Store current tbs.sh path in config file (updated on every run)
+    echo "$tbsFile" > "$config_file"
+
+    # Create smart wrapper that reads path from config (auto-updates when project moves)
+    cat > "$wrapper_path" <<'WRAPPER'
+#!/usr/bin/env bash
+CONFIG_FILE="${HOME}/.tbs/config"
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+if [[ -f "$CONFIG_FILE" ]]; then
+    TBS_SCRIPT="$(cat "$CONFIG_FILE")"
+    if [[ -f "$TBS_SCRIPT" ]]; then
+        exec "$TBS_SCRIPT" "$@"
+    else
+        echo ""
+        echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║              ⚠️  TBS Project Not Found                      ║${NC}"
+        echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${YELLOW}Last known location:${NC}"
+        echo -e "  $TBS_SCRIPT"
+        echo ""
+        echo -e "${CYAN}This usually happens when:${NC}"
+        echo "  • The project folder was moved or renamed"
+        echo "  • The project was deleted"
+        echo "  • The drive/volume is not mounted"
+        echo ""
+        echo -e "${CYAN}To fix this, run tbs.sh from its new location:${NC}"
+        echo -e "  ${YELLOW}cd /path/to/turbo-stack && ./tbs.sh${NC}"
+        echo ""
+        echo -e "${CYAN}Or uninstall tbs command:${NC}"
+        echo -e "  ${YELLOW}rm -rf ~/.tbs${NC}"
+        echo ""
+        exit 1
+    fi
+else
+    echo ""
+    echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║              ⚠️  TBS Not Configured                         ║${NC}"
+    echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${CYAN}First time setup:${NC}"
+    echo "  1. Navigate to your Turbo Stack project folder"
+    echo "  2. Run: ${YELLOW}./tbs.sh${NC}"
+    echo ""
+    echo -e "${CYAN}This will:${NC}"
+    echo "  • Configure the 'tbs' command globally"
+    echo "  • Set up your development environment"
+    echo ""
+    exit 1
+fi
+WRAPPER
     chmod +x "$wrapper_path" 2>/dev/null || true
 
-    # Ensure current shell can find it immediately
+    # Add to current session PATH if not present
     case ":$PATH:" in
         *:"$bin_dir":*) ;;
         *) export PATH="$bin_dir:$PATH" ;;
     esac
 
-    # Persist PATH for bash shells
-    local shell_rc
-    if [[ -f "${HOME}/.bashrc" ]]; then
-        shell_rc="${HOME}/.bashrc"
-    elif [[ -f "${HOME}/.profile" ]]; then
-        shell_rc="${HOME}/.profile"
-    else
-        shell_rc="${HOME}/.bashrc"
-        touch "$shell_rc"
-    fi
+    # Detect user's default shell config file
+    local shell_rc=""
+    local current_shell="${SHELL##*/}"
+    
+    case "$current_shell" in
+        zsh)  shell_rc="$HOME/.zshrc" ;;
+        bash) [[ -f "$HOME/.bashrc" ]] && shell_rc="$HOME/.bashrc" || shell_rc="$HOME/.bash_profile" ;;
+        fish) shell_rc="$HOME/.config/fish/config.fish" ;;
+        *)
+            for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile"; do
+                [[ -f "$rc" ]] && { shell_rc="$rc"; break; }
+            done
+            [[ -z "$shell_rc" ]] && shell_rc="$HOME/.profile"
+            ;;
+    esac
 
-    # Git Bash warning helper: ensure .bash_profile sources .bashrc if none exists
-    if [[ -f "${HOME}/.bashrc" ]]; then
-        if [[ ! -f "${HOME}/.bash_profile" && ! -f "${HOME}/.bash_login" && ! -f "${HOME}/.profile" ]]; then
-            cat > "${HOME}/.bash_profile" <<'EOF'
-#!/bin/bash
-if [ -f "$HOME/.bashrc" ]; then
-    . "$HOME/.bashrc"
-fi
-EOF
+    # Ensure rc file directory and file exist
+    mkdir -p "$(dirname "$shell_rc")" 2>/dev/null || true
+    touch "$shell_rc" 2>/dev/null || true
+
+    # Add PATH to shell config (only once, using marker)
+    if [[ -f "$shell_rc" ]] && ! grep -qF "$marker" "$shell_rc" 2>/dev/null; then
+        needs_shell_restart=true
+        if [[ "$current_shell" == "fish" ]]; then
+            cat >> "$shell_rc" <<FISH_RC
+
+$marker
+if not contains "$bin_dir" \$PATH
+    set -gx PATH "$bin_dir" \$PATH
+end
+FISH_RC
+        else
+            cat >> "$shell_rc" <<POSIX_RC
+
+$marker
+export PATH="$bin_dir:\$PATH"
+POSIX_RC
         fi
     fi
 
-    local export_line="export PATH=\"$bin_dir:\$PATH\""
-    if ! grep -F "$export_line" "$shell_rc" >/dev/null 2>&1; then
-        {
-            echo ""
-            echo "# Added by tbs.sh for Turbo Stack CLI"
-            echo "$export_line"
-        } >> "$shell_rc"
+    # Fish: create function wrapper for better integration
+    if command_exists fish || [[ -d "$HOME/.config/fish" ]]; then
+        local fish_func_dir="$HOME/.config/fish/functions"
+        mkdir -p "$fish_func_dir" 2>/dev/null || true
+        cat > "$fish_func_dir/tbs.fish" <<'FISH_FN'
+function tbs --description 'Turbo Stack CLI'
+    bash "TBS_SCRIPT_PLACEHOLDER" $argv
+end
+FISH_FN
+        sed_i "s|TBS_SCRIPT_PLACEHOLDER|$tbsFile|g" "$fish_func_dir/tbs.fish"
     fi
 
-    # On Windows, also drop cmd/ps1 shims for PowerShell/CMD users
+    # Windows: CMD and PowerShell shims
     if [[ "$(get_os_type)" == "windows" ]]; then
-        local win_bin_dir="${HOME}/.local/bin"
-        mkdir -p "$win_bin_dir" 2>/dev/null || true
+        local win_script="$tbsFile"
+        command_exists cygpath && win_script="$(cygpath -w "$tbsFile")"
 
-        local win_tbs_path="$tbsFile"
-        if command_exists cygpath; then
-            win_tbs_path="$(cygpath -w "$tbsFile")"
-        fi
-
-        # CMD shim
-        cat > "${win_bin_dir}/tbs.cmd" <<EOF
+        cat > "${bin_dir}/tbs.cmd" <<'CMD_EOF'
 @echo off
-"%ProgramFiles%\\Git\\bin\\bash.exe" "$win_tbs_path" %*
-EOF
+setlocal enabledelayedexpansion
+set "BASH="
+for %%p in ("%ProgramFiles%\Git\bin\bash.exe" "%ProgramFiles(x86)%\Git\bin\bash.exe" "%LOCALAPPDATA%\Programs\Git\bin\bash.exe" "C:\msys64\usr\bin\bash.exe") do (
+    if exist "%%~p" set "BASH=%%~p"
+)
+if defined BASH (
+    "%BASH%" "TBS_WIN_PATH" %*
+) else (
+    where wsl >nul 2>&1 && (wsl bash "TBS_NIX_PATH" %*) || (echo Error: bash not found & exit /b 1)
+)
+CMD_EOF
+        sed_i "s|TBS_WIN_PATH|$win_script|g" "${bin_dir}/tbs.cmd"
+        sed_i "s|TBS_NIX_PATH|$tbsFile|g" "${bin_dir}/tbs.cmd"
 
-        # PowerShell shim
-        cat > "${win_bin_dir}/tbs.ps1" <<EOF
-& "\$env:ProgramFiles\\Git\\bin\\bash.exe" "$win_tbs_path" @args
-EOF
+        cat > "${bin_dir}/tbs.ps1" <<'PS_EOF'
+$bash = @(
+    "$env:ProgramFiles\Git\bin\bash.exe",
+    "${env:ProgramFiles(x86)}\Git\bin\bash.exe",
+    "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe",
+    "C:\msys64\usr\bin\bash.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($bash) { & $bash "TBS_WIN_PATH" @args }
+elseif (Get-Command wsl -EA 0) { wsl bash "TBS_NIX_PATH" @args }
+else { Write-Error "bash not found. Install Git for Windows or WSL."; exit 1 }
+PS_EOF
+        sed_i "s|TBS_WIN_PATH|$win_script|g" "${bin_dir}/tbs.ps1"
+        sed_i "s|TBS_NIX_PATH|$tbsFile|g" "${bin_dir}/tbs.ps1"
+
+        # Add to Windows user PATH
+        if command_exists powershell.exe; then
+            local win_bin="$bin_dir"
+            command_exists cygpath && win_bin="$(cygpath -w "$bin_dir")"
+            powershell.exe -NoProfile -Command "
+                \$p=[Environment]::GetEnvironmentVariable('PATH','User')
+                if(\$p -notlike '*$win_bin*'){[Environment]::SetEnvironmentVariable('PATH',\"$win_bin;\$p\",'User')}" 2>/dev/null || true
+        fi
+    fi
+
+    # Linux: symlink to ~/.local/bin
+    if [[ "$(get_os_type)" == "linux" ]]; then
+        local local_bin="$HOME/.local/bin"
+        mkdir -p "$local_bin" 2>/dev/null || true
+        ln -sf "$wrapper_path" "$local_bin/tbs" 2>/dev/null || true
+    fi
+
+    # macOS: symlink to /usr/local/bin if writable
+    if [[ "$(get_os_type)" == "mac" && -w "/usr/local/bin" ]]; then
+        ln -sf "$wrapper_path" "/usr/local/bin/tbs" 2>/dev/null || true
+    fi
+
+    # Show first-run hint if shell config was modified
+    if [[ "$needs_shell_restart" == "true" ]]; then
+        echo ""
+        info_message "✓ 'tbs' command installed! Run 'source $shell_rc' or restart terminal to use it globally."
     fi
 }
 
