@@ -447,11 +447,26 @@ generate_strong_password() {
 }
 
 # Generate unique app_user (primary identifier for app)
-# Format: <app_name><random> - alphanumeric only, used as directory, SSH user, and config key
+# Format: <random> - used as directory, SSH user, and config key
 generate_app_user() {
-    local app_name="$1"
-    local suffix=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6)
-    echo "${app_name}${suffix}"
+    local sum_cmd="sha256sum"
+    command -v sha256sum >/dev/null 2>&1 || sum_cmd="shasum -a 256"
+    
+    # Ensure variables are set
+    local doc_root="${DOCUMENT_ROOT:-./www}"
+    local apps_dir_name="${APPLICATIONS_DIR_NAME:-applications}"
+    
+    local user_id
+    while true; do
+        # Generate random ID
+        user_id=$(echo "$(date +%s%N 2>/dev/null || date +%s)$RANDOM" | $sum_cmd | tr -dc 'a-z' | head -c 12)
+        
+        # Check if directory exists to ensure uniqueness
+        if [[ ! -d "$doc_root/$apps_dir_name/$user_id" ]]; then
+            echo "$user_id"
+            return 0
+        fi
+    done
 }
 
 # Get app config file path (by app_user - primary identifier)
@@ -607,10 +622,11 @@ set_app_config() {
 }
 
 # Execute MySQL command through webserver container
+# Usage: execute_mysql_command [options] [query]
 execute_mysql_command() {
-    local mysql_command="$1"
-    
-    docker compose exec -T "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database $mysql_command" 2>/dev/null
+    # Use -T to disable TTY allocation (required for pipes/scripts)
+    # Pass arguments directly to mysql client to avoid shell quoting issues
+    docker compose exec -T "$WEBSERVER_SERVICE" mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -h database "$@" 2>/dev/null
 }
 
 # Execute MySQL dump through webserver container
@@ -618,7 +634,113 @@ execute_mysqldump() {
     local database="$1"
     local output_file="$2"
     
-    docker compose exec -T "$WEBSERVER_SERVICE" bash -c "exec mysqldump -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database --databases $database" >"$output_file" 2>/dev/null
+    docker compose exec -T "$WEBSERVER_SERVICE" mysqldump -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -h database --databases "$database" >"$output_file" 2>/dev/null
+}
+
+# ============================================
+# Database Helpers
+# ============================================
+
+# Create a database
+_db_create() {
+    local db_name="$1"
+    [[ -z "$db_name" ]] && { error_message "Database name required"; return 1; }
+    
+    if execute_mysql_command -e "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"; then
+        green_message "Created database: $db_name"
+        return 0
+    else
+        error_message "Failed to create database: $db_name"
+        return 1
+    fi
+}
+
+# Drop a database
+_db_drop() {
+    local db_name="$1"
+    [[ -z "$db_name" ]] && { error_message "Database name required"; return 1; }
+    
+    if execute_mysql_command -e "DROP DATABASE IF EXISTS \`$db_name\`;"; then
+        green_message "Dropped database: $db_name"
+        return 0
+    else
+        error_message "Failed to drop database: $db_name"
+        return 1
+    fi
+}
+
+# Create a database user and grant permissions
+_db_create_user() {
+    local user="$1"
+    local pass="$2"
+    local db="$3"
+    
+    [[ -z "$user" || -z "$pass" || -z "$db" ]] && { error_message "User, password, and database required"; return 1; }
+    
+    if execute_mysql_command -e "CREATE USER IF NOT EXISTS '$user'@'%' IDENTIFIED BY '$pass'; GRANT ALL ON \`$db\`.* TO '$user'@'%'; FLUSH PRIVILEGES;"; then
+        return 0
+    else
+        error_message "Failed to create user: $user"
+        return 1
+    fi
+}
+
+# Drop a database user
+_db_drop_user() {
+    local user="$1"
+    [[ -z "$user" ]] && { error_message "User required"; return 1; }
+    
+    execute_mysql_command -e "DROP USER IF EXISTS '$user'@'%'; FLUSH PRIVILEGES;"
+}
+
+# Import SQL file
+_db_import() {
+    local db_name="$1"
+    local sql_file="$2"
+    
+    [[ -z "$db_name" ]] && { error_message "Database name required"; return 1; }
+    [[ ! -f "$sql_file" ]] && { error_message "File not found: $sql_file"; return 1; }
+    
+    info_message "Importing $sql_file into $db_name..."
+    
+    if [[ "$sql_file" == *.gz ]]; then
+        if gunzip -c "$sql_file" | execute_mysql_command "$db_name"; then
+            green_message "Imported successfully!"
+            return 0
+        fi
+    else
+        if execute_mysql_command "$db_name" < "$sql_file"; then
+            green_message "Imported successfully!"
+            return 0
+        fi
+    fi
+    
+    error_message "Import failed"
+    return 1
+}
+
+# Export database
+_db_export() {
+    local db_name="$1"
+    local output_file="$2"
+    
+    [[ -z "$db_name" ]] && { error_message "Database name required"; return 1; }
+    [[ -z "$output_file" ]] && { error_message "Output file required"; return 1; }
+    
+    if execute_mysqldump "$db_name" "$output_file"; then
+        if [[ -s "$output_file" ]]; then
+            green_message "Exported to: $output_file"
+            return 0
+        else
+            rm -f "$output_file"
+            error_message "Export failed (empty file)"
+            return 1
+        fi
+    else
+        rm -f "$output_file"
+        error_message "Export failed"
+        return 1
+    fi
 }
 
 # Reload Web Servers
@@ -1310,7 +1432,7 @@ tbs_start() {
         info_message "  • phpMyAdmin: http://localhost:${HOST_MACHINE_PMA_PORT:-8080}"
         info_message "  • Mailpit: http://localhost:8025"
     fi
-    info_message "  • Database: localhost:${HOST_MACHINE_MYSQL_PORT:-3306}"
+    info_message "  • Database: localhost:${HOST_MACHINE_MYSQL_PORT:-3306} (Host: database)"
     info_message "  • Redis: localhost:${HOST_MACHINE_REDIS_PORT:-6379}"
     info_message "  • Memcached: localhost:11211"
     print_line
@@ -1511,6 +1633,7 @@ tbs() {
             if [[ -n "$input" ]]; then
                 SELECTED_APP=$(resolve_app_user "$input")
                 [[ -z "$SELECTED_APP" ]] && { error_message "App '$input' not found."; return 1; }
+                return 0
             else
                 _app_select || return 1
             fi
@@ -1531,9 +1654,8 @@ tbs() {
         # Create database for app
         _app_db_create() {
             local app_user="$1"
-            local mysql_pass="${MYSQL_ROOT_PASSWORD:-root}"
             
-            is_service_running "mysql" || { error_message "MySQL not running. Run: tbs start"; return 1; }
+            is_service_running "database" || { error_message "MySQL not running. Run: tbs start"; return 1; }
             
             local db_name="${app_user//-/_}"
             read -p "Database name (default: $db_name): " input_db
@@ -1545,15 +1667,12 @@ tbs() {
             read -p "Password (Enter=auto): " db_pass
             db_pass="${db_pass:-$suggested_pass}"
             
-            docker compose exec -T mysql mysql -uroot -p"$mysql_pass" -e \
-                "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-                 CREATE USER IF NOT EXISTS '$db_user'@'%' IDENTIFIED BY '$db_pass';
-                 GRANT ALL PRIVILEGES ON \`$db_name\`.* TO '$db_user'@'%'; FLUSH PRIVILEGES;" 2>/dev/null
+            _db_create "$db_name" && _db_create_user "$db_user" "$db_pass" "$db_name"
             
             command_exists jq && {
                 local cfg=$(get_app_config_path "$app_user")
                 local tmp=$(mktemp)
-                jq ".database={\"name\":\"$db_name\",\"user\":\"$db_user\",\"password\":\"$db_pass\",\"host\":\"mysql\",\"created\":true}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+                jq ".database={\"name\":\"$db_name\",\"user\":\"$db_user\",\"password\":\"$db_pass\",\"host\":\"database\",\"created\":true}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"
             }
             
             echo ""
@@ -1561,7 +1680,7 @@ tbs() {
             echo "  Database: $db_name"
             echo "  Username: $db_user"  
             echo "  Password: $db_pass"
-            echo "  Host: mysql (container) / localhost:3306 (host)"
+            echo "  Host: database (container) / localhost:${HOST_MACHINE_MYSQL_PORT:-3306} (host)"
             echo ""
         }
         
@@ -1607,7 +1726,7 @@ tbs() {
             [[ ! "$name" =~ ^[a-zA-Z0-9_-]+$ ]] && { error_message "Invalid name (use a-z, 0-9, -, _)"; return 1; }
             
             # Generate app_user
-            local app_user=$(generate_app_user "$name")
+            local app_user=$(generate_app_user)
             local ssh_pass=$(generate_strong_password 22)
             local uid_hash=$(echo "$app_user$(date +%s)" | md5sum | tr -dc '0-9' | head -c 4)
             local ssh_uid=$((2000 + ${uid_hash:-1}))
@@ -1747,10 +1866,10 @@ EOF
             info_message "Deleting..."
             
             # Delete database
-            [[ "$del_db" =~ ^[Yy]$ ]] && is_service_running "mysql" && {
+            [[ "$del_db" =~ ^[Yy]$ ]] && is_service_running "database" && {
                 local db_user=$(get_app_config "$app_user" "database.user")
-                docker compose exec -T mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -e \
-                    "DROP DATABASE IF EXISTS \`$db_name\`; DROP USER IF EXISTS '$db_user'@'%';" 2>/dev/null
+                _db_drop "$db_name"
+                [[ -n "$db_user" && "$db_user" != "null" ]] && _db_drop_user "$db_user"
                 green_message "Database deleted"
             }
             
@@ -1776,60 +1895,73 @@ EOF
             local app_user="$SELECTED_APP"
             local mysql_pass="${MYSQL_ROOT_PASSWORD:-root}"
             
-            is_service_running "mysql" || { error_message "MySQL not running"; return 1; }
+            is_service_running "database" || { error_message "MySQL not running"; return 1; }
             
-            local db=$(get_app_config "$app_user" "database.name")
-            local db_user=$(get_app_config "$app_user" "database.user")
-            local db_created=$(get_app_config "$app_user" "database.created")
-            
-            _app_header "$app_user" "💾 Database"
-            [[ "$db_created" == "true" ]] && echo "  Current: $db (user: $db_user)"
-            echo ""
-            echo "  1) 📋 Show Credentials    4) 📥 Import"
-            echo "  2) ➕ Create Database     5) 📤 Export"
-            echo "  3) 🔄 Reset Password      6) 🗑️  Delete"
-            echo "  0) ↩️  Back"
-            echo ""
-            read -p "Select [0-6]: " choice
-            
-            case "$choice" in
-                1) [[ "$db_created" != "true" ]] && { yellow_message "No database"; return 0; }
-                   local cfg=$(get_app_config_path "$app_user")
-                   echo ""
-                   echo "  Database: $(jq -r '.database.name' "$cfg")"
-                   echo "  Username: $(jq -r '.database.user' "$cfg")"
-                   echo "  Password: $(jq -r '.database.password' "$cfg")"
-                   echo "  Host: mysql / localhost:3306"
-                   ;;
-                2) _app_db_create "$app_user" ;;
-                3) [[ "$db_created" != "true" ]] && { error_message "No database"; return 1; }
-                   local new_pass=$(generate_strong_password 16)
-                   echo -e "  Auto: ${CYAN}$new_pass${NC}"
-                   read -p "New password (Enter=auto): " input_pass
-                   new_pass="${input_pass:-$new_pass}"
-                   docker compose exec -T mysql mysql -uroot -p"$mysql_pass" -e "ALTER USER '$db_user'@'%' IDENTIFIED BY '$new_pass'; FLUSH PRIVILEGES;" 2>/dev/null
-                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".database.password=\"$new_pass\"" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
-                   green_message "✅ Password: $new_pass"
-                   ;;
-                4) [[ "$db_created" != "true" ]] && { error_message "No database"; return 1; }
-                   read -p "SQL file: " sql_file
-                   [[ ! -f "$sql_file" ]] && { error_message "File not found"; return 1; }
-                   [[ "$sql_file" == *.gz ]] && gunzip -c "$sql_file" | docker compose exec -T mysql mysql -uroot -p"$mysql_pass" "$db" 2>/dev/null || docker compose exec -T mysql mysql -uroot -p"$mysql_pass" "$db" < "$sql_file" 2>/dev/null
-                   green_message "✅ Imported!"
-                   ;;
-                5) [[ "$db_created" != "true" ]] && { error_message "No database"; return 1; }
-                   local out="$tbsPath/data/backup/${db}_$(date +%Y%m%d_%H%M%S).sql"
-                   docker compose exec -T mysql mysqldump -uroot -p"$mysql_pass" "$db" 2>/dev/null > "$out"
-                   green_message "✅ Exported: $out"
-                   ;;
-                6) [[ "$db_created" != "true" ]] && { error_message "No database"; return 1; }
-                   read -p "Type '$db' to delete: " confirm
-                   [[ "$confirm" != "$db" ]] && { info_message "Cancelled"; return 0; }
-                   docker compose exec -T mysql mysql -uroot -p"$mysql_pass" -e "DROP DATABASE IF EXISTS \`$db\`; DROP USER IF EXISTS '$db_user'@'%';" 2>/dev/null
-                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".database={\"name\":\"\",\"user\":\"\",\"password\":\"\",\"created\":false}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
-                   green_message "✅ Deleted!"
-                   ;;
-            esac
+            while true; do
+                local db=$(get_app_config "$app_user" "database.name")
+                local db_user=$(get_app_config "$app_user" "database.user")
+                local db_created=$(get_app_config "$app_user" "database.created")
+                
+                _app_header "$app_user" "💾 Database"
+                [[ "$db_created" == "true" ]] && echo "  Current: $db (user: $db_user)"
+                echo ""
+                echo "  1) 📋 Show Credentials    4) 📥 Import"
+                echo "  2) ➕ Create Database     5) 📤 Export"
+                echo "  3) 🔄 Reset Password      6) 🗑️  Delete"
+                echo "  0) ↩️  Back"
+                echo ""
+                read -p "Select [0-6]: " choice
+                
+                case "$choice" in
+                    1) [[ "$db_created" != "true" ]] && { yellow_message "No database"; } || {
+                       local cfg=$(get_app_config_path "$app_user")
+                       echo ""
+                       echo "  Database: $(jq -r '.database.name' "$cfg")"
+                       echo "  Username: $(jq -r '.database.user' "$cfg")"
+                       echo "  Password: $(jq -r '.database.password' "$cfg")"
+                       echo "  Host: database / localhost:${HOST_MACHINE_MYSQL_PORT:-3306}"
+                       }
+                       ;;
+                    2) _app_db_create "$app_user" ;;
+                    3) [[ "$db_created" != "true" ]] && { error_message "No database"; } || {
+                       local new_pass=$(generate_strong_password 16)
+                       echo -e "  Auto: ${CYAN}$new_pass${NC}"
+                       read -p "New password (Enter=auto): " input_pass
+                       new_pass="${input_pass:-$new_pass}"
+                       execute_mysql_command -e "ALTER USER '$db_user'@'%' IDENTIFIED BY '$new_pass'; FLUSH PRIVILEGES;"
+                       command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".database.password=\"$new_pass\"" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                       green_message "✅ Password: $new_pass"
+                       }
+                       ;;
+                    4) [[ "$db_created" != "true" ]] && { error_message "No database"; } || {
+                       read -p "SQL file: " sql_file
+                       if [[ ! -f "$sql_file" ]]; then error_message "File not found"; else
+                           [[ "$sql_file" == *.gz ]] && gunzip -c "$sql_file" | execute_mysql_command "$db" || execute_mysql_command "$db" < "$sql_file"
+                           green_message "✅ Imported!"
+                       fi
+                       }
+                       ;;
+                    5) [[ "$db_created" != "true" ]] && { error_message "No database"; } || {
+                       local out="$tbsPath/data/backup/${db}_$(date +%Y%m%d_%H%M%S).sql"
+                       _db_export "$db" "$out"
+                       }
+                       ;;
+                    6) [[ "$db_created" != "true" ]] && { error_message "No database"; } || {
+                       read -p "Type '$db' to delete: " confirm
+                       if [[ "$confirm" != "$db" ]]; then info_message "Cancelled"; else
+                           _db_drop "$db"
+                           [[ -n "$db_user" ]] && _db_drop_user "$db_user"
+                           command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".database={\"name\":\"\",\"user\":\"\",\"password\":\"\",\"created\":false}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                           green_message "✅ Deleted!"
+                       fi
+                       }
+                       ;;
+                    0) return 0 ;;
+                    *) error_message "Invalid option" ;;
+                esac
+                echo ""
+                read -p "Press Enter to continue..."
+            done
             ;;
         
         # tbs app ssh [app] - SSH management
@@ -1837,46 +1969,53 @@ EOF
             _app_get "$app_arg1" || return 1
             local app_user="$SELECTED_APP"
             local ssh_file="$tbsPath/sites/ssh/${app_user}.json"
-            local ssh_enabled=$(get_app_config "$app_user" "ssh.enabled")
             
-            _app_header "$app_user" "🔑 SSH/SFTP"
-            [[ "$ssh_enabled" == "true" ]] && echo "  Status: ${GREEN}Enabled${NC}" || echo "  Status: ${RED}Disabled${NC}"
-            echo ""
-            echo "  1) 📋 Show Credentials    3) 🔄 Reset Password"
-            echo "  2) ✅ Enable SSH          4) ❌ Disable SSH"
-            echo "  0) ↩️  Back"
-            echo ""
-            read -p "Select [0-4]: " choice
-            
-            case "$choice" in
-                1) [[ "$ssh_enabled" != "true" ]] && { yellow_message "SSH not enabled"; return 0; }
-                   command_exists jq && {
-                       local cfg=$(get_app_config_path "$app_user")
-                       echo ""
-                       echo "  Host: localhost"
-                       echo "  Port: $(jq -r '.ssh.port' "$cfg")"
-                       echo "  User: $(jq -r '.ssh.username' "$cfg")"
-                       echo "  Pass: $(jq -r '.ssh.password' "$cfg")"
-                   }
-                   ;;
-                2) local pass=$(generate_strong_password 22)
-                   local uid=$(get_app_config "$app_user" "ssh.uid")
-                   [[ -z "$uid" || "$uid" == "null" ]] && { local h=$(echo "$app_user$(date +%s)" | md5sum | tr -dc '0-9' | head -c 4); uid=$((2000 + ${h:-1})); }
-                   mkdir -p "$tbsPath/sites/ssh"
-                   echo "{\"app_user\":\"$app_user\",\"username\":\"$app_user\",\"password\":\"$pass\",\"enabled\":true,\"uid\":$uid,\"gid\":$uid}" > "$ssh_file"
-                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh={\"enabled\":true,\"username\":\"$app_user\",\"password\":\"$pass\",\"port\":${HOST_MACHINE_SSH_PORT:-2244},\"uid\":$uid,\"gid\":$uid}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
-                   green_message "✅ SSH Enabled! Pass: $pass"
-                   ;;
-                3) local pass=$(generate_strong_password 22)
-                   command_exists jq && [[ -f "$ssh_file" ]] && { local tmp=$(mktemp); jq ".password=\"$pass\"|.enabled=true" "$ssh_file" > "$tmp" && mv "$tmp" "$ssh_file"; }
-                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh.password=\"$pass\"|.ssh.enabled=true" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
-                   green_message "✅ New password: $pass"
-                   ;;
-                4) command_exists jq && [[ -f "$ssh_file" ]] && { local tmp=$(mktemp); jq ".enabled=false" "$ssh_file" > "$tmp" && mv "$tmp" "$ssh_file"; }
-                   set_app_config "$app_user" "ssh.enabled" "false"
-                   yellow_message "SSH Disabled"
-                   ;;
-            esac
+            while true; do
+                local ssh_enabled=$(get_app_config "$app_user" "ssh.enabled")
+                _app_header "$app_user" "🔑 SSH/SFTP"
+                [[ "$ssh_enabled" == "true" ]] && echo "  Status: ${GREEN}Enabled${NC}" || echo "  Status: ${RED}Disabled${NC}"
+                echo ""
+                echo "  1) 📋 Show Credentials    3) 🔄 Reset Password"
+                echo "  2) ✅ Enable SSH          4) ❌ Disable SSH"
+                echo "  0) ↩️  Back"
+                echo ""
+                read -p "Select [0-4]: " choice
+                
+                case "$choice" in
+                    1) [[ "$ssh_enabled" != "true" ]] && { yellow_message "SSH not enabled"; } || {
+                       command_exists jq && {
+                           local cfg=$(get_app_config_path "$app_user")
+                           echo ""
+                           echo "  Host: localhost"
+                           echo "  Port: $(jq -r '.ssh.port' "$cfg")"
+                           echo "  User: $(jq -r '.ssh.username' "$cfg")"
+                           echo "  Pass: $(jq -r '.ssh.password' "$cfg")"
+                       }
+                       }
+                       ;;
+                    2) local pass=$(generate_strong_password 22)
+                       local uid=$(get_app_config "$app_user" "ssh.uid")
+                       [[ -z "$uid" || "$uid" == "null" ]] && { local h=$(echo "$app_user$(date +%s)" | md5sum | tr -dc '0-9' | head -c 4); uid=$((2000 + ${h:-1})); }
+                       mkdir -p "$tbsPath/sites/ssh"
+                       echo "{\"app_user\":\"$app_user\",\"username\":\"$app_user\",\"password\":\"$pass\",\"enabled\":true,\"uid\":$uid,\"gid\":$uid}" > "$ssh_file"
+                       command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh={\"enabled\":true,\"username\":\"$app_user\",\"password\":\"$pass\",\"port\":${HOST_MACHINE_SSH_PORT:-2244},\"uid\":$uid,\"gid\":$uid}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                       green_message "✅ SSH Enabled! Pass: $pass"
+                       ;;
+                    3) local pass=$(generate_strong_password 22)
+                       command_exists jq && [[ -f "$ssh_file" ]] && { local tmp=$(mktemp); jq ".password=\"$pass\"|.enabled=true" "$ssh_file" > "$tmp" && mv "$tmp" "$ssh_file"; }
+                       command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh.password=\"$pass\"|.ssh.enabled=true" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                       green_message "✅ New password: $pass"
+                       ;;
+                    4) command_exists jq && [[ -f "$ssh_file" ]] && { local tmp=$(mktemp); jq ".enabled=false" "$ssh_file" > "$tmp" && mv "$tmp" "$ssh_file"; }
+                       set_app_config "$app_user" "ssh.enabled" "false"
+                       yellow_message "SSH Disabled"
+                       ;;
+                    0) return 0 ;;
+                    *) error_message "Invalid option" ;;
+                esac
+                echo ""
+                read -p "Press Enter to continue..."
+            done
             ;;
         
         # tbs app domain [app] - Domain management
@@ -1884,41 +2023,49 @@ EOF
             _app_get "$app_arg1" || return 1
             local app_user="$SELECTED_APP"
             
-            _app_header "$app_user" "🌍 Domains"
-            echo "  Current domains:"
-            command_exists jq && jq -r '.domains[]? // empty' "$(get_app_config_path "$app_user")" 2>/dev/null | while read d; do
-                local p=$(get_app_config "$app_user" "primary_domain")
-                [[ "$d" == "$p" ]] && echo "    • $d (primary)" || echo "    • $d"
+            while true; do
+                _app_header "$app_user" "🌍 Domains"
+                echo "  Current domains:"
+                command_exists jq && jq -r '.domains[]? // empty' "$(get_app_config_path "$app_user")" 2>/dev/null | while read d; do
+                    local p=$(get_app_config "$app_user" "primary_domain")
+                    [[ "$d" == "$p" ]] && echo "    • $d (primary)" || echo "    • $d"
+                done
+                echo ""
+                echo "  1) ➕ Add Domain"
+                echo "  2) ➖ Remove Domain"
+                echo "  0) ↩️  Back"
+                echo ""
+                read -p "Select [0-2]: " choice
+                
+                case "$choice" in
+                    1) read -p "New domain: " new_dom
+                       if [[ -n "$new_dom" ]]; then
+                           local primary=$(get_app_config "$app_user" "primary_domain")
+                           local src_vhost="${VHOSTS_DIR}/${primary}.conf"
+                           [[ -f "$src_vhost" ]] && sed "s/$primary/$new_dom/g" "$src_vhost" > "${VHOSTS_DIR}/${new_dom}.conf"
+                           local src_nginx="${NGINX_CONF_DIR}/${primary}.conf"
+                           [[ -f "$src_nginx" ]] && sed "s/$primary/$new_dom/g" "$src_nginx" > "${NGINX_CONF_DIR}/${new_dom}.conf"
+                           command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".domains+=[\"$new_dom\"]" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                           generate_ssl_certificates "$new_dom" "${VHOSTS_DIR}/${new_dom}.conf" "${NGINX_CONF_DIR}/${new_dom}.conf" 2>/dev/null || true
+                           reload_webservers
+                           green_message "✅ Domain added: $new_dom"
+                       fi
+                       ;;
+                    2) read -p "Domain to remove: " rem_dom
+                       local primary=$(get_app_config "$app_user" "primary_domain")
+                       if [[ "$rem_dom" == "$primary" ]]; then error_message "Cannot remove primary domain"; else
+                           rm -f "${VHOSTS_DIR}/${rem_dom}.conf" "${NGINX_CONF_DIR}/${rem_dom}.conf"
+                           command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".domains-=[\"$rem_dom\"]" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                           reload_webservers
+                           green_message "✅ Domain removed"
+                       fi
+                       ;;
+                    0) return 0 ;;
+                    *) error_message "Invalid option" ;;
+                esac
+                echo ""
+                read -p "Press Enter to continue..."
             done
-            echo ""
-            echo "  1) ➕ Add Domain"
-            echo "  2) ➖ Remove Domain"
-            echo "  0) ↩️  Back"
-            echo ""
-            read -p "Select [0-2]: " choice
-            
-            case "$choice" in
-                1) read -p "New domain: " new_dom
-                   [[ -z "$new_dom" ]] && return 0
-                   local primary=$(get_app_config "$app_user" "primary_domain")
-                   local src_vhost="${VHOSTS_DIR}/${primary}.conf"
-                   [[ -f "$src_vhost" ]] && sed "s/$primary/$new_dom/g" "$src_vhost" > "${VHOSTS_DIR}/${new_dom}.conf"
-                   local src_nginx="${NGINX_CONF_DIR}/${primary}.conf"
-                   [[ -f "$src_nginx" ]] && sed "s/$primary/$new_dom/g" "$src_nginx" > "${NGINX_CONF_DIR}/${new_dom}.conf"
-                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".domains+=[\"$new_dom\"]" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
-                   generate_ssl_certificates "$new_dom" "${VHOSTS_DIR}/${new_dom}.conf" "${NGINX_CONF_DIR}/${new_dom}.conf" 2>/dev/null || true
-                   reload_webservers
-                   green_message "✅ Domain added: $new_dom"
-                   ;;
-                2) read -p "Domain to remove: " rem_dom
-                   local primary=$(get_app_config "$app_user" "primary_domain")
-                   [[ "$rem_dom" == "$primary" ]] && { error_message "Cannot remove primary domain"; return 1; }
-                   rm -f "${VHOSTS_DIR}/${rem_dom}.conf" "${NGINX_CONF_DIR}/${rem_dom}.conf"
-                   command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".domains-=[\"$rem_dom\"]" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
-                   reload_webservers
-                   green_message "✅ Domain removed"
-                   ;;
-            esac
             ;;
         
         # tbs app ssl [app] - SSL certificate management
@@ -1927,74 +2074,82 @@ EOF
             local app_user="$SELECTED_APP"
             local ssl_dir="$tbsPath/sites/ssl"
             
-            _app_header "$app_user" "🔒 SSL Certificates"
-            
-            # Get all domains
-            local domains=()
-            if command_exists jq; then
-                mapfile -t domains < <(jq -r '.domains[]? // empty' "$(get_app_config_path "$app_user")" 2>/dev/null)
-            fi
-            [[ ${#domains[@]} -eq 0 ]] && domains=("$(get_app_config "$app_user" "primary_domain")")
-            
-            echo "  App Domains:"
-            local i=1
-            for d in "${domains[@]}"; do
-                [[ -z "$d" || "$d" == "null" ]] && continue
-                local cert="$ssl_dir/${d}.crt"
-                [[ -f "$cert" ]] && echo "    $i) $d ${GREEN}✓${NC}" || echo "    $i) $d ${YELLOW}✗${NC}"
-                ((i++))
-            done
-            echo ""
-            echo "  1) 🔐 Generate SSL for ALL domains"
-            echo "  2) 🔐 Generate SSL for specific domain"
-            echo "  3) 🔍 Check SSL status"
-            echo "  0) ↩️  Back"
-            echo ""
-            read -p "Select [0-3]: " choice
-            
-            case "$choice" in
-                1) # Generate for all domains
-                   echo ""
-                   for d in "${domains[@]}"; do
-                       [[ -z "$d" || "$d" == "null" ]] && continue
-                       info_message "Generating SSL for: $d"
-                       local vf="${VHOSTS_DIR}/${d}.conf"
-                       local nf="${NGINX_CONF_DIR}/${d}.conf"
-                       generate_ssl_certificates "$d" "$vf" "$nf" 2>/dev/null && green_message "  ✅ $d" || yellow_message "  ⚠️  $d (may already exist)"
-                   done
-                   reload_webservers
-                   green_message "✅ SSL generation complete!"
-                   ;;
-                2) # Generate for specific domain
-                   echo "  Enter domain number or name:"
-                   read -p "  Domain: " sel_dom
-                   # Check if it's a number
-                   if [[ "$sel_dom" =~ ^[0-9]+$ ]] && [[ $sel_dom -le ${#domains[@]} ]] && [[ $sel_dom -gt 0 ]]; then
-                       sel_dom="${domains[$((sel_dom-1))]}"
-                   fi
-                   [[ -z "$sel_dom" ]] && return 0
-                   # Verify domain belongs to this app
-                   local found=false
-                   for d in "${domains[@]}"; do [[ "$d" == "$sel_dom" ]] && found=true && break; done
-                   [[ "$found" != "true" ]] && { error_message "Domain not found in this app"; return 1; }
-                   local vf="${VHOSTS_DIR}/${sel_dom}.conf"
-                   local nf="${NGINX_CONF_DIR}/${sel_dom}.conf"
-                   generate_ssl_certificates "$sel_dom" "$vf" "$nf" && reload_webservers && green_message "✅ SSL generated for: $sel_dom" || error_message "Failed to generate SSL"
-                   ;;
-                3) # Check SSL status
-                   echo ""
-                   for d in "${domains[@]}"; do
-                       [[ -z "$d" || "$d" == "null" ]] && continue
-                       local cert="$ssl_dir/${d}.crt"
-                       if [[ -f "$cert" ]]; then
-                           local expiry=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2)
-                           echo "  $d: ${GREEN}Valid${NC} (expires: $expiry)"
-                       else
-                           echo "  $d: ${RED}No certificate${NC}"
+            while true; do
+                _app_header "$app_user" "🔒 SSL Certificates"
+                
+                # Get all domains
+                local domains=()
+                if command_exists jq; then
+                    mapfile -t domains < <(jq -r '.domains[]? // empty' "$(get_app_config_path "$app_user")" 2>/dev/null)
+                fi
+                [[ ${#domains[@]} -eq 0 ]] && domains=("$(get_app_config "$app_user" "primary_domain")")
+                
+                echo "  App Domains:"
+                local i=1
+                for d in "${domains[@]}"; do
+                    [[ -z "$d" || "$d" == "null" ]] && continue
+                    local cert="$ssl_dir/${d}.crt"
+                    [[ -f "$cert" ]] && echo "    $i) $d ${GREEN}✓${NC}" || echo "    $i) $d ${YELLOW}✗${NC}"
+                    ((i++))
+                done
+                echo ""
+                echo "  1) 🔐 Generate SSL for ALL domains"
+                echo "  2) 🔐 Generate SSL for specific domain"
+                echo "  3) 🔍 Check SSL status"
+                echo "  0) ↩️  Back"
+                echo ""
+                read -p "Select [0-3]: " choice
+                
+                case "$choice" in
+                    1) # Generate for all domains
+                       echo ""
+                       for d in "${domains[@]}"; do
+                           [[ -z "$d" || "$d" == "null" ]] && continue
+                           info_message "Generating SSL for: $d"
+                           local vf="${VHOSTS_DIR}/${d}.conf"
+                           local nf="${NGINX_CONF_DIR}/${d}.conf"
+                           generate_ssl_certificates "$d" "$vf" "$nf" 2>/dev/null && green_message "  ✅ $d" || yellow_message "  ⚠️  $d (may already exist)"
+                       done
+                       reload_webservers
+                       green_message "✅ SSL generation complete!"
+                       ;;
+                    2) # Generate for specific domain
+                       echo "  Enter domain number or name:"
+                       read -p "  Domain: " sel_dom
+                       # Check if its a number
+                       if [[ "$sel_dom" =~ ^[0-9]+$ ]] && [[ $sel_dom -le ${#domains[@]} ]] && [[ $sel_dom -gt 0 ]]; then
+                           sel_dom="${domains[$((sel_dom-1))]}"
                        fi
-                   done
-                   ;;
-            esac
+                       if [[ -n "$sel_dom" ]]; then
+                           # Verify domain belongs to this app
+                           local found=false
+                           for d in "${domains[@]}"; do [[ "$d" == "$sel_dom" ]] && found=true && break; done
+                           if [[ "$found" != "true" ]]; then error_message "Domain not found in this app"; else
+                               local vf="${VHOSTS_DIR}/${sel_dom}.conf"
+                               local nf="${NGINX_CONF_DIR}/${sel_dom}.conf"
+                               generate_ssl_certificates "$sel_dom" "$vf" "$nf" && reload_webservers && green_message "✅ SSL generated for: $sel_dom" || error_message "Failed to generate SSL"
+                           fi
+                       fi
+                       ;;
+                    3) # Check SSL status
+                       echo ""
+                       for d in "${domains[@]}"; do
+                           [[ -z "$d" || "$d" == "null" ]] && continue
+                           local cert="$ssl_dir/${d}.crt"
+                           if [[ -f "$cert" ]]; then
+                               local expiry=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2)
+                               echo "  $d: ${GREEN}Valid${NC} (expires: $expiry)"
+                           else
+                               echo "  $d: ${RED}No certificate${NC}"
+                           fi
+                       done
+                       ;;
+                    0) return 0 ;;
+                    *) error_message "Invalid option" ;;
+                esac
+                echo ""
+                read -p "Press Enter to continue..."
+            done
             ;;
         
         # tbs app php [app] - PHP config
@@ -2005,28 +2160,29 @@ EOF
             local user_ini="$app_root/public_html/.user.ini"
             local pool_conf="$tbsPath/sites/php/pools/${app_user}.conf"
             
-            _app_header "$app_user" "🐘 PHP Config"
-            [[ -f "$user_ini" ]] && echo "  .user.ini: ${GREEN}exists${NC}" || echo "  .user.ini: ${YELLOW}not set${NC}"
-            [[ -f "$pool_conf" ]] && echo "  FPM pool: ${GREEN}exists${NC}" || echo "  FPM pool: ${YELLOW}not set${NC}"
-            echo ""
-            echo "  1) 📄 Create .user.ini     4) 📝 Edit .user.ini"
-            echo "  2) ⚙️  Create FPM pool      5) 📝 Edit FPM pool"
-            echo "  3) 🗑️  Delete configs       6) 📋 Show FPM pool"
-            echo "  0) ↩️  Back"
-            echo ""
-            read -p "Select [0-6]: " choice
-            
-            case "$choice" in
-                1) cat > "$user_ini" <<'INI'
+            while true; do
+                _app_header "$app_user" "🐘 PHP Config"
+                [[ -f "$user_ini" ]] && echo "  .user.ini: ${GREEN}exists${NC}" || echo "  .user.ini: ${YELLOW}not set${NC}"
+                [[ -f "$pool_conf" ]] && echo "  FPM pool: ${GREEN}exists${NC}" || echo "  FPM pool: ${YELLOW}not set${NC}"
+                echo ""
+                echo "  1) 📄 Create .user.ini     4) 📝 Edit .user.ini"
+                echo "  2) ⚙️  Create FPM pool      5) 📝 Edit FPM pool"
+                echo "  3) 🗑️  Delete configs       6) 📋 Show FPM pool"
+                echo "  0) ↩️  Back"
+                echo ""
+                read -p "Select [0-6]: " choice
+                
+                case "$choice" in
+                    1) cat > "$user_ini" <<'INI'
 memory_limit = 512M
 max_execution_time = 300
 upload_max_filesize = 64M
 post_max_size = 64M
 INI
-                   green_message "✅ .user.ini created"
-                   ;;
-                2) mkdir -p "$tbsPath/sites/php/pools"
-                   cat > "$pool_conf" <<POOL
+                       green_message "✅ .user.ini created"
+                       ;;
+                    2) mkdir -p "$tbsPath/sites/php/pools"
+                       cat > "$pool_conf" <<POOL
 [$app_user]
 user = www-data
 group = www-data
@@ -2035,13 +2191,18 @@ pm = dynamic
 pm.max_children = 20
 pm.start_servers = 5
 POOL
-                   green_message "✅ FPM pool created"
-                   ;;
-                3) rm -f "$user_ini" "$pool_conf"; green_message "✅ Deleted" ;;
-                4) [[ -f "$user_ini" ]] && open_in_editor "$user_ini" || { tbs app php "$app_user"; return; } ;;
-                5) [[ -f "$pool_conf" ]] && open_in_editor "$pool_conf" || { tbs app php "$app_user"; return; } ;;
-                6) [[ -f "$pool_conf" ]] && cat "$pool_conf" || info_message "No pool config" ;;
-            esac
+                       green_message "✅ FPM pool created"
+                       ;;
+                    3) rm -f "$user_ini" "$pool_conf"; green_message "✅ Deleted" ;;
+                    4) [[ -f "$user_ini" ]] && open_in_editor "$user_ini" || info_message "File not found" ;;
+                    5) [[ -f "$pool_conf" ]] && open_in_editor "$pool_conf" || info_message "File not found" ;;
+                    6) [[ -f "$pool_conf" ]] && cat "$pool_conf" || info_message "No pool config" ;;
+                    0) return 0 ;;
+                    *) error_message "Invalid option" ;;
+                esac
+                echo ""
+                read -p "Press Enter to continue..."
+            done
             ;;
         
         # tbs app supervisor [app] [add|rm|list]
@@ -2123,30 +2284,36 @@ POOL
                 return 0
             fi
             
-            _app_header "$app_user" "⚙️  Settings"
-            local varnish=$(get_app_config "$app_user" "varnish")
-            local webroot=$(get_app_config "$app_user" "webroot")
-            echo "  Varnish: ${varnish:-true}"
-            echo "  Webroot: ${webroot:-public_html}"
-            echo ""
-            echo "  1) 🔄 Toggle Varnish"
-            echo "  2) 📁 Change Webroot"
-            echo "  3) 🔐 Reset Permissions"
-            echo "  4) 📋 Show Full Config"
-            echo "  0) ↩️  Back"
-            echo ""
-            read -p "Select [0-4]: " choice
-            
-            case "$choice" in
-                1) [[ "$varnish" == "false" ]] && set_app_config "$app_user" "varnish" "true" && green_message "Varnish ON" || { set_app_config "$app_user" "varnish" "false"; yellow_message "Varnish OFF"; } ;;
-                2) read -p "Webroot (e.g., public, web): " new_wr
-                   [[ -n "$new_wr" ]] && { set_app_config "$app_user" "webroot" "\"$new_wr\""; green_message "Webroot: $new_wr"; } ;;
-                3) is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
-                       find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
-                       find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
-                   " 2>/dev/null && green_message "✅ Permissions reset" ;;
-                4) command_exists jq && jq '.' "$(get_app_config_path "$app_user")" || cat "$(get_app_config_path "$app_user")" ;;
-            esac
+            while true; do
+                _app_header "$app_user" "⚙️  Settings"
+                local varnish=$(get_app_config "$app_user" "varnish")
+                local webroot=$(get_app_config "$app_user" "webroot")
+                echo "  Varnish: ${varnish:-true}"
+                echo "  Webroot: ${webroot:-public_html}"
+                echo ""
+                echo "  1) 🔄 Toggle Varnish"
+                echo "  2) 📁 Change Webroot"
+                echo "  3) 🔐 Reset Permissions"
+                echo "  4) 📋 Show Full Config"
+                echo "  0) ↩️  Back"
+                echo ""
+                read -p "Select [0-4]: " choice
+                
+                case "$choice" in
+                    1) [[ "$varnish" == "false" ]] && set_app_config "$app_user" "varnish" "true" && green_message "Varnish ON" || { set_app_config "$app_user" "varnish" "false"; yellow_message "Varnish OFF"; } ;;
+                    2) read -p "Webroot (e.g., public, web): " new_wr
+                       [[ -n "$new_wr" ]] && { set_app_config "$app_user" "webroot" "\"$new_wr\""; green_message "Webroot: $new_wr"; } ;;
+                    3) is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
+                           find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
+                           find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
+                       " 2>/dev/null && green_message "✅ Permissions reset" ;;
+                    4) command_exists jq && jq '.' "$(get_app_config_path "$app_user")" || cat "$(get_app_config_path "$app_user")" ;;
+                    0) return 0 ;;
+                    *) error_message "Invalid option" ;;
+                esac
+                echo ""
+                read -p "Press Enter to continue..."
+            done
             ;;
         
         # tbs app code [app] - Open in VS Code
@@ -2219,6 +2386,27 @@ POOL
         [[ -n "$2" ]] && { local d="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$2"; [[ -d "$d" ]] && code "$d" || error_message "App not found: $2"; return; }
         tbs app code
         ;;
+    info)
+        print_header
+        blue_message "System Information"
+        echo "  OS: $(uname -s) $(uname -r)"
+        echo "  Docker: $(docker --version)"
+        echo "  Compose: $(docker compose version)"
+        echo ""
+        blue_message "Stack Configuration"
+        if [[ -f .env ]]; then
+            echo "  PHP Version: ${PHPVERSION:-Unknown}"
+            echo "  Database: ${DATABASE:-Unknown}"
+            echo "  Webserver: ${WEBSERVER_SERVICE:-Unknown}"
+            echo "  Install Type: ${INSTALLATION_TYPE:-Unknown}"
+        else
+            yellow_message "  .env file not found"
+        fi
+        echo ""
+        blue_message "Service Status"
+        docker compose ps
+        ;;
+
     config)
         tbs_config
         ;;
@@ -2345,7 +2533,7 @@ POOL
                     info_message "Restoring database: $db_name"
                     # Pipe content directly to mysql client
                     # Note: mysqldump with --databases includes CREATE DATABASE statement
-                    if ! cat "$sql_file" | docker compose exec -T "$WEBSERVER_SERVICE" bash -c "exec mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -h database" 2>/dev/null; then
+                    if ! cat "$sql_file" | execute_mysql_command; then
                         yellow_message "Failed to restore database: $db_name"
                     fi
                 fi
@@ -2372,16 +2560,34 @@ POOL
     # SSL commands - redirect to app ssl
     ssl) tbs app ssl "$2" ;;
     ssl-localhost) generate_default_ssl ;;
-    mail) open_browser "http://localhost:8025" ;;
-    pma) open_browser "http://localhost:${HOST_MACHINE_PMA_PORT}" ;;
-    redis-cli) docker compose exec redis redis-cli ;;
+    mail)
+        if is_service_running "mailpit"; then
+            open_browser "http://localhost:8025"
+        else
+            yellow_message "Mailpit is not running (requires APP_ENV=development)"
+        fi
+        ;;
+    pma)
+        if is_service_running "phpmyadmin"; then
+            open_browser "http://localhost:${HOST_MACHINE_PMA_PORT}"
+        else
+            yellow_message "phpMyAdmin is not running (requires APP_ENV=development)"
+        fi
+        ;;
+    redis-cli)
+        if is_service_running "redis"; then
+            docker compose exec redis redis-cli
+        else
+            yellow_message "Redis is not running"
+        fi
+        ;;
 
     # Shell access
     shell)
         local s="${2:-php}"
         case "$s" in
             php|web*) docker compose exec "$WEBSERVER_SERVICE" bash ;;
-            mysql|maria*|db) docker compose exec mysql bash ;;
+            mysql|maria*|db) docker compose exec database bash ;;
             redis) docker compose exec redis sh ;;
             nginx|varnish|memcached|mailpit) docker compose exec "$s" sh ;;
             *) error_message "Unknown: $s (php/mysql/redis/nginx/varnish/memcached/mailpit)" ;;
@@ -2390,23 +2596,23 @@ POOL
 
     # Database management
     db)
-        local a="${2:-}" n="${3:-}" f="${4:-}" p="${MYSQL_ROOT_PASSWORD:-root}"
-        is_service_running "mysql" || { error_message "MySQL not running"; return 1; }
-        case "$a" in
-            list|ls) docker compose exec mysql mysql -uroot -p"$p" -e "SHOW DATABASES;" 2>/dev/null | grep -vE "^(Database|information_schema|performance_schema|mysql|sys)$" ;;
-            create) [[ -z "$n" ]] && read -p "Database name: " n; [[ -z "$n" ]] && { error_message "Name required"; return 1; }
-                    docker compose exec mysql mysql -uroot -p"$p" -e "CREATE DATABASE IF NOT EXISTS \`$n\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null && green_message "Created: $n" || error_message "Failed" ;;
-            drop) [[ -z "$n" ]] && read -p "Database to drop: " n; [[ -z "$n" ]] && { error_message "Name required"; return 1; }
-                  read -p "Drop '$n'? (y/N): " c; [[ "$c" =~ ^[Yy]$ ]] && docker compose exec mysql mysql -uroot -p"$p" -e "DROP DATABASE IF EXISTS \`$n\`;" 2>/dev/null && green_message "Dropped: $n" || info_message "Cancelled" ;;
-            import) [[ -z "$n" ]] && read -p "Database: " n; [[ -z "$f" ]] && read -p "SQL file: " f; [[ ! -f "$f" ]] && { error_message "File not found"; return 1; }
-                    [[ "$f" == *.gz ]] && gunzip -c "$f" | docker compose exec -T mysql mysql -uroot -p"$p" "$n" 2>/dev/null || docker compose exec -T mysql mysql -uroot -p"$p" "$n" < "$f" 2>/dev/null
-                    [[ $? -eq 0 ]] && green_message "Imported!" || error_message "Failed" ;;
-            export) [[ -z "$n" ]] && read -p "Database: " n; [[ -z "$n" ]] && { error_message "Name required"; return 1; }
-                    local o="$tbsPath/data/backup/${n}_$(date +%Y%m%d_%H%M%S).sql"
-                    docker compose exec mysql mysqldump -uroot -p"$p" "$n" 2>/dev/null > "$o" && [[ -s "$o" ]] && green_message "Exported: $o" || { error_message "Failed"; rm -f "$o"; } ;;
-            user) local u="${3:-}" up="${4:-}" ud="${5:-}"; [[ -z "$u" ]] && read -p "Username: " u; [[ -z "$u" ]] && { error_message "Required"; return 1; }
-                  [[ -z "$up" ]] && up=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16); [[ -z "$ud" ]] && ud="$u"
-                  docker compose exec mysql mysql -uroot -p"$p" -e "CREATE USER IF NOT EXISTS '$u'@'%' IDENTIFIED BY '$up'; GRANT ALL ON \`$ud\`.* TO '$u'@'%'; FLUSH PRIVILEGES;" 2>/dev/null && echo "User: $u | Pass: $up | DB: $ud" || error_message "Failed" ;;
+        local action="${2:-}" name="${3:-}" file="${4:-}"
+        is_service_running "database" || { error_message "MySQL not running"; return 1; }
+        case "$action" in
+            list|ls) execute_mysql_command -e "SHOW DATABASES;" | grep -vE "^(Database|information_schema|performance_schema|mysql|sys)$" ;;
+            create) [[ -z "$name" ]] && read -p "Database name: " name; _db_create "$name" ;;
+            drop) [[ -z "$name" ]] && read -p "Database to drop: " name
+                  read -p "Drop '$name'? (y/N): " confirm; [[ "$confirm" =~ ^[Yy]$ ]] && _db_drop "$name" || info_message "Cancelled" ;;
+            import) [[ -z "$name" ]] && read -p "Database: " name; [[ -z "$file" ]] && read -p "SQL file: " file
+                    _db_import "$name" "$file" ;;
+            export) [[ -z "$name" ]] && read -p "Database: " name; [[ -z "$name" ]] && { error_message "Name required"; return 1; }
+                    local outfile="$tbsPath/data/backup/${name}_$(date +%Y%m%d_%H%M%S).sql"
+                    _db_export "$name" "$outfile" ;;
+            user) local user="${3:-}" pass="${4:-}" db="${5:-}"
+                  [[ -z "$user" ]] && read -p "Username: " user; [[ -z "$user" ]] && { error_message "Required"; return 1; }
+                  [[ -z "$pass" ]] && pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16)
+                  [[ -z "$db" ]] && db="$user"
+                  _db_create_user "$user" "$pass" "$db" && echo "User: $user | Pass: $pass | DB: $db" ;;
             *) info_message "tbs db [list|create|drop|import|export|user] <name>" ;;
         esac
         ;;
@@ -2424,9 +2630,26 @@ POOL
         case "$t" in
             laravel) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u && rm -rf public_html/* && composer create-project --no-interaction laravel/laravel public_html"
                      tbs app config "$u" webroot "public_html/public"; green_message "Laravel: https://${u}.localhost" ;;
-            wordpress) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u/public_html && rm -f index.php && wp core download --allow-root"
-                       tbs db create "$u"; docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u/public_html && wp config create --dbname=$u --dbuser=docker --dbpass=docker --dbhost=mysql --allow-root"
-                       green_message "WordPress: https://${u}.localhost" ;;
+            wordpress)
+                # Get DB config or create if missing
+                local db_name=$(get_app_config "$u" "database.name")
+                if [[ -z "$db_name" || "$db_name" == "null" ]]; then
+                     _app_db_create "$u"
+                     db_name=$(get_app_config "$u" "database.name")
+                fi
+                local db_user=$(get_app_config "$u" "database.user")
+                local db_pass=$(get_app_config "$u" "database.password")
+                local db_host=$(get_app_config "$u" "database.host")
+                [[ -z "$db_host" || "$db_host" == "null" || "$db_host" == "mysql" ]] && db_host="database"
+
+                # Install WordPress
+                green_message "Installing WordPress..."
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u/public_html && rm -f index.php index.html && wp core download --allow-root --force"
+                
+                # Configure WordPress
+                docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u/public_html && wp config create --dbname='$db_name' --dbuser='$db_user' --dbpass='$db_pass' --dbhost='$db_host' --allow-root --force"
+                
+                green_message "WordPress: https://${u}.localhost" ;;
             symfony) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/applications/$u && rm -rf public_html/* && composer create-project --no-interaction symfony/skeleton public_html"
                      tbs app config "$u" webroot "public_html/public"; green_message "Symfony: https://${u}.localhost" ;;
             blank|empty) green_message "Blank: https://${u}.localhost" ;;

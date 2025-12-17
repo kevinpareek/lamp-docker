@@ -60,8 +60,9 @@ services:
         aliases:
           - reverse-proxy
     depends_on:
-      varnish:
-        condition: service_healthy
+      - varnish
+      # varnish:
+      #   condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/nginx-health"]
       interval: 30s
