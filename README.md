@@ -1,38 +1,52 @@
 # 🚀 PHP Turbo Stack (Docker LAMP & LEMP)
 
-**The most complete, flexible, and production-ready local development environment for PHP.**
+[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/kevinpareek/turbo-stack/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)
+[![PHP](https://img.shields.io/badge/PHP-7.4--8.4-777BB4.svg)](https://www.php.net/)
 
-Stop wasting time configuring servers. This stack gives you everything you need—**Apache, Nginx, MySQL/MariaDB, Redis, Varnish, Memcached, Mailpit, and more**—all in one powerful Docker setup.
+**The most complete, flexible, and production-ready Docker LAMP & LEMP environment for PHP developers.**
 
-> **🔮 Future Roadmap:** Check out the [Coming Soon](#-coming-soon) section to see exciting features we're working on!
+Stop wasting time configuring servers. Get everything you need—**Apache, Nginx, MySQL/MariaDB, Redis, Varnish, Memcached, Mailpit, and more**—in one powerful, optimized Docker setup.
+
+> 📖 **Quick Links:** [Installation](#installation) • [Commands](#️-the-tbs-command) • [Configuration](#️-configuration-via-env) • [Roadmap](#-coming-soon)
 
 ---
 
 ## ✨ Why PHP Turbo Stack?
 
-*   **🔥 Dual Modes**:
-    *   **Hybrid Mode**: Nginx (Proxy) → Varnish → Apache (Webserver). Best for compatibility.
-    *   **Thunder Mode**: Nginx (Webserver) → PHP-FPM. Best for performance.
-*   **🐘 Multiple PHP Versions**: Switch instantly between PHP 7.4 to 8.4.
-*   **💾 Database Freedom**: Choose MySQL (5.7 - 8.4) or MariaDB (10.3 - 11.4).
-    *   *Coming Soon: MongoDB & PostgreSQL support.*
-*   **⚡ Caching Suite**: Pre-configured **Redis**, **Memcached**, and **Varnish**.
-*   **🔒 Smart SSL**:
-    *   **Local**: Zero-config trusted certificates for `.localhost` domains via **mkcert**.
-    *   **Public**: Automatic Let's Encrypt certificates via **Certbot**.
-*   **🛠 Developer Tools**:
-    *   **phpMyAdmin**: Database management.
-    *   **Mailpit**: Catch-all SMTP server for email testing.
-    *   **Xdebug**: Ready-to-go debugging.
-*   **🤖 Automation**: A powerful `tbs.sh` (Turbo Stack) script to manage sites, certs, and configs.
+| Feature | Description |
+|---------|-------------|
+| 🔥 **Dual Modes** | **Hybrid** (Nginx → Varnish → Apache) for compatibility, **Thunder** (Nginx → PHP-FPM) for performance |
+| 🐘 **PHP 7.4 - 8.4** | Switch PHP versions instantly with a single command |
+| 💾 **MySQL & MariaDB** | Choose from MySQL 5.7-8.4 or MariaDB 10.3-11.4 |
+| ⚡ **Caching Suite** | Pre-configured Redis, Memcached, and Varnish |
+| 🔒 **Smart SSL** | Auto SSL via mkcert (local) or Let's Encrypt (production) |
+| 🛠 **Dev Tools** | phpMyAdmin, Mailpit (email testing), Xdebug ready |
+| 🤖 **CLI Automation** | Powerful `tbs` command to manage everything |
 
 ---
 
 ## 🚀 Getting Started
 
+### ⚡ Quick Start (TL;DR)
+
+```bash
+git clone https://github.com/kevinpareek/turbo-stack.git && cd turbo-stack
+./tbs.sh config    # Choose PHP, Database, Mode
+./tbs.sh start     # Launch the stack
+```
+
+Open **http://localhost** and you're ready! 🎉
+
+---
+
 ### Prerequisites
 
-The stack is designed to work on **macOS, Linux, Windows, and other Unix-like systems**. Requirements vary based on your installation type (local development vs. live/production).
+<details>
+<summary><strong>📋 Click to expand detailed requirements</strong></summary>
+
+The stack works on **macOS, Linux, Windows, and other Unix-like systems**.
 
 #### Common Requirements (All Environments)
 
@@ -70,18 +84,14 @@ The stack is designed to work on **macOS, Linux, Windows, and other Unix-like sy
 
 #### OS-Specific Notes
 
-*   **macOS**: 
-    *   Apple Silicon (M1/M2/M3): Fully supported; MariaDB recommended for best compatibility
-    *   Intel Macs: All database options available
-*   **Linux**: 
-    *   Works on most distributions (Ubuntu, Debian, CentOS, Fedora, Arch, etc.)
-    *   May require `sudo` for Docker commands (add user to `docker` group)
-*   **Windows**: 
-    *   Requires WSL 2 (Windows Subsystem for Linux) for Docker Desktop
-    *   Use Git Bash or WSL terminal for running `tbs.sh` script
-*   **Other Unix-like Systems** (FreeBSD, OpenBSD, etc.):
-    *   Docker Engine support varies; check Docker documentation for your OS
-    *   Bash compatibility required for `tbs.sh` script
+| OS | Notes |
+|----|-------|
+| **macOS** | Apple Silicon (M1/M2/M3) fully supported; MariaDB recommended |
+| **Linux** | Ubuntu, Debian, CentOS, Fedora, Arch - may need `sudo` for Docker |
+| **Windows** | Requires WSL 2 + Docker Desktop; use Git Bash or WSL terminal |
+| **Other Unix** | Check Docker docs for your OS; bash 4.0+ required |
+
+</details>
 
 ### Installation
 
@@ -437,13 +447,16 @@ Add this to `.vscode/launch.json`:
 
 ---
 
-## ⚠️ Production Usage
-1.  Set `APP_ENV=production` in `.env`.
-2.  **Change all passwords** in `.env`.
-3.  Disable `INSTALL_XDEBUG`.
-4.  Ensure `STACK_MODE` is set correctly for your needs.
+## ⚠️ Production Checklist
 
-For more details, see `SECURITY.md`. For release notes, see `CHANGELOG.md`.
+- [ ] Set `APP_ENV=production` in `.env`
+- [ ] Change all default passwords (`MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`)
+- [ ] Set `INSTALL_XDEBUG=false`
+- [ ] Configure proper `STACK_MODE` for your needs
+- [ ] Review firewall rules (ports 80, 443)
+- [ ] Setup backup strategy using `tbs backup`
+
+> 📚 See [SECURITY.md](SECURITY.md) for hardening guide • [CHANGELOG.md](CHANGELOG.md) for release notes
 
 ---
 
@@ -471,7 +484,22 @@ We're constantly improving Turbo Stack! Here's what's on our roadmap:
 ---
 
 ## 🤝 Contributing
-Pull Requests are welcome!
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## 📄 License
-MIT License.
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+<p align="center">
+  <strong>Made with ❤️ for PHP developers</strong><br>
+  <sub>If you find this useful, please ⭐ star the repo!</sub>
+</p>
