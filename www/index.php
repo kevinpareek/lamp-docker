@@ -17,7 +17,17 @@ if (extension_loaded('redis')) {
     try {
         $redis = new Redis();
         $redis_status = @$redis->connect('redis', 6379, 1);
-        if ($redis_status) $redis->close();
+        if ($redis_status) {
+            $redis_pass = getenv('REDIS_PASSWORD');
+            if ($redis_pass) {
+                try {
+                    $redis->auth($redis_pass);
+                } catch (Exception $e) {
+                    // Auth failed but connection works
+                }
+            }
+            $redis->close();
+        }
     } catch (Exception $e) {
         $redis_status = false;
     }

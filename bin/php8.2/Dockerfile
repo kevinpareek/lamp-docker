@@ -55,6 +55,7 @@ RUN set -eux; \
         libjpeg62-turbo-dev \
         libpng-dev \
         libwebp-dev \
+        libavif-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/cache/apt/*
 
@@ -68,6 +69,7 @@ RUN set -eux; \
         --with-freetype \
         --with-jpeg \
         --with-webp \
+        --with-avif \
     # Install all extensions in parallel
     && docker-php-ext-install -j"$(nproc)" \
         pdo_mysql \

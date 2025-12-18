@@ -1,8 +1,82 @@
+# ============================================
+# YAML Anchors (DRY Principle)
+# ============================================
 x-logging: &default-logging
   driver: "json-file"
   options:
     max-size: "10m"
-    max-file: "5"
+    max-file: "3"
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s
+
+# Resource limits for production stability
+x-resource-limits: &resource-limits
+  deploy:
+    resources:
+      limits:
+        memory: ${CONTAINER_MEMORY_LIMIT:-512M}
+      reservations:
+        memory: 128M
+
+x-security-opts: &security-opts
+  security_opt:
+    - no-new-privileges:true
+  read_only: false
+
+x-varnish-common: &varnish-common
+  image: varnish:stable
+  restart: unless-stopped
+  stop_grace_period: 30s
+  tmpfs:
+    - /var/lib/varnish:exec
+  environment:
+    VARNISH_SIZE: ${VARNISH_CACHE_SIZE:-128M}
+  networks:
+    frontend:
+      aliases:
+        - varnish
+    backend:
+      aliases:
+        - varnish
+  healthcheck:
+    test: ["CMD-SHELL", "varnishadm vcl.list || exit 1"]
+    <<: *healthcheck-defaults
+  logging: *default-logging
+
+x-nginx-common: &nginx-common
+  build:
+    context: ./bin/nginx
+  restart: unless-stopped
+  ports:
+    - "${HOST_MACHINE_UNSECURE_HOST_PORT:-80}:80"
+    - "${HOST_MACHINE_SECURE_HOST_PORT:-443}:443"
+  volumes:
+    - "${NGINX_CONF_DIR}:/etc/nginx/extra-conf.d:ro"
+    - "./config/nginx/partials:/etc/nginx/partials:ro"
+    - "${DOCUMENT_ROOT}:/var/www/html:ro"
+    - "${SSL_DIR}:/etc/nginx/ssl-sites:rw"
+    - "${NGINX_LOG_DIR}:/var/log/nginx"
+  environment:
+    APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
+    APPLICATIONS_DIR_NAME: "${APPLICATIONS_DIR_NAME}"
+    APP_ENV: "${APP_ENV:-development}"
+  networks:
+    frontend:
+      aliases:
+        - reverse-proxy
+    backend:
+      aliases:
+        - reverse-proxy
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://localhost/nginx-health"]
+    <<: *healthcheck-defaults
+    timeout: 5s
+    start_period: 5s
+  logging: *default-logging
 
 x-webserver-common: &webserver-common
   restart: unless-stopped
@@ -14,6 +88,14 @@ x-webserver-common: &webserver-common
     APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
     APP_ENV: "${APP_ENV:-development}"
     APP_DEBUG: "${APP_DEBUG:-true}"
+    # Database
+    DB_HOST: "dbhost"
+    MYSQL_DATABASE: "${MYSQL_DATABASE}"
+    MYSQL_USER: "${MYSQL_USER}"
+    MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
+    # Redis
+    REDIS_HOST: "redis"
+    REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
   depends_on:
     dbhost:
       condition: service_healthy
@@ -30,18 +112,15 @@ x-webserver-common: &webserver-common
 
 services:
   # ============================================
-  # Reverse Proxy (NGINX)
+  # Reverse Proxy (NGINX) - Hybrid Mode
   # ============================================
   reverse-proxy:
-    build:
-      context: ./bin/nginx
+    <<: *nginx-common
     container_name: "${COMPOSE_PROJECT_NAME}-nginx"
-    restart: unless-stopped
-    ports:
-      - "${HOST_MACHINE_UNSECURE_HOST_PORT:-80}:80"
-      - "${HOST_MACHINE_SECURE_HOST_PORT:-443}:443"
+    profiles:
+      - hybrid
     volumes:
-      - "./config/nginx/modes/${STACK_MODE:-hybrid}.conf.template:/etc/nginx/templates/00-default.conf.template:ro"
+      - "./config/nginx/modes/hybrid.conf.template:/etc/nginx/templates/00-default.conf.template:ro"
       - "${NGINX_CONF_DIR}:/etc/nginx/extra-conf.d:ro"
       - "./config/nginx/partials:/etc/nginx/partials:ro"
       - "${DOCUMENT_ROOT}:/var/www/html:ro"
@@ -51,24 +130,34 @@ services:
       APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
       APPLICATIONS_DIR_NAME: "${APPLICATIONS_DIR_NAME}"
       APP_ENV: "${APP_ENV:-development}"
-      STACK_MODE: "${STACK_MODE:-hybrid}"
-    networks:
-      frontend:
-        aliases:
-          - reverse-proxy
-      backend:
-        aliases:
-          - reverse-proxy
+      STACK_MODE: "hybrid"
     depends_on:
-      - varnish
-      # varnish:
-      #   condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/nginx-health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    logging: *default-logging
+      varnish:
+        condition: service_healthy
+
+  # ============================================
+  # Reverse Proxy (NGINX) - Thunder Mode
+  # ============================================
+  reverse-proxy-thunder:
+    <<: *nginx-common
+    container_name: "${COMPOSE_PROJECT_NAME}-nginx-thunder"
+    profiles:
+      - thunder
+    volumes:
+      - "./config/nginx/modes/thunder.conf.template:/etc/nginx/templates/00-default.conf.template:ro"
+      - "${NGINX_CONF_DIR}:/etc/nginx/extra-conf.d:ro"
+      - "./config/nginx/partials:/etc/nginx/partials:ro"
+      - "${DOCUMENT_ROOT}:/var/www/html:ro"
+      - "${SSL_DIR}:/etc/nginx/ssl-sites:rw"
+      - "${NGINX_LOG_DIR}:/var/log/nginx"
+    environment:
+      APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
+      APPLICATIONS_DIR_NAME: "${APPLICATIONS_DIR_NAME}"
+      APP_ENV: "${APP_ENV:-development}"
+      STACK_MODE: "thunder"
+    depends_on:
+      varnish-thunder:
+        condition: service_healthy
 
   # ============================================
   # Certbot (SSL Generation)
@@ -109,11 +198,9 @@ services:
       - "${SSL_DIR}:/etc/apache2/ssl-sites:rw"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 3
+      test: ["CMD-SHELL", "curl -sf http://localhost/ -o /dev/null || exit 1"]
+      <<: *healthcheck-defaults
+      start_period: 20s
 
   # ============================================
   # PHP-FPM Webserver (Thunder Mode)
@@ -138,12 +225,47 @@ services:
       - "./sites/php/pools:/usr/local/etc/php-fpm.d/pools:ro"
       - "${APACHE_LOG_DIR}:/var/log/php-fpm"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
+    networks:
+      backend:
+        aliases:
+          - php-fpm
+      frontend:
+        aliases:
+          - php-fpm
     healthcheck:
-      test: ["CMD", "cgi-fcgi", "-bind", "-connect", "127.0.0.1:9000"]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 3
+      test: ["CMD-SHELL", "SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 || exit 1"]
+      <<: *healthcheck-defaults
+      start_period: 20s
+
+  # ============================================
+  # Internal Nginx for Thunder Mode (Varnish Backend)
+  # ============================================
+  nginx-fpm:
+    image: nginx:alpine
+    container_name: "${COMPOSE_PROJECT_NAME}-nginx-fpm"
+    restart: unless-stopped
+    profiles:
+      - thunder
+    volumes:
+      - "${DOCUMENT_ROOT}:${APACHE_DOCUMENT_ROOT}:ro"
+      - "./config/nginx/fpm.conf:/etc/nginx/conf.d/default.conf:ro"
+    environment:
+      APACHE_DOCUMENT_ROOT: "${APACHE_DOCUMENT_ROOT}"
+    networks:
+      backend:
+        aliases:
+          - webserver
+      frontend:
+        aliases:
+          - webserver
+    depends_on:
+      webserver-fpm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost/nginx-health"]
+      <<: *healthcheck-defaults
+      timeout: 5s
+    logging: *default-logging
 
   # ============================================
   # Database (MariaDB/MySQL)
@@ -170,9 +292,8 @@ services:
       - backend
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 30s
-      timeout: 10s
-      start_period: 60s
+      <<: *healthcheck-defaults
+      start_period: 45s
       retries: 5
     logging: *default-logging
 
@@ -203,7 +324,8 @@ services:
       test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a $REDIS_PASSWORD} ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 3
+      start_period: 5s
     logging: *default-logging
 
   # ============================================
@@ -220,6 +342,11 @@ services:
       - backend
     profiles:
       - development
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8025/"]
+      <<: *healthcheck-defaults
+      timeout: 5s
+      start_period: 5s
     logging: *default-logging
 
   # ============================================
@@ -246,6 +373,11 @@ services:
       - backend
     profiles:
       - development
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost/"]
+      <<: *healthcheck-defaults
+      timeout: 5s
+      start_period: 10s
     logging: *default-logging
 
   # ============================================
@@ -257,38 +389,43 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:11211:11211"
-    command: memcached -m 64
+    command: memcached -m ${MEMCACHED_MEMORY:-64}
     networks:
       - backend
     healthcheck:
       test: ["CMD-SHELL", "echo stats | nc localhost 11211 | grep -q pid"]
-      interval: 30s
+      <<: *healthcheck-defaults
       timeout: 5s
-      retries: 3
+      start_period: 5s
     logging: *default-logging
 
   # ============================================
-  # Varnish Cache
+  # Varnish Cache (Hybrid Mode)
   # ============================================
   varnish:
-    image: varnish:stable
+    <<: *varnish-common
     container_name: "${COMPOSE_PROJECT_NAME}-varnish"
-    restart: unless-stopped
+    profiles:
+      - hybrid
     volumes:
-      - "./config/varnish/${STACK_MODE:-hybrid}.vcl:/etc/varnish/default.vcl:ro"
-    tmpfs:
-      - /var/lib/varnish:exec
-    environment:
-      VARNISH_SIZE: 128M
-    networks:
-      - frontend
-      - backend
-    healthcheck:
-      test: ["CMD-SHELL", "varnishadm vcl.list || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    logging: *default-logging
+      - "./config/varnish/hybrid.vcl:/etc/varnish/default.vcl:ro"
+    depends_on:
+      webserver-apache:
+        condition: service_healthy
+
+  # ============================================
+  # Varnish Cache (Thunder Mode)
+  # ============================================
+  varnish-thunder:
+    <<: *varnish-common
+    container_name: "${COMPOSE_PROJECT_NAME}-varnish-thunder"
+    profiles:
+      - thunder
+    volumes:
+      - "./config/varnish/thunder.vcl:/etc/varnish/default.vcl:ro"
+    depends_on:
+      nginx-fpm:
+        condition: service_healthy
 
   # ============================================
   # SSH Server (Per-App SSH/SFTP Access)
@@ -311,6 +448,11 @@ services:
       - backend
     profiles:
       - ssh
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep sshd || exit 1"]
+      <<: *healthcheck-defaults
+      timeout: 5s
+      start_period: 10s
     logging: *default-logging
 
 # ============================================
@@ -323,4 +465,3 @@ networks:
   backend:
     driver: bridge
     name: "${COMPOSE_PROJECT_NAME}-backend"
-    # internal: true

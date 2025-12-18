@@ -8,6 +8,7 @@ set -e
 
 USERS_DIR="/etc/ssh.d/users"
 WEB_ROOT="/var/www/html/${APPLICATIONS_DIR_NAME:-applications}"
+ADMIN_FILE="/etc/ssh.d/admin.json"
 
 # Function to create/update admin user (access to all apps)
 create_admin_user() {

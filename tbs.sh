@@ -15,6 +15,9 @@ get_script_dir() {
 tbsPath=$(get_script_dir)
 tbsFile="$tbsPath/$(basename "${BASH_SOURCE[0]}")"
 
+# ============================================
+# Global Constants (Set Once at Startup)
+# ============================================
 # Colors and Styles
 BOLD='\033[1m'
 RED='\033[0;31m'
@@ -23,6 +26,21 @@ BLUE='\033[0;34m'
 YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# Detect OS type once at startup
+detect_os_type() {
+    case "$(uname -s)" in
+        Darwin) echo "mac" ;;
+        Linux) echo "linux" ;;
+        CYGWIN*|MINGW32*|MSYS*|MINGW*) echo "windows" ;;
+        *) echo "unknown" ;;
+    esac
+}
+OS_TYPE=$(detect_os_type)
+
+# Check jq availability once at startup
+HAS_JQ=false
+command -v jq >/dev/null 2>&1 && HAS_JQ=true
 
 print_header() {
     echo -e "${BLUE}============================================================${NC}"
@@ -134,22 +152,6 @@ load_env_file() {
     done < "$env_file"
 }
 
-# Detect OS
-detect_os_type() {
-    case "$(uname -s)" in
-        Darwin) echo "mac" ;;
-        Linux) echo "linux" ;;
-        CYGWIN*|MINGW32*|MSYS*|MINGW*) echo "windows" ;;
-        *) echo "unknown" ;;
-    esac
-}
-
-OS_TYPE=$(detect_os_type)
-
-get_os_type() {
-    echo "$OS_TYPE"
-}
-
 # Cross-platform sed in-place editing
 sed_i() {
     local expression=$1
@@ -163,7 +165,7 @@ sed_i() {
 
 # Prevent Git Bash from rewriting docker paths on Windows
 prepare_windows_path_handling() {
-    if [[ "$(get_os_type)" == "windows" ]]; then
+    if [[ "$OS_TYPE" == "windows" ]]; then
         export MSYS_NO_PATHCONV=1
         export MSYS2_ARG_CONV_EXCL="*"
     fi
@@ -294,7 +296,7 @@ FISH_FN
     fi
 
     # Windows: CMD and PowerShell shims
-    if [[ "$(get_os_type)" == "windows" ]]; then
+    if [[ "$OS_TYPE" == "windows" ]]; then
         local win_script="$tbsFile"
         command_exists cygpath && win_script="$(cygpath -w "$tbsFile")"
 
@@ -340,14 +342,14 @@ PS_EOF
     fi
 
     # Linux: symlink to ~/.local/bin
-    if [[ "$(get_os_type)" == "linux" ]]; then
+    if [[ "$OS_TYPE" == "linux" ]]; then
         local local_bin="$HOME/.local/bin"
         mkdir -p "$local_bin" 2>/dev/null || true
         ln -sf "$wrapper_path" "$local_bin/tbs" 2>/dev/null || true
     fi
 
     # macOS: symlink to /usr/local/bin if writable
-    if [[ "$(get_os_type)" == "mac" && -w "/usr/local/bin" ]]; then
+    if [[ "$OS_TYPE" == "mac" && -w "/usr/local/bin" ]]; then
         ln -sf "$wrapper_path" "/usr/local/bin/tbs" 2>/dev/null || true
     fi
 
@@ -433,12 +435,12 @@ generate_strong_password() {
     
     # Fallback to /dev/urandom
     if [[ -z "$password" || ${#password} -lt $length ]]; then
-        password=$(LC_ALL=C tr -dc 'A-Za-z0-9!@$%^&*_+' < /dev/urandom 2>/dev/null | head -c "$length" || true)
+        password=$(LC_ALL=C tr -dc 'A-Za-z0-9!@$%&*' < /dev/urandom 2>/dev/null | head -c "$length" || true)
     fi
     
     # Ultimate fallback using $RANDOM (bash built-in)
     if [[ -z "$password" || ${#password} -lt $length ]]; then
-        local chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@$%^&*_+'
+        local chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@$%&*'
         password=""
         for ((i=0; i<length; i++)); do
             password+="${chars:RANDOM%${#chars}:1}"
@@ -498,10 +500,26 @@ generate_app_user() {
     echo "app$(date +%s | tail -c 10)"
 }
 
+# ============================================
+# App Path Helper Functions
+# ============================================
+
 # Get app config file path (by app_user - primary identifier)
 get_app_config_path() {
     local app_user="$1"
     echo "$tbsPath/sites/apps/${app_user}.json"
+}
+
+# Get app root directory (host path)
+get_app_root() {
+    local app_user="$1"
+    echo "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
+}
+
+# Get app root directory (container path)
+get_app_container_root() {
+    local app_user="$1"
+    echo "${APACHE_DOCUMENT_ROOT}/${APPLICATIONS_DIR_NAME}/$app_user"
 }
 
 # Find app_user by app_name (searches all configs)
@@ -515,7 +533,7 @@ find_app_user_by_name() {
     for config_file in "$apps_dir"/*.json; do
         [[ ! -f "$config_file" ]] && continue
         local name=""
-        if command_exists jq; then
+        if [[ "$HAS_JQ" == "true" ]]; then
             name=$(jq -r '.name // empty' "$config_file" 2>/dev/null)
         else
             # Fallback: grep-based extraction
@@ -532,6 +550,8 @@ find_app_user_by_name() {
 # Resolve input to app_user (accepts app_user or app_name)
 resolve_app_user() {
     local input="$1"
+    [[ -z "$input" ]] && return 1
+    
     local config_file="$tbsPath/sites/apps/${input}.json"
     
     # If config exists with this name, it's already app_user
@@ -540,8 +560,16 @@ resolve_app_user() {
         return 0
     fi
     
+    # Check if app directory exists (fallback for apps without config)
+    local app_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$input"
+    if [[ -d "$app_dir" ]]; then
+        echo "$input"
+        return 0
+    fi
+    
     # Otherwise search by app_name
-    local found=$(find_app_user_by_name "$input")
+    local found
+    found=$(find_app_user_by_name "$input")
     if [[ -n "$found" ]]; then
         echo "$found"
         return 0
@@ -622,7 +650,7 @@ get_app_config() {
         return 1
     fi
     
-    if command_exists jq; then
+    if [[ "$HAS_JQ" == "true" ]]; then
         jq -r ".$key // empty" "$config_file" 2>/dev/null
     else
         # Fallback: simple grep for basic keys
@@ -641,7 +669,7 @@ set_app_config() {
         init_app_config "$app_user"
     fi
     
-    if command_exists jq; then
+    if [[ "$HAS_JQ" == "true" ]]; then
         local tmp_file=$(mktemp)
         if jq ".$key = $value" "$config_file" > "$tmp_file" 2>/dev/null; then
             mv "$tmp_file" "$config_file"
@@ -661,7 +689,12 @@ set_app_config() {
 execute_mysql_command() {
     # Use -T to disable TTY allocation (required for pipes/scripts)
     # Pass arguments directly to mysql client to avoid shell quoting issues
-    docker compose exec -T "$WEBSERVER_SERVICE" mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -h dbhost "$@" 2>/dev/null
+    local root_pass="${MYSQL_ROOT_PASSWORD:-root}"
+    if [[ -z "$root_pass" ]]; then
+        docker compose exec -T "$WEBSERVER_SERVICE" mysql -uroot -h dbhost "$@" 2>/dev/null
+    else
+        docker compose exec -T "$WEBSERVER_SERVICE" mysql -uroot -p"$root_pass" -h dbhost "$@" 2>/dev/null
+    fi
 }
 
 # Execute MySQL dump through webserver container
@@ -669,7 +702,20 @@ execute_mysqldump() {
     local database="$1"
     local output_file="$2"
     
-    docker compose exec -T "$WEBSERVER_SERVICE" mysqldump -uroot -p"${MYSQL_ROOT_PASSWORD:-root}" -h dbhost --databases "$database" >"$output_file" 2>/dev/null
+    [[ -z "$database" ]] && { error_message "Database name required"; return 1; }
+    [[ -z "$output_file" ]] && { error_message "Output file required"; return 1; }
+    
+    local root_pass="${MYSQL_ROOT_PASSWORD:-root}"
+    local dump_opts="--single-transaction --routines --triggers --events"
+    
+    # Ensure output directory exists
+    mkdir -p "$(dirname "$output_file")" 2>/dev/null || true
+    
+    if [[ -z "$root_pass" ]]; then
+        docker compose exec -T "$WEBSERVER_SERVICE" mysqldump -uroot -h dbhost $dump_opts --databases "$database" >"$output_file" 2>/dev/null
+    else
+        docker compose exec -T "$WEBSERVER_SERVICE" mysqldump -uroot -p"$root_pass" -h dbhost $dump_opts --databases "$database" >"$output_file" 2>/dev/null
+    fi
 }
 
 # ============================================
@@ -704,8 +750,11 @@ _db_select_from_list() {
 # Usage: _jq_update "config_file" "jq_expression"
 _jq_update() {
     local cfg="$1" expr="$2"
-    command_exists jq || return 1
-    local tmp=$(mktemp)
+    [[ -z "$cfg" || -z "$expr" ]] && return 1
+    [[ "$HAS_JQ" == "true" ]] || { error_message "jq is required"; return 1; }
+    [[ ! -f "$cfg" ]] && return 1
+    local tmp
+    tmp=$(mktemp) || return 1
     if jq "$expr" "$cfg" > "$tmp" 2>/dev/null; then
         mv "$tmp" "$cfg"
         return 0
@@ -719,6 +768,12 @@ _jq_update() {
 _db_create() {
     local db_name="$1"
     [[ -z "$db_name" ]] && { error_message "Database name required"; return 1; }
+    
+    # Validate database name (alphanumeric and underscore only)
+    if [[ ! "$db_name" =~ ^[a-zA-Z0-9_]+$ ]]; then
+        error_message "Invalid database name. Use only letters, numbers, and underscores."
+        return 1
+    fi
     
     if execute_mysql_command -e "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"; then
         green_message "Created database: $db_name"
@@ -783,7 +838,17 @@ _db_create_user() {
     
     [[ -z "$user" || -z "$pass" || -z "$db" ]] && { error_message "User, password, and database required"; return 1; }
     
-    if execute_mysql_command -e "CREATE USER IF NOT EXISTS '$user'@'%' IDENTIFIED BY '$pass'; GRANT ALL ON \`$db\`.* TO '$user'@'%'; FLUSH PRIVILEGES;"; then
+    # Validate username (alphanumeric and underscore only, max 32 chars for MySQL)
+    if [[ ! "$user" =~ ^[a-zA-Z0-9_]+$ ]] || [[ ${#user} -gt 32 ]]; then
+        error_message "Invalid username. Use only letters, numbers, underscores (max 32 chars)."
+        return 1
+    fi
+    
+    # Escape single quotes in password for SQL
+    local escaped_pass="${pass//\'/\'\'}" 
+    
+    if execute_mysql_command -e "CREATE USER IF NOT EXISTS '$user'@'%' IDENTIFIED BY '$escaped_pass'; GRANT ALL ON \`$db\`.* TO '$user'@'%'; FLUSH PRIVILEGES;"; then
+        green_message "Created user: $user with access to $db"
         return 0
     else
         error_message "Failed to create user: $user"
@@ -877,12 +942,186 @@ reload_webservers() {
     green_message "Web servers reloaded."
 }
 
+# Interactive password prompt for production security
+# Returns 0 if password is strong, updates .env file
+prompt_strong_password() {
+    local var_name="$1"
+    local display_name="$2"
+    local current_val="${!var_name}"
+    local min_length=15
+    
+    # Check if password is strong enough
+    local is_weak=false
+    [[ -z "$current_val" ]] && is_weak=true
+    [[ ${#current_val} -lt $min_length ]] && is_weak=true
+    [[ "$var_name" == "MYSQL_ROOT_PASSWORD" && "$current_val" == "root" ]] && is_weak=true
+    [[ "$var_name" == "MYSQL_PASSWORD" && "$current_val" == "docker" ]] && is_weak=true
+    [[ "$var_name" == "REDIS_PASSWORD" && "$current_val" == "redis" ]] && is_weak=true
+    [[ "$var_name" == "TBS_ADMIN_PASSWORD" && "$current_val" == "tbsadmin123" ]] && is_weak=true
+    
+    # If password is strong, return success
+    [[ "$is_weak" == "false" ]] && return 0
+    
+    # Show warning
+    echo ""
+    red_message "⚠️  $display_name: WEAK PASSWORD!"
+    if [[ -n "$current_val" ]]; then
+        echo -e "   Current: ${RED}$current_val${NC} (${#current_val} chars - minimum $min_length required)"
+    else
+        echo -e "   Current: ${RED}(empty)${NC}"
+    fi
+    
+    # Generate strong suggestion
+    local suggested_pass=$(generate_strong_password 20)
+    echo -e "   Suggested: ${GREEN}$suggested_pass${NC}"
+    
+    # Loop until strong password is entered
+    while true; do
+        echo -ne "   Enter strong password (${YELLOW}Enter = use suggested${NC}): "
+        read -r new_pass
+        
+        # Use suggested if empty
+        if [[ -z "$new_pass" ]]; then
+            new_pass="$suggested_pass"
+            green_message "   ✓ Using suggested password"
+        fi
+        
+        # Validate length
+        if [[ ${#new_pass} -lt $min_length ]]; then
+            red_message "   ✗ Password too short! Minimum $min_length characters required."
+            suggested_pass=$(generate_strong_password 20)
+            echo -e "   New suggestion: ${GREEN}$suggested_pass${NC}"
+            continue
+        fi
+        
+        # Password is strong, update .env
+        export "$var_name"="$new_pass"
+        if grep -q "^$var_name=" "$tbsPath/.env"; then
+            sed_i "s|^$var_name=.*|$var_name=$new_pass|" "$tbsPath/.env"
+        else
+            echo "$var_name=$new_pass" >> "$tbsPath/.env"
+        fi
+        
+        green_message "   ✓ $display_name updated!"
+        return 0
+    done
+}
+
+# Check production security - interactive prompts for weak passwords
+check_production_security() {
+    [[ "$APP_ENV" != "production" ]] && return 0
+    
+    local has_weak=false
+    local min_length=15
+    
+    # Quick check if any password is weak
+    [[ -z "$MYSQL_ROOT_PASSWORD" || ${#MYSQL_ROOT_PASSWORD} -lt $min_length || "$MYSQL_ROOT_PASSWORD" == "root" ]] && has_weak=true
+    [[ -z "$MYSQL_PASSWORD" || ${#MYSQL_PASSWORD} -lt $min_length || "$MYSQL_PASSWORD" == "docker" ]] && has_weak=true
+    [[ -z "$REDIS_PASSWORD" || ${#REDIS_PASSWORD} -lt $min_length || "$REDIS_PASSWORD" == "redis" ]] && has_weak=true
+    [[ -n "$TBS_ADMIN_PASSWORD" && (${#TBS_ADMIN_PASSWORD} -lt $min_length || "$TBS_ADMIN_PASSWORD" == "tbsadmin123") ]] && has_weak=true
+    
+    if [[ "$has_weak" == "true" ]]; then
+        echo ""
+        blue_message "═══════════════════════════════════════════════════════════════"
+        blue_message "🔐 PRODUCTION SECURITY CHECK"
+        blue_message "═══════════════════════════════════════════════════════════════"
+        yellow_message "Production mode requires strong passwords (min $min_length chars)"
+        
+        prompt_strong_password "MYSQL_ROOT_PASSWORD" "MySQL Root Password"
+        prompt_strong_password "MYSQL_PASSWORD" "MySQL User Password"
+        prompt_strong_password "REDIS_PASSWORD" "Redis Password"
+        prompt_strong_password "TBS_ADMIN_PASSWORD" "TBS Admin Password"
+        
+        echo ""
+        green_message "═══════════════════════════════════════════════════════════════"
+        green_message "✅ All passwords are now secure!"
+        green_message "═══════════════════════════════════════════════════════════════"
+        yellow_message "💡 Passwords saved in .env - keep this file secure!"
+        echo ""
+    fi
+    
+    return 0
+}
+
+# Validate .env configuration before starting
+validate_env_config() {
+    local errors=0
+    
+    # Check if .env exists
+    if [[ ! -f "$tbsPath/.env" ]]; then
+        error_message ".env file not found!"
+        info_message "Run: ./tbs.sh config"
+        return 1
+    fi
+    
+    # Load environment
+    load_env_file "$tbsPath/.env"
+    
+    # Validate required variables
+    local required_vars=(
+        "COMPOSE_PROJECT_NAME"
+        "PHPVERSION"
+        "DATABASE"
+        "STACK_MODE"
+        "APP_ENV"
+        "MYSQL_ROOT_PASSWORD"
+        "MYSQL_DATABASE"
+        "MYSQL_USER"
+        "MYSQL_PASSWORD"
+    )
+    
+    for var in "${required_vars[@]}"; do
+        if [[ -z "${!var}" ]]; then
+            error_message "Missing required variable: $var"
+            ((errors++))
+        fi
+    done
+    
+    # Validate STACK_MODE
+    if [[ -n "$STACK_MODE" && "$STACK_MODE" != "hybrid" && "$STACK_MODE" != "thunder" ]]; then
+        error_message "Invalid STACK_MODE: $STACK_MODE (must be 'hybrid' or 'thunder')"
+        ((errors++))
+    fi
+    
+    # Validate APP_ENV
+    if [[ -n "$APP_ENV" && "$APP_ENV" != "development" && "$APP_ENV" != "production" ]]; then
+        error_message "Invalid APP_ENV: $APP_ENV (must be 'development' or 'production')"
+        ((errors++))
+    fi
+    
+    # Validate PHP version exists
+    if [[ -n "$PHPVERSION" && ! -d "$tbsPath/bin/$PHPVERSION" ]]; then
+        error_message "PHP version not found: $PHPVERSION"
+        info_message "Available versions: $(ls -d $tbsPath/bin/php* 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
+        ((errors++))
+    fi
+    
+    # Validate Database exists
+    if [[ -n "$DATABASE" && ! -d "$tbsPath/bin/$DATABASE" ]]; then
+        error_message "Database not found: $DATABASE"
+        info_message "Available databases: $(ls -d $tbsPath/bin/mysql* $tbsPath/bin/mariadb* 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
+        ((errors++))
+    fi
+    
+    # Return early if basic validation failed
+    if [[ $errors -gt 0 ]]; then
+        error_message "Configuration has $errors error(s). Please fix and try again."
+        info_message "Run: ./tbs.sh config"
+        return 1
+    fi
+    
+    # Interactive production security check
+    check_production_security
+    
+    return 0
+}
+
 # Ensure Docker is running
 ensure_docker_running() {
     if ! docker info >/dev/null 2>&1; then
         yellow_message "Docker daemon is not running. Starting Docker daemon..."
         
-        case "$(get_os_type)" in
+        case "$OS_TYPE" in
             mac) open -a Docker ;;
             linux) sudo systemctl start docker ;;
             windows)
@@ -954,7 +1193,7 @@ yes_no_prompt() {
 install_mkcert() {
     info_message "Installing mkcert for SSL certificate generation..."
 
-    case "$(get_os_type)" in
+    case "$OS_TYPE" in
         mac)
             # macOS installation
             if command_exists brew; then
@@ -1140,7 +1379,7 @@ open_browser() {
     # Open the domain in the default web browser
     info_message "Opening $domain in the default web browser..."
 
-    case "$(get_os_type)" in
+    case "$OS_TYPE" in
         mac)
             open "$domain"
             ;;
@@ -1220,7 +1459,7 @@ tbs_config() {
 
         # Auto-detect default
         local default_index=1
-        if [[ "$(get_os_type)" == "linux" ]]; then
+        if [[ "$OS_TYPE" == "linux" ]]; then
              # Likely Linux, could be live
              # But let's check if INSTALLATION_TYPE is already set
              if [[ "$INSTALLATION_TYPE" == "live" ]]; then
@@ -1486,7 +1725,9 @@ tbs_config() {
             info_message "   • phpMyAdmin: Disabled"
             info_message "   • Mailpit: Disabled"
             info_message "   • PHP Config: php.production.ini"
-            yellow_message "   ⚠️  Remember to change default database passwords!"
+            
+            # Configure production passwords (interactive)
+            check_production_security
         fi
         print_line
 
@@ -1515,6 +1756,11 @@ tbs_config() {
 }
 
 tbs_start() {
+    # Validate configuration first
+    if ! validate_env_config; then
+        exit 1
+    fi
+    
     # Check if Docker daemon is running
     ensure_docker_running
 
@@ -1618,6 +1864,11 @@ tbs() {
         tbs_config
     fi
 
+    # Production security check - runs on every command except 'config', 'help', 'stop'
+    if [[ "$APP_ENV" == "production" && ! "$1" =~ ^(config|help|--help|-h|stop)$ ]]; then
+        check_production_security
+    fi
+
     # Determine webserver service name based on stack mode
     WEBSERVER_SERVICE=$(get_webserver_service)
 
@@ -1656,6 +1907,11 @@ tbs() {
 
     # Rebuild & Start
     build)
+        # Validate configuration first
+        if ! validate_env_config; then
+            exit 1
+        fi
+        ensure_docker_running
         PROFILES=$(build_profiles)
         # Always tear down everything regardless of profile before rebuild
         ALL_PROFILES=$(get_all_profiles)
@@ -1795,7 +2051,7 @@ tbs() {
             _db_create "$db_name" && _db_create_user "$db_user" "$db_pass" "$db_name"
             
             # Add to databases array (supports multiple DBs per app)
-            command_exists jq && {
+            [[ "$HAS_JQ" == "true" ]] && {
                 local cfg=$(get_app_config_path "$app_user")
                 local tmp=$(mktemp)
                 local new_db='{"name":"'"$db_name"'","user":"'"$db_user"'","password":"'"$db_pass"'","host":"dbhost","created":true}'
@@ -1827,7 +2083,7 @@ tbs() {
             local dbs=()
             
             # Get from config databases array
-            if command_exists jq && [[ -f "$cfg" ]]; then
+            if [[ "$HAS_JQ" == "true" ]] && [[ -f "$cfg" ]]; then
                 while IFS= read -r db; do
                     [[ -n "$db" && "$db" != "null" ]] && dbs+=("$db")
                 done < <(jq -r '.databases[]?.name // empty' "$cfg" 2>/dev/null)
@@ -1854,7 +2110,7 @@ tbs() {
             local field="$3"
             local cfg=$(get_app_config_path "$app_user")
             
-            if command_exists jq && [[ -f "$cfg" ]]; then
+            if [[ "$HAS_JQ" == "true" ]] && [[ -f "$cfg" ]]; then
                 jq -r '.databases[]? | select(.name=="'"$db_name"'") | .'"$field"' // empty' "$cfg" 2>/dev/null
             fi
         }
@@ -1939,7 +2195,7 @@ server {
     listen 80;
     server_name $domain www.$domain;
     include /etc/nginx/includes/common.conf;
-    include /etc/nginx/partials/varnish-proxy.conf;
+    include /etc/nginx/includes/varnish-proxy.conf;
 }
 server {
     listen 443 ssl;
@@ -1947,7 +2203,7 @@ server {
     ssl_certificate /etc/nginx/ssl-sites/cert.pem;
     ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
     include /etc/nginx/includes/common.conf;
-    include /etc/nginx/partials/varnish-proxy.conf;
+    include /etc/nginx/includes/varnish-proxy.conf;
 }
 EOF
             [[ "$(get_webserver_service)" == "webserver-fpm" ]] && cat >>"$nginx_file" <<EOF
@@ -1956,7 +2212,7 @@ server {
     server_name $domain www.$domain;
     root $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user/public_html;
     index index.php index.html;
-    include /etc/nginx/partials/php-fpm.conf;
+    include /etc/nginx/includes/php-fpm.conf;
 }
 EOF
 
@@ -1984,7 +2240,7 @@ EOF
 EOF
             
             # Update app config
-            command_exists jq && {
+            [[ "$HAS_JQ" == "true" ]] && {
                 local tmp=$(mktemp)
                 jq ".ssh={\"enabled\":true,\"username\":\"$app_user\",\"password\":\"$ssh_pass\",\"port\":${HOST_MACHINE_SSH_PORT:-2244},\"uid\":$ssh_uid,\"gid\":$ssh_uid}" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
             }
@@ -2131,10 +2387,7 @@ EOF
                        [[ ${#db_list[@]} -eq 0 ]] && { error_message "Create a database first"; } || {
                            _db_select_from_list db_list && {
                                read -p "SQL file path: " sql_file
-                               [[ -f "$sql_file" ]] && {
-                                   [[ "$sql_file" == *.gz ]] && gunzip -c "$sql_file" | execute_mysql_command "$SELECTED_DB" || execute_mysql_command "$SELECTED_DB" < "$sql_file"
-                                   green_message "Imported to $SELECTED_DB!"
-                               } || error_message "File not found"
+                               _db_import "$SELECTED_DB" "$sql_file"
                            }
                        }
                        ;;
@@ -2184,7 +2437,7 @@ EOF
                 
                 case "$choice" in
                     1) [[ "$ssh_enabled" != "true" ]] && { yellow_message "SSH not enabled"; } || {
-                       command_exists jq && {
+                       [[ "$HAS_JQ" == "true" ]] && {
                            local cfg=$(get_app_config_path "$app_user")
                            echo ""
                            echo "  Host: localhost"
@@ -2199,15 +2452,15 @@ EOF
                        [[ -z "$uid" || "$uid" == "null" ]] && { local h=$(echo "$app_user$(date +%s)" | md5sum | tr -dc '0-9' | head -c 4); uid=$((2000 + ${h:-1})); }
                        mkdir -p "$tbsPath/sites/ssh"
                        echo "{\"app_user\":\"$app_user\",\"username\":\"$app_user\",\"password\":\"$pass\",\"enabled\":true,\"uid\":$uid,\"gid\":$uid}" > "$ssh_file"
-                       command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh={\"enabled\":true,\"username\":\"$app_user\",\"password\":\"$pass\",\"port\":${HOST_MACHINE_SSH_PORT:-2244},\"uid\":$uid,\"gid\":$uid}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                       [[ "$HAS_JQ" == "true" ]] && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh={\"enabled\":true,\"username\":\"$app_user\",\"password\":\"$pass\",\"port\":${HOST_MACHINE_SSH_PORT:-2244},\"uid\":$uid,\"gid\":$uid}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
                        green_message "✅ SSH Enabled! Pass: $pass"
                        ;;
                     3) local pass=$(generate_strong_password 22)
-                       command_exists jq && [[ -f "$ssh_file" ]] && { local tmp=$(mktemp); jq ".password=\"$pass\"|.enabled=true" "$ssh_file" > "$tmp" && mv "$tmp" "$ssh_file"; }
-                       command_exists jq && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh.password=\"$pass\"|.ssh.enabled=true" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
+                       [[ "$HAS_JQ" == "true" ]] && [[ -f "$ssh_file" ]] && { local tmp=$(mktemp); jq ".password=\"$pass\"|.enabled=true" "$ssh_file" > "$tmp" && mv "$tmp" "$ssh_file"; }
+                       [[ "$HAS_JQ" == "true" ]] && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh.password=\"$pass\"|.ssh.enabled=true" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
                        green_message "✅ New password: $pass"
                        ;;
-                    4) command_exists jq && [[ -f "$ssh_file" ]] && { local tmp=$(mktemp); jq ".enabled=false" "$ssh_file" > "$tmp" && mv "$tmp" "$ssh_file"; }
+                    4) [[ "$HAS_JQ" == "true" ]] && [[ -f "$ssh_file" ]] && { local tmp=$(mktemp); jq ".enabled=false" "$ssh_file" > "$tmp" && mv "$tmp" "$ssh_file"; }
                        set_app_config "$app_user" "ssh.enabled" "false"
                        yellow_message "SSH Disabled"
                        ;;
@@ -2228,7 +2481,7 @@ EOF
             while true; do
                 _app_header "$app_user" "Domains"
                 echo "  Current domains:"
-                command_exists jq && jq -r '.domains[]? // empty' "$cfg" 2>/dev/null | while read d; do
+                [[ "$HAS_JQ" == "true" ]] && jq -r '.domains[]? // empty' "$cfg" 2>/dev/null | while read d; do
                     local p=$(get_app_config "$app_user" "primary_domain")
                     [[ "$d" == "$p" ]] && echo "    * $d (primary)" || echo "    - $d"
                 done
@@ -2280,7 +2533,7 @@ EOF
                 
                 # Get all domains
                 local domains=()
-                if command_exists jq; then
+                if [[ "$HAS_JQ" == "true" ]]; then
                     while IFS= read -r line; do
                         [[ -n "$line" ]] && domains+=("$line")
                     done < <(jq -r '.domains[]? // empty' "$cfg" 2>/dev/null)
@@ -2492,7 +2745,7 @@ POOL
                             find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
                             find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
                         " 2>/dev/null && green_message "✅ Permissions reset" ;;
-                    show) command_exists jq && jq '.' "$(get_app_config_path "$app_user")" || cat "$(get_app_config_path "$app_user")" ;;
+                    show) [[ "$HAS_JQ" == "true" ]] && jq '.' "$(get_app_config_path "$app_user")" || cat "$(get_app_config_path "$app_user")" ;;
                     *) error_message "Unknown config action: $sub_action" ;;
                 esac
                 return 0
@@ -2580,7 +2833,7 @@ POOL
                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
                        " 2>/dev/null && green_message "✅ Permissions reset" ;;
-                    4) command_exists jq && jq '.' "$(get_app_config_path "$app_user")" || cat "$(get_app_config_path "$app_user")" ;;
+                    4) [[ "$HAS_JQ" == "true" ]] && jq '.' "$(get_app_config_path "$app_user")" || cat "$(get_app_config_path "$app_user")" ;;
                     0) return 0 ;;
                     *) error_message "Invalid option" ;;
                 esac
@@ -2607,7 +2860,7 @@ POOL
         info|show)
             _app_get "$app_arg1" || return 1
             _app_header "$SELECTED_APP" "ℹ️  Info"
-            command_exists jq && jq '.' "$(get_app_config_path "$SELECTED_APP")"
+            [[ "$HAS_JQ" == "true" ]] && jq '.' "$(get_app_config_path "$SELECTED_APP")"
             ;;
         
         # Help
@@ -2698,7 +2951,8 @@ POOL
             return 1
         fi
         
-        local databases=$(execute_mysql_command "-e 'SHOW DATABASES;'" | grep -Ev "(Database|information_schema|performance_schema|mysql|phpmyadmin|sys)" || true)
+        local databases
+        databases=$(execute_mysql_command -N -B -e "SHOW DATABASES;" | grep -Ev "^(information_schema|performance_schema|mysql|phpmyadmin|sys)$" || true)
 
         if [[ -z "$databases" ]]; then
             yellow_message "No databases found to backup."
@@ -2758,9 +3012,9 @@ POOL
             local backup_file="${backup_files[$i]}"
             local backup_time
             # Cross-platform date command
-            if [[ "$(get_os_type)" == "mac" ]]; then
+            if [[ "$OS_TYPE" == "mac" ]]; then
                 backup_time=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$backup_file" 2>/dev/null || date -r "$backup_file" +"%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "unknown")
-            elif [[ "$(get_os_type)" == "linux" ]]; then
+            elif [[ "$OS_TYPE" == "linux" ]]; then
                 backup_time=$(stat -c "%y" "$backup_file" 2>/dev/null | cut -d'.' -f1 || echo "unknown")
             else
                 # Windows/Git Bash fallback
@@ -2907,7 +3161,7 @@ POOL
                     _db_create "$db_name" && _db_create_user "$db_user" "$db_pass" "$db_name"
                     
                     # Update app config
-                    command_exists jq && {
+                    [[ "$HAS_JQ" == "true" ]] && {
                         local cfg=$(get_app_config_path "$u")
                         local tmp=$(mktemp)
                         if jq '.database={"name":"'"$db_name"'","user":"'"$db_user"'","password":"'"$db_pass"'","host":"dbhost","created":true}' "$cfg" > "$tmp" 2>/dev/null; then

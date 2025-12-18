@@ -136,7 +136,7 @@ RUN set -eux; \
 # Health Check
 # ============================================
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD cgi-fcgi -bind -connect 127.0.0.1:9000 || exit 1
+    CMD SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 || exit 1
 
 # ============================================
 # Expose Ports
