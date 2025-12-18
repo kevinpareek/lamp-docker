@@ -1237,6 +1237,82 @@ validate_env_config() {
 }
 
 # Ensure Docker is running
+# Fix line endings in shell scripts and Docker files
+# Prevents CRLF issues that cause container failures
+# Cross-platform compatible (Windows, macOS, Linux)
+fix_line_endings() {
+    local fixed_count=0
+    local checked_count=0
+    
+    # Check if dos2unix is available
+    local use_dos2unix=false
+    command -v dos2unix >/dev/null 2>&1 && use_dos2unix=true
+    
+    # Check if 'file' command is available (for detection)
+    local has_file_cmd=false
+    command -v file >/dev/null 2>&1 && has_file_cmd=true
+    
+    # Function to check if file has CRLF (multiple methods for compatibility)
+    has_crlf() {
+        local file="$1"
+        
+        # Method 1: Use 'file' command if available
+        if [ "$has_file_cmd" = true ]; then
+            if file "$file" 2>/dev/null | grep -q "CRLF\|with CR line terminators"; then
+                return 0
+            fi
+        fi
+        
+        # Method 2: Check for \r in file (more reliable, works everywhere)
+        if grep -q $'\r' "$file" 2>/dev/null; then
+            return 0
+        fi
+        
+        return 1
+    }
+    
+    # Function to fix a single file
+    fix_file() {
+        local file="$1"
+        checked_count=$((checked_count + 1))
+        
+        # Check if file has CRLF
+        if has_crlf "$file"; then
+            if [ "$use_dos2unix" = true ]; then
+                dos2unix "$file" 2>/dev/null || sed_i 's/\r$//' "$file"
+            else
+                sed_i 's/\r$//' "$file"
+            fi
+            fixed_count=$((fixed_count + 1))
+            return 0
+        fi
+        return 1
+    }
+    
+    # Fix critical files that cause container failures
+    local critical_files=(
+        "bin/healthcheck.sh"
+        "bin/nginx/entrypoint.sh"
+        "bin/ssh/entrypoint.sh"
+    )
+    
+    for file in "${critical_files[@]}"; do
+        if [ -f "$tbsPath/$file" ]; then
+            fix_file "$tbsPath/$file"
+        fi
+    done
+    
+    # Fix all shell scripts in bin directory
+    while IFS= read -r -d '' file; do
+        fix_file "$file"
+    done < <(find "$tbsPath/bin" -type f \( -name "*.sh" -o -name "entrypoint.sh" \) -print0 2>/dev/null)
+    
+    # Show result if any files were fixed
+    if [ $fixed_count -gt 0 ]; then
+        yellow_message "Fixed line endings in $fixed_count file(s) to prevent container issues"
+    fi
+}
+
 ensure_docker_running() {
     if ! docker info >/dev/null 2>&1; then
         yellow_message "Docker daemon is not running. Starting Docker daemon..."
@@ -1881,6 +1957,9 @@ tbs_start() {
         exit 1
     fi
     
+    # Fix line endings before starting (prevents container failures)
+    fix_line_endings
+    
     # Check if Docker daemon is running
     ensure_docker_running
 
@@ -2031,6 +2110,8 @@ tbs() {
         if ! validate_env_config; then
             exit 1
         fi
+        # Fix line endings before building (prevents container failures)
+        fix_line_endings
         ensure_docker_running
         PROFILES=$(build_profiles)
         # Always tear down everything regardless of profile before rebuild
@@ -3241,6 +3322,12 @@ POOL
         esac
         ;;
 
+    # Fix line endings in shell scripts
+    fix-line-endings|fix)
+        fix_line_endings
+        green_message "Line endings check completed!"
+        ;;
+    
     # Database management
     db)
         error_message "Direct database commands have been removed. Use: tbs app db <app_user>"

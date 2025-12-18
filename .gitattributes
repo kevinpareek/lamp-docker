@@ -1,0 +1,77 @@
+# ============================================
+# Git Attributes - Line Ending Configuration
+# ============================================
+# This file ensures consistent line endings across all platforms
+# Prevents CRLF issues that cause Docker container failures
+
+# Shell scripts - MUST use LF (Unix) line endings
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Docker files - MUST use LF
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+docker-compose*.yml text eol=lf
+docker-compose*.yaml text eol=lf
+
+# Configuration files that run in Linux containers
+bin/**/*.sh text eol=lf
+bin/**/entrypoint.sh text eol=lf
+bin/**/Dockerfile text eol=lf
+
+# PHP files (can be CRLF on Windows, but LF is preferred)
+*.php text eol=lf
+
+# JSON, YAML, XML - LF preferred
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.xml text eol=lf
+
+# Config files
+*.conf text eol=lf
+*.ini text eol=lf
+*.cnf text eol=lf
+*.vcl text eol=lf
+
+# Text files
+*.txt text eol=lf
+*.md text eol=lf
+*.log text eol=lf
+
+# Source code
+*.py text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.css text eol=lf
+
+# Binary files - don't modify
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.sql binary
+*.db binary
+*.pem binary
+*.key binary
+*.crt binary
+*.cert binary
+
+# Windows-specific files - allow CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Default for all other text files
+# Use 'auto' to let Git decide based on content
+* text=auto
+
+# Ensure core.autocrlf is set appropriately
+# Windows users should run: git config --global core.autocrlf true
+# Mac/Linux users should run: git config --global core.autocrlf input
+
