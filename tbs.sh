@@ -4,16 +4,56 @@
 # Cross-platform readlink -f implementation
 get_script_dir() {
     local source="${BASH_SOURCE[0]}"
+    
+    # Detect if we're on Windows (Git Bash/MSYS)
+    local is_windows=false
+    case "$(uname -s)" in
+        CYGWIN*|MINGW32*|MSYS*|MINGW*) is_windows=true ;;
+    esac
+    
+    # On Windows (Git Bash/MSYS), handle path conversion
+    if [[ "$is_windows" == true ]]; then
+        # If source is a relative path, make it absolute first
+        if [[ "$source" != /* ]] && [[ "$source" != [a-zA-Z]:* ]]; then
+            source="$(pwd)/$source"
+        fi
+        
+        # Convert Windows path to Unix path if needed (D:\path -> /d/path)
+        if [[ "$source" =~ ^[a-zA-Z]: ]]; then
+            local drive="${source:0:1}"
+            local path_part="${source:3}"
+            source="/${drive,,}$path_part"
+            source="${source//\\//}"
+        fi
+    fi
+    
     while [ -h "$source" ]; do # resolve $source until the file is no longer a symlink
         local dir="$( cd -P "$( dirname "$source" )" >/dev/null 2>&1 && pwd )"
         source="$(readlink "$source")"
         [[ $source != /* ]] && source="$dir/$source" # if $source was a relative symlink, we need to resolve it relative to the path where the symlink file was located
     done
-    echo "$( cd -P "$( dirname "$source" )" >/dev/null 2>&1 && pwd )"
+    
+    local result="$( cd -P "$( dirname "$source" )" >/dev/null 2>&1 && pwd )"
+    
+    # On Windows, normalize the path
+    if [[ "$is_windows" == true ]]; then
+        # Ensure path uses forward slashes and is properly formatted
+        result="${result//\\//}"
+        # Remove any double slashes
+        result="${result//\/\///}"
+    fi
+    
+    echo "$result"
 }
 
 tbsPath=$(get_script_dir)
 tbsFile="$tbsPath/$(basename "${BASH_SOURCE[0]}")"
+
+# Validate that the script file actually exists
+if [[ ! -f "$tbsFile" ]]; then
+    echo "Error: Cannot locate tbs.sh script at: $tbsFile" >&2
+    exit 1
+fi
 
 # ============================================
 # Global Constants (Set Once at Startup)
@@ -180,8 +220,32 @@ install_tbs_command() {
 
     mkdir -p "$bin_dir" 2>/dev/null || true
 
-    # Store current tbs.sh path in config file (updated on every run)
-    echo "$tbsFile" > "$config_file"
+    # Normalize and validate the tbs.sh path before storing
+    local normalized_path="$tbsFile"
+    
+    # On Windows, ensure path is in Unix format (/d/path)
+    if [[ "$OS_TYPE" == "windows" ]]; then
+        # Convert Windows path to Unix path if needed
+        if [[ "$normalized_path" =~ ^[a-zA-Z]: ]]; then
+            local drive="${normalized_path:0:1}"
+            local path_part="${normalized_path:3}"
+            normalized_path="/${drive,,}$path_part"
+            normalized_path="${normalized_path//\\//}"
+        fi
+        # Remove any double slashes
+        normalized_path="${normalized_path//\/\///}"
+    fi
+    
+    # Validate that the file exists
+    if [[ ! -f "$normalized_path" ]]; then
+        error_message "Cannot find tbs.sh at: $normalized_path"
+        error_message "Current working directory: $(pwd)"
+        error_message "BASH_SOURCE: ${BASH_SOURCE[0]}"
+        return 1
+    fi
+
+    # Store normalized tbs.sh path in config file (updated on every run)
+    echo "$normalized_path" > "$config_file"
 
     # Create smart wrapper that reads path from config (auto-updates when project moves)
     cat > "$wrapper_path" <<'WRAPPER'
@@ -193,7 +257,21 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 if [[ -f "$CONFIG_FILE" ]]; then
-    TBS_SCRIPT="$(cat "$CONFIG_FILE")"
+    TBS_SCRIPT="$(cat "$CONFIG_FILE" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    
+    # On Windows, try to normalize the path if it doesn't exist
+    if [[ ! -f "$TBS_SCRIPT" ]] && [[ "$(uname -s)" =~ ^(CYGWIN|MINGW|MSYS) ]]; then
+        # Try converting Windows path format if needed
+        if [[ "$TBS_SCRIPT" =~ ^[a-zA-Z]: ]]; then
+            DRIVE="${TBS_SCRIPT:0:1}"
+            PATH_PART="${TBS_SCRIPT:3}"
+            TBS_SCRIPT="/${DRIVE,,}$PATH_PART"
+            TBS_SCRIPT="${TBS_SCRIPT//\\//}"
+        fi
+        # Remove double slashes
+        TBS_SCRIPT="${TBS_SCRIPT//\/\///}"
+    fi
+    
     if [[ -f "$TBS_SCRIPT" ]]; then
         exec "$TBS_SCRIPT" "$@"
     else
@@ -262,6 +340,28 @@ WRAPPER
     # Ensure rc file directory and file exist
     mkdir -p "$(dirname "$shell_rc")" 2>/dev/null || true
     touch "$shell_rc" 2>/dev/null || true
+
+    # Remove old tbs() function definitions if they exist (they conflict with PATH-based command)
+    # This ensures the PATH-based wrapper takes precedence over hardcoded function definitions
+    if [[ -f "$shell_rc" ]] && grep -qE "^tbs\(\)|# Added by tbs\.sh for Turbo Stack CLI" "$shell_rc" 2>/dev/null; then
+        # Create a backup before modifying (only if changes will be made)
+        cp "$shell_rc" "${shell_rc}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+        
+        # Remove old function definitions using cross-platform sed_i function
+        # Pattern 1: Remove function block from "tbs() {" to matching "}"
+        sed_i '/^tbs() {/,/^}$/d' "$shell_rc" 2>/dev/null || true
+        
+        # Pattern 2: Remove comment header for old tbs installation
+        sed_i '/^# Added by tbs\.sh for Turbo Stack CLI$/d' "$shell_rc" 2>/dev/null || true
+        
+        # Pattern 3: Remove any standalone lines with hardcoded old paths
+        sed_i '/turbo-stack\/tbs\.sh/d' "$shell_rc" 2>/dev/null || true
+        
+        # Remove empty lines that might be left behind (max 2 consecutive)
+        sed_i '/^$/N;/^\n$/d' "$shell_rc" 2>/dev/null || true
+        
+        needs_shell_restart=true
+    fi
 
     # Add PATH to shell config (only once, using marker)
     if [[ -f "$shell_rc" ]] && ! grep -qF "$marker" "$shell_rc" 2>/dev/null; then
@@ -353,11 +453,31 @@ PS_EOF
         ln -sf "$wrapper_path" "/usr/local/bin/tbs" 2>/dev/null || true
     fi
 
-    # Show first-run hint if shell config was modified
+    # Show installation status and instructions
+    echo ""
     if [[ "$needs_shell_restart" == "true" ]]; then
+        green_message "✓ 'tbs' command installed successfully!"
         echo ""
-        info_message "✓ 'tbs' command installed! Run 'source $shell_rc' or restart terminal to use it globally."
+        info_message "To use 'tbs' command in this terminal, run:"
+        echo -e "  ${YELLOW}source $shell_rc${NC}"
+        echo ""
+        info_message "Or simply restart your terminal."
+    else
+        # PATH already in config, but check if it's in current session
+        if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
+            green_message "✓ 'tbs' command is installed!"
+            echo ""
+            info_message "To use 'tbs' command in this terminal, run:"
+            echo -e "  ${YELLOW}source $shell_rc${NC}"
+            echo ""
+            info_message "Or restart your terminal."
+            echo ""
+            yellow_message "Note: You can also use the full path: $wrapper_path"
+        else
+            green_message "✓ 'tbs' command is ready to use!"
+        fi
     fi
+    echo ""
 }
 
 # Get webserver service name based on stack mode
