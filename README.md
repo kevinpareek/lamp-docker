@@ -1,38 +1,52 @@
 # 🚀 PHP Turbo Stack (Docker LAMP & LEMP)
 
-**The most complete, flexible, and production-ready local development environment for PHP.**
+[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/kevinpareek/turbo-stack/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)
+[![PHP](https://img.shields.io/badge/PHP-7.4--8.4-777BB4.svg)](https://www.php.net/)
 
-Stop wasting time configuring servers. This stack gives you everything you need—**Apache, Nginx, MySQL/MariaDB, Redis, Varnish, Memcached, Mailpit, and more**—all in one powerful Docker setup.
+**The most complete, flexible, and production-ready Docker LAMP & LEMP environment for PHP developers.**
 
-> **🔮 Future Roadmap:** We are actively working on adding support for **Node.js**, **MongoDB**, and **PostgreSQL**. Stay tuned!
+Stop wasting time configuring servers. Get everything you need—**Apache, Nginx, MySQL/MariaDB, Redis, Varnish, Memcached, Mailpit, and more**—in one powerful, optimized Docker setup.
+
+> 📖 **Quick Links:** [Installation](#installation) • [Commands](#️-the-tbs-command) • [Configuration](#️-configuration-via-env) • [Roadmap](#-coming-soon)
 
 ---
 
 ## ✨ Why PHP Turbo Stack?
 
-*   **🔥 Dual Modes**:
-    *   **Hybrid Mode**: Nginx (Proxy) → Varnish → Apache (Webserver). Best for compatibility.
-    *   **Thunder Mode**: Nginx (Webserver) → PHP-FPM. Best for performance.
-*   **🐘 Multiple PHP Versions**: Switch instantly between PHP 7.4 to 8.4.
-*   **💾 Database Freedom**: Choose MySQL (5.7 - 8.4) or MariaDB (10.3 - 11.4).
-    *   *Coming Soon: MongoDB & PostgreSQL support.*
-*   **⚡ Caching Suite**: Pre-configured **Redis**, **Memcached**, and **Varnish**.
-*   **🔒 Smart SSL**:
-    *   **Local**: Zero-config trusted certificates for `.localhost` domains via **mkcert**.
-    *   **Public**: Automatic Let's Encrypt certificates via **Certbot**.
-*   **🛠 Developer Tools**:
-    *   **phpMyAdmin**: Database management.
-    *   **Mailpit**: Catch-all SMTP server for email testing.
-    *   **Xdebug**: Ready-to-go debugging.
-*   **🤖 Automation**: A powerful `tbs.sh` (Turbo Stack) script to manage sites, certs, and configs.
+| Feature | Description |
+|---------|-------------|
+| 🔥 **Dual Modes** | **Hybrid** (Nginx → Varnish → Apache) for compatibility, **Thunder** (Nginx → PHP-FPM) for performance |
+| 🐘 **PHP 7.4 - 8.4** | Switch PHP versions instantly with a single command |
+| 💾 **MySQL & MariaDB** | Choose from MySQL 5.7-8.4 or MariaDB 10.3-11.4 |
+| ⚡ **Caching Suite** | Pre-configured Redis, Memcached, and Varnish |
+| 🔒 **Smart SSL** | Auto SSL via mkcert (local) or Let's Encrypt (production) |
+| 🛠 **Dev Tools** | phpMyAdmin, Mailpit (email testing), Xdebug ready |
+| 🤖 **CLI Automation** | Powerful `tbs` command to manage everything |
 
 ---
 
 ## 🚀 Getting Started
 
+### ⚡ Quick Start (TL;DR)
+
+```bash
+git clone https://github.com/kevinpareek/turbo-stack.git && cd turbo-stack
+./tbs.sh config    # Choose PHP, Database, Mode
+./tbs.sh start     # Launch the stack
+```
+
+Open **http://localhost** and you're ready! 🎉
+
+---
+
 ### Prerequisites
 
-The stack is designed to work on **macOS, Linux, Windows, and other Unix-like systems**. Requirements vary based on your installation type (local development vs. live/production).
+<details>
+<summary><strong>📋 Click to expand detailed requirements</strong></summary>
+
+The stack works on **macOS, Linux, Windows, and other Unix-like systems**.
 
 #### Common Requirements (All Environments)
 
@@ -70,18 +84,14 @@ The stack is designed to work on **macOS, Linux, Windows, and other Unix-like sy
 
 #### OS-Specific Notes
 
-*   **macOS**: 
-    *   Apple Silicon (M1/M2/M3): Fully supported; MariaDB recommended for best compatibility
-    *   Intel Macs: All database options available
-*   **Linux**: 
-    *   Works on most distributions (Ubuntu, Debian, CentOS, Fedora, Arch, etc.)
-    *   May require `sudo` for Docker commands (add user to `docker` group)
-*   **Windows**: 
-    *   Requires WSL 2 (Windows Subsystem for Linux) for Docker Desktop
-    *   Use Git Bash or WSL terminal for running `tbs.sh` script
-*   **Other Unix-like Systems** (FreeBSD, OpenBSD, etc.):
-    *   Docker Engine support varies; check Docker documentation for your OS
-    *   Bash compatibility required for `tbs.sh` script
+| OS | Notes |
+|----|-------|
+| **macOS** | Apple Silicon (M1/M2/M3) fully supported; MariaDB recommended |
+| **Linux** | Ubuntu, Debian, CentOS, Fedora, Arch - may need `sudo` for Docker |
+| **Windows** | Requires WSL 2 + Docker Desktop; use Git Bash or WSL terminal |
+| **Other Unix** | Check Docker docs for your OS; bash 4.0+ required |
+
+</details>
 
 ### Installation
 
@@ -109,60 +119,78 @@ The stack is designed to work on **macOS, Linux, Windows, and other Unix-like sy
 
 ---
 
-## 🛠️ The `tbs` Helper Script
+## 🛠️ The `tbs` Command
 
-Manage your entire stack with simple commands.
+Manage your entire stack with simple, intuitive commands.
 
+### Core Commands
 | Command | Description |
 | :--- | :--- |
-| `tbs` | Open the interactive Turbo Stack menu. |
-| `tbs start` | Start all services (Docker Compose profiles based on `STACK_MODE` and `APP_ENV`). |
-| `tbs stop` | Stop services and remove orphans. |
-| `tbs restart` | Restart the stack with the current profiles. |
-| `tbs build` | Rebuild images (e.g., after adding PHP extensions) and start the stack. |
-| `tbs status` | Show running containers (`docker compose ps`). |
-| `tbs logs [service]` | Stream logs for all services or for a specific service. |
-| `tbs config` | Wizard to change PHP version, DB, environment, or Stack Mode and update `.env` |
-| `tbs addapp <name> [domain]` | Create a new site (Apache + Nginx vhost, SSL, document root under `www/applications`). Default domain: `<name>.localhost`. |
-| `tbs removeapp <name> [domain]` | Remove app vhost(s), optional app files, and related SSL certs. |
-| `tbs code <name>` | Open a project folder in VS Code. `tbs code` (without name) lets you pick an app. |
-| `tbs ssl <domain>` | Force SSL generation for an existing domain (Certbot for live, mkcert for local). |
-| `tbs ssl-localhost` | Generate trusted SSL certs for `localhost` and reload Nginx/Apache. |
-| `tbs backup` | Backup all user databases and `www/applications` to `data/backup`. |
-| `tbs restore` | Restore databases and app files from a backup archive. |
+| `tbs` | Open interactive menu |
+| `tbs start` | Start all services |
+| `tbs stop` | Stop all services |
+| `tbs restart` | Restart the stack |
+| `tbs build` | Rebuild images and start |
+| `tbs status` | Show running containers |
+| `tbs logs [service]` | Stream logs |
+| `tbs config` | Configuration wizard |
+| `tbs info` | Show stack info |
 
-### Tool Shortcuts
-| Command | Description | URL |
-| :--- | :--- | :--- |
-| `tbs pma` | phpMyAdmin | [http://localhost:8080](http://localhost:8080) |
-| `tbs mail` | Mailpit | [http://localhost:8025](http://localhost:8025) |
-| `tbs redis-cli` | Redis CLI | - |
-| `tbs cmd` | PHP Shell | - |
+### App Management (`tbs app`)
+| Command | Description |
+| :--- | :--- |
+| `tbs app` | Interactive app manager |
+| `tbs app add <name>` | Create new app (auto SSH, SSL, vhost) |
+| `tbs app rm [app]` | Delete app |
+| `tbs app db [app]` | Database management |
+| `tbs app ssh [app]` | SSH/SFTP settings |
+| `tbs app domain [app]` | Manage domains |
+| `tbs app ssl [app]` | SSL certificates |
+| `tbs app php [app]` | PHP configuration |
+| `tbs app config [app]` | App settings (varnish, webroot, etc.) |
+| `tbs app code [app]` | Open in VS Code |
+| `tbs app open [app]` | Open in browser |
+| `tbs app info [app]` | Show app config |
+| `tbs app supervisor [app]` | Manage background workers |
+| `tbs app cron [app]` | Manage cron jobs |
+| `tbs app logs [app]` | App logging |
 
-#### If `tbs` is not found (manual install)
-The script auto-installs a shim, but if your shell still cannot find `tbs`, set it up once:
-- Linux/mac/WSL/Git Bash:
-  ```bash
-  mkdir -p ~/.local/bin
-  cat > ~/.local/bin/tbs <<'EOF'
-  #!/bin/bash
-  exec "/path/to/your/clone/tbs.sh" "$@"
-  EOF
-  chmod +x ~/.local/bin/tbs
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-  source ~/.bashrc
-  ```
-- Windows PowerShell (User PATH):
-  ```powershell
-  $bin="$HOME\.local\bin"; New-Item -ItemType Directory -Force -Path $bin | Out-Null
-  Set-Content -Path "$bin\tbs.cmd" -Value "@echo off`n\"%ProgramFiles%\Git\bin\bash.exe\" \"D:/path/to/your/clone/tbs.sh\" %*"
-  [Environment]::SetEnvironmentVariable("Path", "$bin;" + $env:Path, "User")
-  ```
-- Windows CMD (per-session):
-  ```cmd
-  set "PATH=%UserProfile%\.local\bin;%PATH%"
-  ```
-Then open a new shell and run `tbs status`.
+> Database management is app-scoped via `tbs app db <app>`, which covers create, import/export, reset password, and delete. Databases and MySQL users share the same app-prefixed name (for example, `myapp_abcd`).
+
+### Project Creators (`tbs create`)
+| Command | Description |
+| :--- | :--- |
+| `tbs create laravel <name>` | New Laravel project |
+| `tbs create wordpress <name>` | WordPress with auto database |
+| `tbs create symfony <name>` | New Symfony project |
+| `tbs create blank <name>` | Blank PHP project |
+
+### Shell & Tools
+| Command | Description |
+| :--- | :--- |
+| `tbs shell [php\|mysql\|redis\|nginx]` | Container shell access |
+| `tbs pma` | Open phpMyAdmin |
+| `tbs mail` | Open Mailpit |
+| `tbs redis-cli` | Redis CLI |
+| `tbs code [app]` | Open in VS Code |
+
+### Backup & Restore
+| Command | Description |
+| :--- | :--- |
+| `tbs backup` | Backup databases + apps |
+| `tbs restore` | Restore from backup |
+
+### SSH Admin
+| Command | Description |
+| :--- | :--- |
+| `tbs sshadmin` | Show admin SSH credentials |
+| `tbs sshadmin password` | Reset admin password |
+
+#### Global `tbs` Command
+The script auto-installs a global shim. If your shell can't find `tbs`, restart your terminal or run:
+```bash
+source ~/.bashrc   # or ~/.zshrc for Zsh
+```
 
 ---
 
@@ -185,6 +213,7 @@ Most behavior is controlled through `.env` (created from `sample.env` and mainta
   - DB & tools: `HOST_MACHINE_MYSQL_PORT`, `HOST_MACHINE_PMA_PORT`, `HOST_MACHINE_REDIS_PORT`.
 - **Database credentials**
   - `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` (change for production!).
+  - **Host**: `dbhost` (internal container name) or `localhost` (from host machine).
 
 Run `./tbs.sh config` anytime to re-run the wizard and safely update `.env`.
 
@@ -232,7 +261,122 @@ You can switch modes in `.env` or via `tbs config`.
 
 ---
 
-## 📂 Directory Structure
+## 🎛️ Per-Application Features
+
+Each app created via `tbs app add` automatically gets:
+- **Unique app_user ID** - Random 12-char identifier for isolation
+- **SSH/SFTP access** - Auto-generated secure credentials
+- **SSL certificates** - Via mkcert (local) or Let's Encrypt (production)
+- **Dedicated directory structure** - `public_html/`, `logs/`, `tmp/`, etc.
+
+### App Configuration (`tbs app config`)
+
+```bash
+# Interactive config menu
+tbs app config myapp
+
+# Direct commands
+tbs app config myapp varnish on/off    # Toggle Varnish caching
+tbs app config myapp webroot public    # Change document root
+tbs app config myapp perms             # Reset file permissions
+tbs app config myapp show              # Show full config JSON
+```
+
+### Database per App (`tbs app db`)
+
+```bash
+tbs app db myapp              # Interactive database menu
+# Options: Create, Show credentials, Reset password, Import, Export, Delete
+```
+
+### SSH/SFTP Access (`tbs app ssh`)
+
+```bash
+tbs app ssh myapp             # Interactive SSH menu
+# Options: Show credentials, Enable, Reset password, Disable
+
+# Connect via SFTP
+sftp -P 2244 <app_user>@localhost
+```
+
+### Domain Management (`tbs app domain`)
+
+```bash
+tbs app domain myapp          # Manage domains
+# Options: Add domain, Remove domain
+```
+
+### PHP Configuration (`tbs app php`)
+
+```bash
+tbs app php myapp             # PHP config menu
+# Options: Create .user.ini, Create FPM pool, Edit configs
+```
+
+### Background Workers & Cron
+
+```bash
+# Supervisor (background processes)
+tbs app supervisor myapp add worker    # Add new worker
+tbs app supervisor myapp list          # List workers
+tbs app supervisor myapp rm worker     # Remove worker
+
+# Cron jobs
+tbs app cron myapp add                 # Add cron job
+tbs app cron myapp list                # List jobs
+```
+
+### Configuration Storage
+
+Each app config is stored as JSON in `sites/apps/<app_user>.json`:
+
+```json
+{
+  "app_user": "abc123xyz",
+  "name": "myapp",
+  "domains": ["abc123xyz.localhost"],
+  "primary_domain": "abc123xyz.localhost",
+  "webroot": "public_html",
+  "varnish": true,
+  "database": { "name": "myapp", "user": "myapp", "created": true },
+  "ssh": { "enabled": true, "username": "abc123xyz", "password": "***", "port": 2244 }
+}
+```
+
+---
+
+## 🔒 Security Features
+
+Turbo Stack includes built-in security rules to protect your applications from common attack vectors.
+
+### Blocked Files & Extensions
+
+The following files and patterns are automatically blocked from public access:
+
+| Category | Blocked Patterns |
+| :--- | :--- |
+| **Version Control** | `.git`, `.svn`, `.hg` |
+| **Environment Files** | `.env`, `.env.*` |
+| **Database Files** | `.sql`, `.sql.gz`, `.sqlite`, `.db` |
+| **Backup Files** | `.bak`, `.backup`, `.old`, `.orig` |
+| **Config Files** | `.yml`, `.yaml`, `.xml`, `.json`, `.ini`, `.conf` |
+| **Sensitive Files** | `.htpasswd`, `.htaccess`, `.pem`, `.key`, `.crt`, `.log` |
+| **PHP Internals** | `composer.json`, `composer.lock`, `phpunit.xml`, `artisan` |
+
+### Production Hardening
+
+In production mode (`APP_ENV=production`), additional security measures are applied:
+
+- **`open_basedir`**: Restricts PHP file access to web root only
+- **`disable_functions`**: Dangerous functions like `exec`, `shell_exec`, `system` are disabled
+- **Session Security**: `httponly`, `secure`, and `samesite` flags enabled
+- **Error Display**: Errors logged to file, not displayed to users
+
+> **Tip:** Always review `config/php/php.production.ini` before deploying to production.
+
+---
+
+## �📂 Directory Structure
 
 ```text
 ├── bin/                 # Docker build context for PHP, Nginx, MySQL/MariaDB images
@@ -241,18 +385,22 @@ You can switch modes in `.env` or via `tbs config`.
 │   ├── mariadb/         # Custom MySQL/MariaDB configs (e.g. my.cnf)
 │   ├── nginx/           # Nginx templates, partials, and mode configs
 │   ├── php/             # php.ini variants, FPM pool, supervisord configs
+│   │   └── templates/   # Per-app config templates (user.ini, FPM pool)
 │   ├── varnish/         # VCL configurations for Hybrid / Thunder modes
 │   └── vhosts/          # Base Apache vhost templates used by tbs.sh
 ├── data/                # Persistent data volumes (DB, Redis, backups)
 ├── logs/                # Logs for web, DB, and services (Apache, Nginx, MySQL, etc.)
 ├── sites/               # Generated configs (managed by tbs.sh – do NOT edit manually)
 │   ├── apache/          # Active Apache vhosts for your apps
+│   ├── apps/            # App configuration JSON files
 │   ├── nginx/           # Active Nginx configs per app / mode
+│   ├── php/pools/       # Per-app PHP-FPM pool configs (gitignored)
+│   ├── ssh/             # SSH user configs per app
 │   └── ssl/             # Generated SSL certs (mkcert / Let's Encrypt)
 ├── www/                 # Web root inside containers
-│   ├── applications/    # Your project folders (created via `tbs addapp`)
+│   ├── applications/    # Your project folders (created via `tbs app add`)
 │   └── index.php        # Landing page
-└── tbs.sh               # Turbo Stack helper/automation script
+└── tbs.sh               # Turbo Stack CLI script
 ```
 
 **Database auto-init:** Any `.sql` (or compressed `.sql.gz`) file you drop into `config/initdb` will be picked up and executed automatically when the database container starts for the first time—perfect for seeding schemas, users, and sample data.
@@ -299,18 +447,59 @@ Add this to `.vscode/launch.json`:
 
 ---
 
-## ⚠️ Production Usage
-1.  Set `APP_ENV=production` in `.env`.
-2.  **Change all passwords** in `.env`.
-3.  Disable `INSTALL_XDEBUG`.
-4.  Ensure `STACK_MODE` is set correctly for your needs.
+## ⚠️ Production Checklist
 
-For more details, see `SECURITY.md`. For release notes, see `CHANGELOG.md`.
+- [ ] Set `APP_ENV=production` in `.env`
+- [ ] Change all default passwords (`MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`)
+- [ ] Set `INSTALL_XDEBUG=false`
+- [ ] Configure proper `STACK_MODE` for your needs
+- [ ] Review firewall rules (ports 80, 443)
+- [ ] Setup backup strategy using `tbs backup`
+
+> 📚 See [SECURITY.md](SECURITY.md) for hardening guide • [CHANGELOG.md](CHANGELOG.md) for release notes
+
+---
+
+## 🔮 Coming Soon
+
+We're constantly improving Turbo Stack! Here's what's on our roadmap:
+
+| Category | Feature | Description |
+| :--- | :--- | :--- |
+| **🐘 PHP** | PHP 8.5 | Support for upcoming PHP 8.5 release |
+| **🐘 PHP** | ionCube Loader | ionCube PHP Encoder support |
+| **🌐 Routing** | Web Rules | Custom header & URL rewrite rules per app |
+| **📁 Structure** | New Webroot Standard | Document root at `applications/<app>/public_html/` |
+| **📁 Structure** | App Data Directory | Dedicated data storage at `applications/<app>/app_data/` |
+| **💾 Database** | MongoDB Support | Full MongoDB integration |
+| **💾 Database** | PostgreSQL Support | Full PostgreSQL integration |
+| **🚀 Stack** | Node.js Mode | Full Node.js application support with PM2 |
+| **📊 Monitoring** | New Relic APM | Application Performance Monitoring |
+| **📊 Monitoring** | Prometheus + Grafana | Self-hosted metrics & dashboards |
+| **📊 Monitoring** | Sentry | Error tracking & crash reporting |
+| **📊 Monitoring** | Health Checks | Automated service health monitoring |
+
+> 💡 **Want to contribute?** Pick a feature from the roadmap and submit a PR!
 
 ---
 
 ## 🤝 Contributing
-Pull Requests are welcome!
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## 📄 License
-MIT License.
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+<p align="center">
+  <strong>Made with ❤️ for PHP developers</strong><br>
+  <sub>If you find this useful, please ⭐ star the repo!</sub>
+</p>

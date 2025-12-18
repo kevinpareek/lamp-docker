@@ -15,28 +15,17 @@ if [ ! -f /etc/nginx/ssl-sites/cert.pem ] || [ ! -f /etc/nginx/ssl-sites/cert-ke
     echo "Self-signed SSL certificates generated."
 fi
 
-# Wait for webserver to be ready
-echo "Waiting for webserver..."
-if [ "$STACK_MODE" = "thunder" ]; then
-    # Check for PHP-FPM on port 9000
-    until nc -z webserver 9000 > /dev/null 2>&1; do
-        echo "Waiting for PHP-FPM..."
-        sleep 2
-    done
-else
-    # Check for Apache on port 80
-    # curl exit code 52 (empty reply) still means the TCP connection is working.
-    while :; do
-        curl_rc=0
-        curl -s -o /dev/null "http://webserver" || curl_rc=$?
-        if [ "$curl_rc" -eq 0 ] || [ "$curl_rc" -eq 52 ]; then
-            break
-        fi
-        echo "Waiting for Apache..."
-        sleep 2
-    done
-fi
-echo "Webserver is reachable."
+# Wait for Varnish backend to be ready
+echo "Waiting for Varnish..."
+while :; do
+    curl_rc=0
+    curl -s -o /dev/null "http://varnish" || curl_rc=$?
+    if [ "$curl_rc" -eq 0 ] || [ "$curl_rc" -eq 52 ]; then
+        break
+    fi
+    sleep 2
+done
+echo "Varnish is reachable."
 
 # Determine Static Asset Expiration based on Environment
 if [ "$APP_ENV" = "production" ]; then
@@ -57,6 +46,16 @@ mkdir -p /etc/nginx/includes
 
 # Process common.conf
 envsubst '${APACHE_DOCUMENT_ROOT} ${NGINX_STATIC_EXPIRES}' < /etc/nginx/partials/common.conf > /etc/nginx/includes/common.conf
+
+# Process varnish-proxy.conf with APP_ENV for development mode detection
+if [ -f /etc/nginx/partials/varnish-proxy.conf ]; then
+    envsubst '${APP_ENV}' < /etc/nginx/partials/varnish-proxy.conf > /etc/nginx/includes/varnish-proxy.conf
+fi
+
+# Copy php-fpm.conf to includes (no variable substitution needed)
+if [ -f /etc/nginx/partials/php-fpm.conf ]; then
+    cp /etc/nginx/partials/php-fpm.conf /etc/nginx/includes/php-fpm.conf
+fi
 
 # Process main template
 envsubst '${APACHE_DOCUMENT_ROOT} ${APPLICATIONS_DIR_NAME} ${NGINX_STATIC_EXPIRES}' < /etc/nginx/templates/00-default.conf.template > /etc/nginx/http.d/default.conf

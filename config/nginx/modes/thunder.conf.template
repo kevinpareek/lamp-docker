@@ -9,7 +9,7 @@ server {
     server_name localhost _;
 
     include /etc/nginx/includes/common.conf;
-    include /etc/nginx/partials/varnish-proxy.conf;
+    include /etc/nginx/includes/varnish-proxy.conf;
 }
 
 # HTTPS Server (Frontend -> Varnish)
@@ -25,7 +25,7 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
 
     include /etc/nginx/includes/common.conf;
-    include /etc/nginx/partials/varnish-proxy.conf;
+    include /etc/nginx/includes/varnish-proxy.conf;
 }
 
 # ============================================
@@ -37,7 +37,7 @@ server {
     root ${APACHE_DOCUMENT_ROOT};
     index index.php index.html index.htm;
 
-    include /etc/nginx/partials/php-fpm.conf;
+    include /etc/nginx/includes/php-fpm.conf;
 
     # Health check endpoint
     location /nginx-health {

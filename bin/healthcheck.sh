@@ -37,12 +37,19 @@ ROOT_PW="${MYSQL_ROOT_PASSWORD:-${MARIADB_ROOT_PASSWORD:-}}"
 USER_OPT=""
 PASS_OPT=""
 if [ -n "$ROOT_PW" ]; then
-    USER_OPT="-u root"
+    USER_OPT="-u"
+    USER_VAL="root"
     PASS_OPT="-p${ROOT_PW}"
+else
+    USER_VAL=""
 fi
 
 # Always ensure the server is reachable
-$MYSQLADMIN ping -h localhost $USER_OPT $PASS_OPT --silent
+if [ -n "$USER_OPT" ]; then
+    $MYSQLADMIN ping -h localhost $USER_OPT "$USER_VAL" $PASS_OPT --silent
+else
+    $MYSQLADMIN ping -h localhost --silent
+fi
 
 # If requested, verify InnoDB is initialized/available (stricter "ready" signal)
 if [ "$want_innodb" = "true" ] || [ "$want_connect" = "true" ]; then
@@ -56,14 +63,24 @@ if [ "$want_innodb" = "true" ] || [ "$want_connect" = "true" ]; then
     fi
 
     # Basic connect check
-    $MYSQLCLI -h localhost $USER_OPT $PASS_OPT -e "SELECT 1" >/dev/null 2>&1
+    if [ -n "$USER_OPT" ]; then
+        $MYSQLCLI -h localhost $USER_OPT "$USER_VAL" $PASS_OPT -e "SELECT 1" >/dev/null 2>&1
+    else
+        $MYSQLCLI -h localhost -e "SELECT 1" >/dev/null 2>&1
+    fi
 fi
 
 if [ "$want_innodb" = "true" ]; then
     # Confirm InnoDB engine is available (YES or DEFAULT)
-    $MYSQLCLI -h localhost $USER_OPT $PASS_OPT -Nse \
-        "SELECT 1 FROM information_schema.engines WHERE engine='InnoDB' AND support IN ('YES','DEFAULT') LIMIT 1;" \
-        | grep -q '^1$'
+    if [ -n "$USER_OPT" ]; then
+        $MYSQLCLI -h localhost $USER_OPT "$USER_VAL" $PASS_OPT -Nse \
+            "SELECT 1 FROM information_schema.engines WHERE engine='InnoDB' AND support IN ('YES','DEFAULT') LIMIT 1;" \
+            | grep -q '^1$'
+    else
+        $MYSQLCLI -h localhost -Nse \
+            "SELECT 1 FROM information_schema.engines WHERE engine='InnoDB' AND support IN ('YES','DEFAULT') LIMIT 1;" \
+            | grep -q '^1$'
+    fi
 fi
 
 exit $?

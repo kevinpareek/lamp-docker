@@ -1,56 +1,202 @@
 vcl 4.0;
 
+# ============================================
+# Hybrid Mode VCL - Nginx -> Varnish -> Apache
+# Production-Ready Configuration
+# ============================================
+
+import std;
+
 backend default {
     .host = "webserver";
     .port = "80";
-    .first_byte_timeout = 60s;
-    .connect_timeout = 5s;
-    .between_bytes_timeout = 2s;
+    .first_byte_timeout = 300s;
+    .connect_timeout = 10s;
+    .between_bytes_timeout = 10s;
+    .max_connections = 300;
     .probe = {
-        .url = "/";
-        .timeout = 2s;
-        .interval = 2s;
+        .url = "/health-check.php";
+        .timeout = 5s;
+        .interval = 10s;
         .window = 5;
         .threshold = 3;
         .initial = 3;
+        .expected_response = 200;
     }
 }
 
+# ACL for purge requests
+acl purge_allowed {
+    "localhost";
+    "127.0.0.1";
+    "::1";
+    "172.0.0.0"/8;  # Docker default network
+    "192.168.0.0"/16;  # Docker custom networks
+    "10.0.0.0"/8;  # Docker networks
+}
+
 sub vcl_recv {
-    # Only handle GET and HEAD requests
+    # ============================================
+    # DEVELOPMENT MODE: Bypass cache completely
+    # ============================================
+    if (req.http.X-App-Env == "development") {
+        return (pass);
+    }
+
+    # ============================================
+    # Health check endpoint
+    # ============================================
+    if (req.url == "/varnish-health") {
+        return (synth(200, "OK"));
+    }
+
+    # ============================================
+    # Purge handling
+    # ============================================
+    if (req.method == "PURGE") {
+        if (!client.ip ~ purge_allowed) {
+            return (synth(405, "Not allowed"));
+        }
+        return (purge);
+    }
+
+    # ============================================
+    # Normalize host header
+    # ============================================
+    set req.http.Host = regsub(req.http.Host, ":[0-9]+", "");
+
+    # ============================================
+    # Only cache GET and HEAD
+    # ============================================
     if (req.method != "GET" && req.method != "HEAD") {
         return (pass);
     }
 
-    # Strip hash and other static parameters
-    if (req.url ~ "\.(css|js|png|gif|jp(e)?g|swf|ico)") {
-        unset req.http.cookie;
+    # ============================================
+    # Static assets - always cache
+    # ============================================
+    if (req.url ~ "\\.(css|js|png|gif|jpe?g|ico|woff2?|ttf|eot|svg|webp|avif|mp4|webm|pdf)($|\\?)") {
+        unset req.http.Cookie;
+        return (hash);
     }
 
-    # Pass through for authentication/cookies (Basic WordPress/App logic)
-    if (req.http.Authorization || req.http.Cookie) {
+    # ============================================
+    # Admin/Login/Cart - never cache
+    # ============================================
+    if (req.url ~ "^/(wp-admin|wp-login|admin|checkout|cart|my-account|login|logout|register|dashboard|api/)") {
         return (pass);
+    }
+
+    # ============================================
+    # POST requests - never cache
+    # ============================================
+    if (req.http.Authorization) {
+        return (pass);
+    }
+
+    # ============================================
+    # Session cookies - never cache
+    # ============================================
+    if (req.http.Cookie ~ "(wordpress_logged_in|PHPSESSID|laravel_session|PrestaShop-|wp-postpass|woocommerce_)") {
+        return (pass);
+    }
+
+    # Strip marketing cookies
+    set req.http.Cookie = regsuball(req.http.Cookie, "(^|;\\s*)(_ga|_gat|_gid|_fbp|_gcl_au|__utm)[^;]*", "");
+    set req.http.Cookie = regsuball(req.http.Cookie, "^;\\s*", "");
+    
+    if (req.http.Cookie ~ "^\\s*$") {
+        unset req.http.Cookie;
     }
 
     return (hash);
 }
 
 sub vcl_backend_response {
-    # Set TTL for static assets
-    if (bereq.url ~ "\.(css|js|png|gif|jp(e)?g|swf|ico)") {
-        unset beresp.http.cookie;
-        set beresp.ttl = 365d;
+    # ============================================
+    # Don't cache errors
+    # ============================================
+    if (beresp.status >= 500) {
+        set beresp.ttl = 0s;
+        set beresp.uncacheable = true;
+        return (deliver);
     }
 
-    # Allow stale content if backend is down
+    # ============================================
+    # Static assets - long TTL
+    # ============================================
+    if (bereq.url ~ "\\.(css|js|png|gif|jpe?g|ico|woff2?|ttf|eot|svg|webp|avif|mp4|webm|pdf)($|\\?)") {
+        unset beresp.http.Cookie;
+        unset beresp.http.Set-Cookie;
+        set beresp.ttl = 30d;
+        set beresp.http.Cache-Control = "public, max-age=2592000, immutable";
+    }
+
+    # ============================================
+    # HTML pages - short TTL
+    # ============================================
+    if (beresp.http.Content-Type ~ "text/html") {
+        set beresp.ttl = 5m;
+        set beresp.grace = 24h;
+    }
+
+    # ============================================
+    # Grace period for stale content
+    # ============================================
     set beresp.grace = 6h;
+    
+    # ============================================
+    # Gzip handling
+    # ============================================
+    if (beresp.http.Content-Type ~ "(text|application/(json|javascript|xml))") {
+        set beresp.do_gzip = true;
+    }
+
+    return (deliver);
 }
 
 sub vcl_deliver {
-    # Add debug header
+    # ============================================
+    # Cache status headers
+    # ============================================
     if (obj.hits > 0) {
         set resp.http.X-Cache = "HIT";
+        set resp.http.X-Cache-Hits = obj.hits;
     } else {
         set resp.http.X-Cache = "MISS";
     }
+    
+    # ============================================
+    # Security headers
+    # ============================================
+    unset resp.http.X-Powered-By;
+    unset resp.http.Server;
+    unset resp.http.X-Varnish;
+    unset resp.http.Via;
+    
+    # Add security headers
+    set resp.http.X-Content-Type-Options = "nosniff";
+    set resp.http.X-Frame-Options = "SAMEORIGIN";
+    set resp.http.Referrer-Policy = "strict-origin-when-cross-origin";
+}
+
+sub vcl_synth {
+    if (resp.status == 200) {
+        set resp.http.Content-Type = "text/plain; charset=utf-8";
+        synthetic("OK");
+        return (deliver);
+    }
+}
+
+sub vcl_backend_error {
+    set beresp.http.Content-Type = "text/html; charset=utf-8";
+    synthetic({"<!DOCTYPE html>
+<html>
+<head><title>Service Temporarily Unavailable</title></head>
+<body>
+<h1>503 Service Temporarily Unavailable</h1>
+<p>Please try again later.</p>
+</body>
+</html>"});
+    return (deliver);
 }
