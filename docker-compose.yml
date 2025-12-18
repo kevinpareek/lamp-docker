@@ -133,7 +133,13 @@ services:
       STACK_MODE: "hybrid"
     depends_on:
       varnish:
-        condition: service_healthy
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost/nginx-health"]
+      <<: *healthcheck-defaults
+      timeout: 5s
+      start_period: 5s
+    logging: *default-logging
 
   # ============================================
   # Reverse Proxy (NGINX) - Thunder Mode
@@ -157,7 +163,7 @@ services:
       STACK_MODE: "thunder"
     depends_on:
       varnish-thunder:
-        condition: service_healthy
+        condition: service_started
 
   # ============================================
   # Certbot (SSL Generation)
@@ -411,7 +417,7 @@ services:
       - "./config/varnish/hybrid.vcl:/etc/varnish/default.vcl:ro"
     depends_on:
       webserver-apache:
-        condition: service_healthy
+        condition: service_started
 
   # ============================================
   # Varnish Cache (Thunder Mode)
@@ -425,7 +431,7 @@ services:
       - "./config/varnish/thunder.vcl:/etc/varnish/default.vcl:ro"
     depends_on:
       nginx-fpm:
-        condition: service_healthy
+        condition: service_started
 
   # ============================================
   # SSH Server (Per-App SSH/SFTP Access)

@@ -4,15 +4,23 @@ set -e
 # Ensure the destination directory exists
 mkdir -p /etc/nginx/http.d
 
+echo "Checking for SSL certificates..."
 # Check and generate default SSL if missing
 if [ ! -f /etc/nginx/ssl-sites/cert.pem ] || [ ! -f /etc/nginx/ssl-sites/cert-key.pem ]; then
-    echo "Default SSL certificates not found. Generating self-signed certificates..."
+    echo "Default SSL certificates not found in /etc/nginx/ssl-sites/. Generating self-signed certificates..."
     mkdir -p /etc/nginx/ssl-sites
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    if openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
         -keyout /etc/nginx/ssl-sites/cert-key.pem \
         -out /etc/nginx/ssl-sites/cert.pem \
-        -subj "/C=IN/ST=Rajasthan/L=Jaipur/O=TurboStack/OU=Local/CN=localhost"
-    echo "Self-signed SSL certificates generated."
+        -subj "/C=IN/ST=Rajasthan/L=Jaipur/O=TurboStack/OU=Local/CN=localhost"; then
+        echo "Self-signed SSL certificates generated successfully."
+        ls -la /etc/nginx/ssl-sites/
+    else
+        echo "ERROR: Failed to generate SSL certificates!"
+        exit 1
+    fi
+else
+    echo "SSL certificates already exist. Skipping generation."
 fi
 
 # Wait for Varnish backend to be ready
