@@ -8,10 +8,10 @@ x-logging: &default-logging
     max-file: "3"
 
 x-healthcheck-defaults: &healthcheck-defaults
-  interval: 30s
-  timeout: 10s
-  retries: 3
-  start_period: 10s
+  interval: 5s
+  timeout: 3s
+  retries: 4
+  start_period: 3s
 
 # Resource limits for production stability
 x-resource-limits: &resource-limits
@@ -45,6 +45,8 @@ x-varnish-common: &varnish-common
   healthcheck:
     test: ["CMD-SHELL", "varnishadm vcl.list || exit 1"]
     <<: *healthcheck-defaults
+    interval: 5s
+    start_period: 3s
   logging: *default-logging
 
 x-nginx-common: &nginx-common
@@ -74,8 +76,9 @@ x-nginx-common: &nginx-common
   healthcheck:
     test: ["CMD", "curl", "-sf", "http://localhost/nginx-health"]
     <<: *healthcheck-defaults
-    timeout: 5s
-    start_period: 5s
+    timeout: 3s
+    start_period: 3s
+    interval: 5s
   logging: *default-logging
 
 x-webserver-common: &webserver-common
@@ -137,8 +140,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost/nginx-health"]
       <<: *healthcheck-defaults
-      timeout: 5s
-      start_period: 5s
+      timeout: 3s
+      start_period: 3s
+      interval: 5s
     logging: *default-logging
 
   # ============================================
@@ -206,7 +210,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost/ -o /dev/null || exit 1"]
       <<: *healthcheck-defaults
-      start_period: 20s
+      start_period: 5s
+      interval: 5s
+      retries: 5
 
   # ============================================
   # PHP-FPM Webserver (Thunder Mode)
@@ -241,7 +247,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 || exit 1"]
       <<: *healthcheck-defaults
-      start_period: 20s
+      start_period: 5s
+      interval: 5s
+      retries: 5
 
   # ============================================
   # Internal Nginx for Thunder Mode (Varnish Backend)
@@ -270,7 +278,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost/nginx-health"]
       <<: *healthcheck-defaults
-      timeout: 5s
+      timeout: 3s
+      start_period: 3s
+      interval: 5s
     logging: *default-logging
 
   # ============================================
@@ -299,8 +309,9 @@ services:
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       <<: *healthcheck-defaults
-      start_period: 45s
-      retries: 5
+      start_period: 5s
+      interval: 5s
+      retries: 6
     logging: *default-logging
 
   # ============================================
@@ -328,10 +339,10 @@ services:
       - backend
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a $REDIS_PASSWORD} ping | grep -q PONG"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 3
-      start_period: 5s
+      start_period: 3s
     logging: *default-logging
 
   # ============================================
@@ -351,8 +362,9 @@ services:
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8025/"]
       <<: *healthcheck-defaults
-      timeout: 5s
-      start_period: 5s
+      timeout: 3s
+      start_period: 3s
+      interval: 5s
     logging: *default-logging
 
   # ============================================
@@ -383,7 +395,8 @@ services:
       test: ["CMD", "curl", "-sf", "http://localhost/"]
       <<: *healthcheck-defaults
       timeout: 5s
-      start_period: 10s
+      start_period: 5s
+      interval: 5s
     logging: *default-logging
 
   # ============================================
@@ -401,8 +414,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "echo stats | nc localhost 11211 | grep -q pid"]
       <<: *healthcheck-defaults
-      timeout: 5s
-      start_period: 5s
+      timeout: 3s
+      start_period: 3s
+      interval: 5s
     logging: *default-logging
 
   # ============================================
@@ -457,8 +471,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pgrep sshd || exit 1"]
       <<: *healthcheck-defaults
-      timeout: 5s
-      start_period: 10s
+      timeout: 3s
+      start_period: 5s
+      interval: 5s
     logging: *default-logging
 
 # ============================================

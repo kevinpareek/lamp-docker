@@ -1574,6 +1574,7 @@ open_browser() {
 
     # Open the domain in the default web browser
     info_message "Opening $domain in the default web browser..."
+    sleep 3
 
     case "$OS_TYPE" in
         mac)
