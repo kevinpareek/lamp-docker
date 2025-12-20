@@ -7,6 +7,8 @@
 /data/mysql/*
 /data/redis/*
 /data/certbot/*
+/data/config/*
+!/data/config/.gitkeep
 /logs/*
 /www/applications/*
 

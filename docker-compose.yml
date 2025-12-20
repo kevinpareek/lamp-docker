@@ -299,6 +299,8 @@ services:
       - "${MYSQL_LOG_DIR}:/var/log/mysql"
       - "./config/mariadb/my.cnf:/etc/mysql/conf.d/custom.cnf:ro"
       - "./bin/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro"
+      - "./bin/tbs-db-entrypoint.sh:/usr/local/bin/tbs-db-entrypoint.sh:ro"
+    entrypoint: ["/bin/sh", "/usr/local/bin/tbs-db-entrypoint.sh"]
     environment:
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
       MYSQL_DATABASE: "${MYSQL_DATABASE}"

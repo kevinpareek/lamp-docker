@@ -32,21 +32,32 @@ else
     exit 1
 fi
 
-# Auth (use env when available; support both MYSQL_ROOT_PASSWORD and MARIADB_ROOT_PASSWORD)
-ROOT_PW="${MYSQL_ROOT_PASSWORD:-${MARIADB_ROOT_PASSWORD:-}}"
-USER_OPT=""
-PASS_OPT=""
-if [ -n "$ROOT_PW" ]; then
+# Auth
+# Best practice: prefer the app/user credentials (least privilege) for readiness checks.
+# Fall back to root only if MYSQL_USER/MYSQL_PASSWORD are not available.
+HC_USER="${MYSQL_USER:-}"
+HC_PASS="${MYSQL_PASSWORD:-}"
+
+if [ -n "$HC_USER" ] && [ -n "$HC_PASS" ]; then
     USER_OPT="-u"
-    USER_VAL="root"
-    PASS_OPT="-p${ROOT_PW}"
+    USER_VAL="$HC_USER"
+    PASS_OPT="-p${HC_PASS}"
 else
-    USER_VAL=""
+    ROOT_PW="${MYSQL_ROOT_PASSWORD:-${MARIADB_ROOT_PASSWORD:-}}"
+    USER_OPT=""
+    PASS_OPT=""
+    if [ -n "$ROOT_PW" ]; then
+        USER_OPT="-u"
+        USER_VAL="root"
+        PASS_OPT="-p${ROOT_PW}"
+    else
+        USER_VAL=""
+    fi
 fi
 
 # Always ensure the server is reachable
 if [ -n "$USER_OPT" ]; then
-    $MYSQLADMIN ping -h localhost $USER_OPT "$USER_VAL" $PASS_OPT --silent
+    $MYSQLADMIN ping -h localhost $USER_OPT "$USER_VAL" "$PASS_OPT" --silent
 else
     $MYSQLADMIN ping -h localhost --silent
 fi
@@ -64,7 +75,7 @@ if [ "$want_innodb" = "true" ] || [ "$want_connect" = "true" ]; then
 
     # Basic connect check
     if [ -n "$USER_OPT" ]; then
-        $MYSQLCLI -h localhost $USER_OPT "$USER_VAL" $PASS_OPT -e "SELECT 1" >/dev/null 2>&1
+        $MYSQLCLI -h localhost $USER_OPT "$USER_VAL" "$PASS_OPT" -e "SELECT 1" >/dev/null 2>&1
     else
         $MYSQLCLI -h localhost -e "SELECT 1" >/dev/null 2>&1
     fi
@@ -73,7 +84,7 @@ fi
 if [ "$want_innodb" = "true" ]; then
     # Confirm InnoDB engine is available (YES or DEFAULT)
     if [ -n "$USER_OPT" ]; then
-        $MYSQLCLI -h localhost $USER_OPT "$USER_VAL" $PASS_OPT -Nse \
+        $MYSQLCLI -h localhost $USER_OPT "$USER_VAL" "$PASS_OPT" -Nse \
             "SELECT 1 FROM information_schema.engines WHERE engine='InnoDB' AND support IN ('YES','DEFAULT') LIMIT 1;" \
             | grep -q '^1$'
     else

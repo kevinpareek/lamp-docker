@@ -22,7 +22,7 @@ get_script_dir() {
         if [[ "$source" =~ ^[a-zA-Z]: ]]; then
             local drive="${source:0:1}"
             local path_part="${source:3}"
-            source="/${drive,,}$path_part"
+            source="/$(printf '%s' "$drive" | tr '[:upper:]' '[:lower:]')$path_part"
             source="${source//\\//}"
         fi
     fi
@@ -81,6 +81,580 @@ OS_TYPE=$(detect_os_type)
 # Check jq availability once at startup
 HAS_JQ=false
 command -v jq >/dev/null 2>&1 && HAS_JQ=true
+
+# ============================================
+# State File Path (config tracker)
+# ============================================
+TBS_STATE_DIR="$tbsPath/data/config"
+TBS_STATE_FILE="$TBS_STATE_DIR/.tbs_state"
+
+# ============================================
+# State Management Functions
+# ============================================
+
+# Simple encode/decode for state file (base64 + ROT13)
+# Prevents casual reading of sensitive data
+_state_encode() {
+    echo "$1" | base64 2>/dev/null | tr 'A-Za-z' 'N-ZA-Mn-za-m'
+}
+
+_state_decode() {
+    echo "$1" | tr 'N-ZA-Mn-za-m' 'A-Za-z' | base64 -d 2>/dev/null
+}
+
+# Get raw decoded state content (cached for performance)
+_get_state_content() {
+    [[ ! -f "$TBS_STATE_FILE" ]] && return 1
+    _state_decode "$(cat "$TBS_STATE_FILE")"
+}
+
+# Initialize state file with current .env values
+init_state_file() {
+    mkdir -p "$TBS_STATE_DIR" 2>/dev/null || true
+    
+    local ts=$(date +%s)
+    local state_content="MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:-docker}
+MYSQL_USER=${MYSQL_USER:-docker}
+MYSQL_DATABASE=${MYSQL_DATABASE:-docker}
+DATABASE=${DATABASE:-mariadb11.4}
+PHPVERSION=${PHPVERSION:-php8.4}
+STACK_MODE=${STACK_MODE:-hybrid}
+REDIS_PASSWORD=${REDIS_PASSWORD:-}
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-turbo-stack}
+STATE_INITIALIZED=$ts
+LAST_UPDATED=$ts"
+    
+    _state_encode "$state_content" > "$TBS_STATE_FILE"
+    chmod 600 "$TBS_STATE_FILE" 2>/dev/null || true
+}
+
+# Read a value from state file
+get_state_value() {
+    local key="$1"
+    local content
+    content=$(_get_state_content) || return 1
+    echo "$content" | grep "^${key}=" | head -1 | cut -d'=' -f2-
+}
+
+# Update state file with current env values
+update_state_file() {
+    mkdir -p "$TBS_STATE_DIR" 2>/dev/null || true
+    
+    # Preserve init timestamp if exists
+    local init_ts=$(get_state_value "STATE_INITIALIZED" 2>/dev/null)
+    [[ -z "$init_ts" ]] && init_ts=$(date +%s)
+    
+    local state_content="MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
+MYSQL_USER=${MYSQL_USER:-}
+MYSQL_DATABASE=${MYSQL_DATABASE:-}
+DATABASE=${DATABASE:-}
+PHPVERSION=${PHPVERSION:-}
+STACK_MODE=${STACK_MODE:-}
+REDIS_PASSWORD=${REDIS_PASSWORD:-}
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-}
+STATE_INITIALIZED=$init_ts
+LAST_UPDATED=$(date +%s)"
+    
+    _state_encode "$state_content" > "$TBS_STATE_FILE"
+}
+
+# Check if state file exists and is valid
+has_valid_state() {
+    [[ -f "$TBS_STATE_FILE" ]] || return 1
+    _get_state_content 2>/dev/null | grep -q "STATE_INITIALIZED=" || return 1
+}
+
+# ============================================
+# Critical Change Detection
+# ============================================
+
+# Variables that require rebuild when changed
+REBUILD_REQUIRED_VARS="PHPVERSION DATABASE STACK_MODE INSTALL_XDEBUG REDIS_PASSWORD COMPOSE_PROJECT_NAME"
+
+# Variables that require special handling (runtime password updates)
+CRITICAL_VARS="MYSQL_ROOT_PASSWORD MYSQL_PASSWORD MYSQL_USER"
+
+# Detect changes between .env and state file
+detect_config_changes() {
+    [[ ! -f "$TBS_STATE_FILE" ]] && return 0
+    
+    local content changes=""
+    content=$(_get_state_content) || return 0
+    
+    for var in $REBUILD_REQUIRED_VARS $CRITICAL_VARS; do
+        local current="${!var}"
+        local saved=$(echo "$content" | grep "^${var}=" | head -1 | cut -d'=' -f2-)
+        [[ -n "$saved" && "$current" != "$saved" ]] && changes+="$var\n"
+    done
+    
+    echo -e "$changes" | grep -v '^$'
+}
+
+# Check if rebuild is required
+needs_rebuild() {
+    local changes="$1"
+    [[ -z "$changes" ]] && return 1
+    
+    for var in $REBUILD_REQUIRED_VARS; do
+        echo "$changes" | grep -q "^${var}$" && return 0
+    done
+    return 1
+}
+
+# Compare database versions
+# Returns: "upgrade", "downgrade", "same", or "change"
+compare_db_versions() {
+    local old_db="$1" new_db="$2"
+    
+    [[ "$old_db" == "$new_db" ]] && echo "same" && return
+    
+    local old_type="${old_db%%[0-9]*}" new_type="${new_db%%[0-9]*}"
+    [[ "$old_type" != "$new_type" ]] && echo "change" && return
+    
+    # Convert versions to numbers for comparison
+    local old_num=$(echo "${old_db#$old_type}" | tr -d '.' | sed 's/^0*//')
+    local new_num=$(echo "${new_db#$new_type}" | tr -d '.' | sed 's/^0*//')
+    old_num=$(printf "%04d" "${old_num:-0}")
+    new_num=$(printf "%04d" "${new_num:-0}")
+    
+    if [[ "$new_num" -gt "$old_num" ]]; then echo "upgrade"
+    elif [[ "$new_num" -lt "$old_num" ]]; then echo "downgrade"
+    else echo "same"; fi
+}
+
+# ============================================
+# Database Operations
+# ============================================
+
+# Execute SQL command in database container
+_exec_db_sql() {
+    local password="$1" sql="$2"
+    local escaped_pass="${password//\'/\'\'}"
+    
+    docker compose exec -T dbhost sh -c "
+        if command -v mariadb >/dev/null 2>&1; then CLI='mariadb'; else CLI='mysql'; fi
+        \$CLI -uroot -p'${escaped_pass}' -e \"${sql}\" 2>/dev/null
+    "
+}
+
+# Update MySQL/MariaDB password
+_update_db_password() {
+    local root_pass="$1" user="$2" new_pass="$3"
+    
+    [[ -z "$user" || -z "$new_pass" ]] && return 1
+    
+    local escaped_new="${new_pass//\'/\'\'}"
+    local host="%" 
+    [[ "$user" == "root" ]] && host="localhost"
+    
+    local sql="ALTER USER '${user}'@'${host}' IDENTIFIED BY '${escaped_new}';"
+    [[ "$user" == "root" ]] && sql+=" ALTER USER 'root'@'%' IDENTIFIED BY '${escaped_new}';"
+    sql+=" FLUSH PRIVILEGES;"
+    
+    _exec_db_sql "$root_pass" "$sql"
+}
+
+# Update root password
+update_db_root_password() {
+    local old_pass="$1" new_pass="$2"
+    
+    [[ -z "$old_pass" || -z "$new_pass" || "$old_pass" == "$new_pass" ]] && return 0
+    
+    info_message "Updating database root password..."
+    if _update_db_password "$old_pass" "root" "$new_pass"; then
+        green_message "✅ Database root password updated!"
+        return 0
+    fi
+    error_message "Failed to update database root password."
+    return 1
+}
+
+# Update user password
+update_db_user_password() {
+    local root_pass="$1" user="$2" old_pass="$3" new_pass="$4"
+    
+    [[ -z "$user" || -z "$new_pass" || "$old_pass" == "$new_pass" ]] && return 0
+    
+    info_message "Updating database user '$user' password..."
+    if _update_db_password "$root_pass" "$user" "$new_pass"; then
+        green_message "✅ Database user '$user' password updated!"
+        return 0
+    fi
+    error_message "Failed to update user password."
+    return 1
+}
+
+# ============================================
+# Database Version Change Handler
+# ============================================
+
+# Handle database version changes (upgrade/downgrade)
+handle_db_version_change() {
+    local old_db="$1"
+    local new_db="$2"
+    local change_type=$(compare_db_versions "$old_db" "$new_db")
+    
+    case "$change_type" in
+        same)
+            return 0
+            ;;
+        upgrade|change)
+            echo ""
+            blue_message "═══════════════════════════════════════════════════════════════"
+            yellow_message "⚠️  DATABASE VERSION CHANGE DETECTED"
+            blue_message "═══════════════════════════════════════════════════════════════"
+            echo "  Current: $old_db"
+            echo "  New:     $new_db"
+            echo "  Type:    $(printf '%s' "$change_type" | tr '[:lower:]' '[:upper:]')"
+            echo ""
+            info_message "Creating automatic backup before version change..."
+            
+            # Create backup
+            if _auto_backup_database; then
+                green_message "✅ Backup created successfully!"
+                echo ""
+                info_message "Data directory will be preserved. If upgrade fails,"
+                info_message "you can restore from: data/backup/"
+                return 0
+            else
+                error_message "Backup failed!"
+                if ! yes_no_prompt "Continue without backup? (DANGEROUS)"; then
+                    # Revert .env to old version
+                    sed_i "s|^DATABASE=.*|DATABASE=$old_db|" "$tbsPath/.env"
+                    DATABASE="$old_db"
+                    yellow_message "Reverted to $old_db"
+                    # Not an error: user chose to keep current DB version.
+                    return 0
+                fi
+            fi
+            ;;
+        downgrade)
+            echo ""
+            red_message "╔════════════════════════════════════════════════════════════╗"
+            red_message "║         ⚠️  DATABASE DOWNGRADE DETECTED                    ║"
+            red_message "╚════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "  Current installed: $old_db"
+            echo "  Requested:         $new_db"
+            echo ""
+            red_message "⚠️  DOWNGRADE WARNING:"
+            echo "  • Data in /data/mysql/ was created with $old_db"
+            echo "  • $new_db may NOT be able to read this data"
+            echo "  • This can cause DATA LOSS or corruption"
+            echo ""
+            yellow_message "Options:"
+            echo "  1) Cancel - Keep using $old_db (RECOMMENDED)"
+            echo "  2) Fresh Start - Backup data, delete /data/mysql/, use $new_db"
+            echo ""
+            read -p "  Select [1-2] (default: 1): " choice
+            choice="${choice:-1}"
+            
+            case "$choice" in
+                2)
+                    echo ""
+                    red_message "⚠️  FINAL WARNING: This will:"
+                    echo "    • Backup ALL databases"
+                    echo "    • DELETE /data/mysql/ directory"
+                    echo "    • Start fresh with $new_db"
+                    echo "    • You'll need to manually restore databases"
+                    echo ""
+                    read -p "  Type 'DOWNGRADE' to confirm: " confirm
+                    
+                    if [[ "$confirm" == "DOWNGRADE" ]]; then
+                        info_message "Creating backup..."
+                        if _auto_backup_database; then
+                            green_message "✅ Backup saved!"
+                            
+                            info_message "Stopping database container..."
+                            docker compose stop dbhost 2>/dev/null || true
+                            docker compose rm -f dbhost 2>/dev/null || true
+                            
+                            info_message "Removing old data directory..."
+                            local mysql_data="${MYSQL_DATA_DIR:-./data/mysql}"
+                            rm -rf "$mysql_data"/*
+                            
+                            green_message "✅ Ready for fresh $new_db installation"
+                            info_message "Restore databases manually from: data/backup/"
+                            return 0
+                        else
+                            error_message "Backup failed! Aborting downgrade."
+                            sed_i "s|^DATABASE=.*|DATABASE=$old_db|" "$tbsPath/.env"
+                            DATABASE="$old_db"
+                            # Continue with current DB version instead of aborting start.
+                            return 0
+                        fi
+                    else
+                        yellow_message "Downgrade cancelled."
+                        sed_i "s|^DATABASE=.*|DATABASE=$old_db|" "$tbsPath/.env"
+                        DATABASE="$old_db"
+                        # Continue with current DB version instead of aborting start.
+                        return 0
+                    fi
+                    ;;
+                *)
+                    yellow_message "Keeping $old_db"
+                    sed_i "s|^DATABASE=.*|DATABASE=$old_db|" "$tbsPath/.env"
+                    DATABASE="$old_db"
+                    # Continue with current DB version instead of aborting start.
+                    return 0
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+# Auto backup all databases (for version changes)
+_auto_backup_database() {
+    local backup_dir="$tbsPath/data/backup"
+    local timestamp=$(date +"%Y%m%d_%H%M%S")
+    local backup_file="$backup_dir/db_auto_backup_${timestamp}.sql"
+    
+    mkdir -p "$backup_dir"
+    
+    # Check if database is running
+    if ! is_service_running "dbhost"; then
+        yellow_message "Database not running, skipping backup."
+        return 0
+    fi
+    
+    # Get current root password from state or env
+    local root_pass=$(get_state_value "MYSQL_ROOT_PASSWORD")
+    [[ -z "$root_pass" ]] && root_pass="${MYSQL_ROOT_PASSWORD:-root}"
+    local escaped_pass="${root_pass//\'/\'\'}"
+    
+    # Dump all databases
+    if docker compose exec -T dbhost sh -c "
+        if command -v mariadb-dump >/dev/null 2>&1; then CMD='mariadb-dump'; else CMD='mysqldump'; fi
+        \$CMD -uroot -p'${escaped_pass}' --all-databases --single-transaction --routines --triggers --events 2>/dev/null
+    " > "$backup_file" 2>/dev/null && [[ -s "$backup_file" ]]; then
+        gzip "$backup_file" 2>/dev/null || true
+        [[ -f "${backup_file}.gz" ]] && backup_file="${backup_file}.gz"
+        green_message "Backup saved: $(basename "$backup_file")"
+        return 0
+    fi
+    
+    rm -f "$backup_file" "${backup_file}.gz" 2>/dev/null
+    return 1
+}
+
+# ============================================
+# Pre-Start Configuration Check
+# ============================================
+
+# Main function to check and handle config changes before start
+check_and_apply_config_changes() {
+    local force_rebuild=false
+    local changes=""
+    
+    # First run - initialize state only if actual DB data exists
+    if ! has_valid_state; then
+        local mysql_data="${MYSQL_DATA_DIR:-./data/mysql}"
+        # Check for actual MySQL/MariaDB data files (ibdata1 = InnoDB data file)
+        if [[ -f "$mysql_data/ibdata1" ]]; then
+            yellow_message "Existing database detected. Initializing state tracker..."
+            init_state_file
+        else
+            # Fresh install - no data yet, init state and skip change detection
+            init_state_file
+            return 0
+        fi
+    fi
+    
+    # Skip change detection if no actual database exists yet
+    local mysql_data="${MYSQL_DATA_DIR:-./data/mysql}"
+    if [[ ! -f "$mysql_data/ibdata1" ]]; then
+        # No database data - just update state with current env values
+        update_state_file
+        return 0
+    fi
+    
+    # Detect changes
+    changes=$(detect_config_changes)
+    
+    [[ -z "$changes" ]] && return 0
+    
+    echo ""
+    blue_message "═══════════════════════════════════════════════════════════════"
+    yellow_message "📋 Configuration Changes Detected"
+    blue_message "═══════════════════════════════════════════════════════════════"
+    
+    # Process each change
+    local db_changed=false
+    local old_db=$(get_state_value "DATABASE")
+    local old_root_pass=$(get_state_value "MYSQL_ROOT_PASSWORD")
+    local old_user_pass=$(get_state_value "MYSQL_PASSWORD")
+    
+    while IFS= read -r var; do
+        [[ -z "$var" ]] && continue
+        
+        local old_val=$(get_state_value "$var")
+        local new_val="${!var}"
+        
+        echo "  • $var: $old_val → $new_val"
+        
+        case "$var" in
+            DATABASE)
+                db_changed=true
+                ;;
+            PHPVERSION|STACK_MODE|INSTALL_XDEBUG)
+                force_rebuild=true
+                ;;
+            REDIS_PASSWORD)
+                force_rebuild=true
+                yellow_message "  ↳ Redis password changed. Container will be rebuilt."
+                ;;
+            COMPOSE_PROJECT_NAME)
+                force_rebuild=true
+                yellow_message "  ↳ Project name changed. All containers will be rebuilt."
+                ;;
+        esac
+    done <<< "$changes"
+    
+    echo ""
+    
+    # Handle database version change FIRST
+    if [[ "$db_changed" == "true" ]]; then
+        if ! handle_db_version_change "$old_db" "$DATABASE"; then
+            return 1
+        fi
+        force_rebuild=true
+    fi
+    
+    # Handle password changes (only if DB is running)
+    if is_service_running "dbhost"; then
+        # Root password change
+        if echo "$changes" | grep -q "^MYSQL_ROOT_PASSWORD$"; then
+            if ! update_db_root_password "$old_root_pass" "$MYSQL_ROOT_PASSWORD"; then
+                error_message "Could not update root password. Using old password."
+                MYSQL_ROOT_PASSWORD="$old_root_pass"
+                sed_i "s|^MYSQL_ROOT_PASSWORD=.*|MYSQL_ROOT_PASSWORD=$old_root_pass|" "$tbsPath/.env"
+            fi
+        fi
+        
+        # User password change
+        if echo "$changes" | grep -q "^MYSQL_PASSWORD$"; then
+            # Use the current (possibly just updated) root password
+            local current_root="${MYSQL_ROOT_PASSWORD}"
+            if ! update_db_user_password "$current_root" "${MYSQL_USER:-docker}" "$old_user_pass" "$MYSQL_PASSWORD"; then
+                error_message "Could not update user password."
+            fi
+        fi
+    else
+        # DB not running - password changes need special handling
+        if echo "$changes" | grep -q "MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD"; then
+            yellow_message "Database not running. Password will be updated on next start."
+            
+            # Save old password for update after container starts
+            export TBS_PENDING_ROOT_PASS_UPDATE="$old_root_pass"
+            export TBS_PENDING_USER_PASS_UPDATE="$old_user_pass"
+        fi
+    fi
+    
+    # Check if rebuild needed
+    if [[ "$force_rebuild" == "true" ]] || needs_rebuild "$changes"; then
+        echo ""
+        yellow_message "⚠️  These changes require a REBUILD"
+        info_message "Containers will be rebuilt with new configuration..."
+        export TBS_FORCE_REBUILD=true
+    fi
+    
+    # Update state file - BUT preserve old passwords if pending update
+    # Password state will be updated ONLY after successful password change
+    if [[ -n "${TBS_PENDING_ROOT_PASS_UPDATE:-}" || -n "${TBS_PENDING_USER_PASS_UPDATE:-}" ]]; then
+        # Don't update password values in state yet - they haven't been applied
+        # Only update non-password values
+        _update_state_non_password_vars
+    else
+        update_state_file
+    fi
+    
+    return 0
+}
+
+# Update only non-password variables in state (for pending password scenarios)
+_update_state_non_password_vars() {
+    [[ ! -f "$TBS_STATE_FILE" ]] && return
+    
+    local content
+    content=$(_get_state_content) || return
+    
+    # Update only non-sensitive vars
+    for key in DATABASE PHPVERSION STACK_MODE COMPOSE_PROJECT_NAME; do
+        local value="${!key}"
+        if echo "$content" | grep -q "^${key}="; then
+            content=$(echo "$content" | sed "s|^${key}=.*|${key}=${value}|")
+        fi
+    done
+    
+    content=$(echo "$content" | sed "s|^LAST_UPDATED=.*|LAST_UPDATED=$(date +%s)|")
+    _state_encode "$content" > "$TBS_STATE_FILE"
+}
+
+# Handle pending password updates after container starts
+apply_pending_password_updates() {
+    # Check if any pending updates
+    [[ -z "${TBS_PENDING_ROOT_PASS_UPDATE:-}" && -z "${TBS_PENDING_USER_PASS_UPDATE:-}" ]] && return 0
+    
+    # Wait for DB to be healthy
+    local max_wait=60
+    local waited=0
+    
+    info_message "Waiting for database to be ready..."
+    while ! is_service_running "dbhost" && [[ $waited -lt $max_wait ]]; do
+        sleep 2
+        waited=$((waited + 2))
+    done
+    
+    # Check if DB actually started
+    if ! is_service_running "dbhost"; then
+        error_message "Database failed to start. Password update cancelled."
+        error_message "Old password preserved in state file."
+        # Don't update state - keep old password
+        unset TBS_PENDING_ROOT_PASS_UPDATE TBS_PENDING_USER_PASS_UPDATE
+        return 1
+    fi
+    
+    # Additional wait for DB to be fully ready
+    sleep 3
+    
+    local password_updated=false
+    
+    # Apply pending root password update
+    if [[ -n "${TBS_PENDING_ROOT_PASS_UPDATE:-}" ]]; then
+        info_message "Applying pending root password update..."
+        if update_db_root_password "$TBS_PENDING_ROOT_PASS_UPDATE" "$MYSQL_ROOT_PASSWORD"; then
+            password_updated=true
+            unset TBS_PENDING_ROOT_PASS_UPDATE
+        else
+            error_message "Failed to update root password. Reverting .env..."
+            sed_i "s|^MYSQL_ROOT_PASSWORD=.*|MYSQL_ROOT_PASSWORD=$TBS_PENDING_ROOT_PASS_UPDATE|" "$tbsPath/.env"
+            MYSQL_ROOT_PASSWORD="$TBS_PENDING_ROOT_PASS_UPDATE"
+            unset TBS_PENDING_ROOT_PASS_UPDATE
+            # Don't update state - keep old values
+            return 1
+        fi
+    fi
+    
+    # Apply pending user password update
+    if [[ -n "${TBS_PENDING_USER_PASS_UPDATE:-}" ]]; then
+        info_message "Applying pending user password update..."
+        if update_db_user_password "$MYSQL_ROOT_PASSWORD" "${MYSQL_USER:-docker}" "$TBS_PENDING_USER_PASS_UPDATE" "$MYSQL_PASSWORD"; then
+            password_updated=true
+            unset TBS_PENDING_USER_PASS_UPDATE
+        else
+            error_message "Failed to update user password."
+            unset TBS_PENDING_USER_PASS_UPDATE
+        fi
+    fi
+    
+    # Update state ONLY if password was successfully updated
+    if [[ "$password_updated" == "true" ]]; then
+        update_state_file
+        green_message "✅ State file updated with new passwords."
+    fi
+}
 
 print_header() {
     echo -e "${BLUE}============================================================${NC}"
@@ -229,7 +803,7 @@ install_tbs_command() {
         if [[ "$normalized_path" =~ ^[a-zA-Z]: ]]; then
             local drive="${normalized_path:0:1}"
             local path_part="${normalized_path:3}"
-            normalized_path="/${drive,,}$path_part"
+            normalized_path="/$(printf '%s' "$drive" | tr '[:upper:]' '[:lower:]')$path_part"
             normalized_path="${normalized_path//\\//}"
         fi
         # Remove any double slashes
@@ -265,7 +839,7 @@ if [[ -f "$CONFIG_FILE" ]]; then
         if [[ "$TBS_SCRIPT" =~ ^[a-zA-Z]: ]]; then
             DRIVE="${TBS_SCRIPT:0:1}"
             PATH_PART="${TBS_SCRIPT:3}"
-            TBS_SCRIPT="/${DRIVE,,}$PATH_PART"
+            TBS_SCRIPT="/$(printf '%s' "$DRIVE" | tr '[:upper:]' '[:lower:]')$PATH_PART"
             TBS_SCRIPT="${TBS_SCRIPT//\\//}"
         fi
         # Remove double slashes
@@ -473,8 +1047,8 @@ PS_EOF
             info_message "Or restart your terminal."
             echo ""
             yellow_message "Note: You can also use the full path: $wrapper_path"
-        else
-            green_message "✓ 'tbs' command is ready to use!"
+        # else
+        #     green_message "✓ 'tbs' command is ready to use!"
         fi
     fi
     echo ""
@@ -550,17 +1124,17 @@ generate_strong_password() {
     
     # Try openssl first (most reliable cross-platform)
     if command_exists openssl; then
-        password=$(openssl rand -base64 48 2>/dev/null | tr -dc 'A-Za-z0-9!@$%^&*_+' | head -c "$length")
+        password=$(openssl rand -base64 48 2>/dev/null | tr -dc 'A-Za-z0-9!@$%^&*' | head -c "$length")
     fi
     
     # Fallback to /dev/urandom
     if [[ -z "$password" || ${#password} -lt $length ]]; then
-        password=$(LC_ALL=C tr -dc 'A-Za-z0-9!@$%&*' < /dev/urandom 2>/dev/null | head -c "$length" || true)
+        password=$(LC_ALL=C tr -dc 'A-Za-z0-9!@$%^&*' < /dev/urandom 2>/dev/null | head -c "$length" || true)
     fi
     
     # Ultimate fallback using $RANDOM (bash built-in)
     if [[ -z "$password" || ${#password} -lt $length ]]; then
-        local chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@$%&*'
+        local chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@$%^&*'
         password=""
         for ((i=0; i<length; i++)); do
             password+="${chars:RANDOM%${#chars}:1}"
@@ -572,7 +1146,7 @@ generate_strong_password() {
     [[ ! "$password" =~ [A-Z] ]] && needs_fix=true
     [[ ! "$password" =~ [a-z] ]] && needs_fix=true
     [[ ! "$password" =~ [0-9] ]] && needs_fix=true
-    [[ ! "$password" =~ [!@$%^\&*_+] ]] && needs_fix=true
+    [[ ! "$password" =~ [!@$%^\&*] ]] && needs_fix=true
     
     if [[ "$needs_fix" == "true" ]]; then
         # Add missing character types
@@ -582,7 +1156,7 @@ generate_strong_password() {
             lower=$(openssl rand -base64 4 2>/dev/null | tr -dc 'a-z' | head -c 1 || echo 'z')
             number=$(openssl rand -base64 4 2>/dev/null | tr -dc '0-9' | head -c 1 || echo '7')
         fi
-        special=$(echo '!@$%^&*_+' | fold -w1 2>/dev/null | shuf 2>/dev/null | head -c 1 || echo '!')
+        special=$(echo '!@$%^&*' | fold -w1 2>/dev/null | shuf 2>/dev/null | head -c 1 || echo '!')
         password="${password:0:$((length-4))}${upper}${lower}${number}${special}"
     fi
     
@@ -1958,6 +2532,19 @@ tbs_start() {
         exit 1
     fi
     
+    # Check and handle config changes (password updates, DB version changes, etc.)
+    if ! check_and_apply_config_changes; then
+        error_message "Configuration check failed. Please resolve issues and try again."
+        exit 1
+    fi
+    
+    # Check if rebuild is required due to config changes
+    local do_rebuild=false
+    if [[ "${TBS_FORCE_REBUILD:-false}" == "true" ]]; then
+        do_rebuild=true
+        unset TBS_FORCE_REBUILD
+    fi
+    
     # Fix line endings before starting (prevents container failures)
     fix_line_endings
     
@@ -1968,10 +2555,27 @@ tbs_start() {
     info_message "Starting Turbo Stack (${APP_ENV:-development} mode, ${STACK_MODE:-hybrid} stack)..."
     
     PROFILES=$(build_profiles)
-
-    if ! docker compose $PROFILES up -d; then
-        error_message "Failed to start the Turbo Stack."
-        exit 1
+    
+    # Rebuild if required, otherwise just start
+    if [[ "$do_rebuild" == "true" ]]; then
+        yellow_message "Rebuilding containers due to configuration changes..."
+        ALL_PROFILES=$(get_all_profiles)
+        docker compose $ALL_PROFILES down --remove-orphans 2>/dev/null || true
+        cleanup_stack_networks
+        if ! docker compose $PROFILES up -d --build; then
+            error_message "Failed to rebuild the Turbo Stack."
+            exit 1
+        fi
+    else
+        if ! docker compose $PROFILES up -d; then
+            error_message "Failed to start the Turbo Stack."
+            exit 1
+        fi
+    fi
+    
+    # Apply any pending password updates after containers are running
+    if [[ -n "${TBS_PENDING_ROOT_PASS_UPDATE:-}" || -n "${TBS_PENDING_USER_PASS_UPDATE:-}" ]]; then
+        apply_pending_password_updates
     fi
 
     green_message "Turbo Stack is running"
@@ -2096,12 +2700,44 @@ tbs() {
 
     # Restart the Turbo Stack
     restart)
+        # Validate configuration first
+        if ! validate_env_config; then
+            exit 1
+        fi
+        
+        # Check and handle config changes
+        if ! check_and_apply_config_changes; then
+            error_message "Configuration check failed. Please resolve issues and try again."
+            exit 1
+        fi
+        
+        # Check if rebuild is required
+        local do_rebuild=false
+        if [[ "${TBS_FORCE_REBUILD:-false}" == "true" ]]; then
+            do_rebuild=true
+            unset TBS_FORCE_REBUILD
+        fi
+        
+        fix_line_endings
+        ensure_docker_running
+        
         PROFILES=$(build_profiles)
-        # Always tear down everything regardless of profile before restart
         ALL_PROFILES=$(get_all_profiles)
         docker compose $ALL_PROFILES down --remove-orphans
         cleanup_stack_networks
-        docker compose $PROFILES up -d
+        
+        if [[ "$do_rebuild" == "true" ]]; then
+            yellow_message "Rebuilding containers due to configuration changes..."
+            docker compose $PROFILES up -d --build
+        else
+            docker compose $PROFILES up -d
+        fi
+        
+        # Apply any pending password updates
+        if [[ -n "${TBS_PENDING_ROOT_PASS_UPDATE:-}" || -n "${TBS_PENDING_USER_PASS_UPDATE:-}" ]]; then
+            apply_pending_password_updates
+        fi
+        
         green_message "Turbo Stack restarted."
         ;;
 
@@ -2111,6 +2747,13 @@ tbs() {
         if ! validate_env_config; then
             exit 1
         fi
+        
+        # Check and handle config changes (especially DB version changes)
+        if ! check_and_apply_config_changes; then
+            error_message "Configuration check failed. Please resolve issues and try again."
+            exit 1
+        fi
+        
         # Fix line endings before building (prevents container failures)
         fix_line_endings
         ensure_docker_running
@@ -2120,6 +2763,15 @@ tbs() {
         docker compose $ALL_PROFILES down --remove-orphans
         cleanup_stack_networks
         docker compose $PROFILES up -d --build
+        
+        # Apply any pending password updates after rebuild
+        if [[ -n "${TBS_PENDING_ROOT_PASS_UPDATE:-}" || -n "${TBS_PENDING_USER_PASS_UPDATE:-}" ]]; then
+            apply_pending_password_updates
+        fi
+        
+        # Update state file after successful build
+        update_state_file
+        
         green_message "Turbo Stack rebuilt and running."
         ;;
 
@@ -3131,6 +3783,23 @@ POOL
             yellow_message "  .env file not found"
         fi
         echo ""
+        blue_message "State Tracking"
+        if has_valid_state; then
+            local saved_db=$(get_state_value "DATABASE")
+            local saved_php=$(get_state_value "PHPVERSION")
+            local changes=$(detect_config_changes)
+            echo -e "  State File: ${GREEN}Active${NC}"
+            echo "  Tracked DB: $saved_db"
+            echo "  Tracked PHP: $saved_php"
+            if [[ -n "$changes" ]]; then
+                echo -e "  Pending Changes: ${YELLOW}Yes${NC} (run 'tbs state diff')"
+            else
+                echo -e "  Pending Changes: ${GREEN}None${NC}"
+            fi
+        else
+            echo -e "  State File: ${YELLOW}Not initialized${NC}"
+        fi
+        echo ""
         blue_message "Service Status"
         docker compose ps
         ;;
@@ -3426,6 +4095,95 @@ POOL
         esac
         ;;
 
+    # State management command
+    state)
+        local state_action="${2:-show}"
+        case "$state_action" in
+            show|status)
+                if has_valid_state; then
+                    echo ""
+                    blue_message "╔══════════════════════════════════════════════════════════════╗"
+                    blue_message "║                    📋 TBS State File                         ║"
+                    blue_message "╚══════════════════════════════════════════════════════════════╝"
+                    echo ""
+                    echo "  File: $TBS_STATE_FILE"
+                    echo ""
+                    info_message "Tracked Configuration:"
+                    for var in DATABASE PHPVERSION STACK_MODE MYSQL_ROOT_PASSWORD MYSQL_USER MYSQL_PASSWORD MYSQL_DATABASE REDIS_PASSWORD COMPOSE_PROJECT_NAME; do
+                        local val=$(get_state_value "$var")
+                        # Mask passwords
+                        if [[ "$var" == *PASSWORD* && -n "$val" ]]; then
+                            local masked="${val:0:3}***${val: -2}"
+                            echo "    $var: $masked"
+                        else
+                            echo "    $var: ${val:-<not set>}"
+                        fi
+                    done
+                    echo ""
+                    local init_time=$(get_state_value "STATE_INITIALIZED")
+                    local update_time=$(get_state_value "LAST_UPDATED")
+                    [[ -n "$init_time" ]] && echo "  Initialized: $(date -r "$init_time" 2>/dev/null || date -d "@$init_time" 2>/dev/null || echo "$init_time")"
+                    [[ -n "$update_time" ]] && echo "  Last Updated: $(date -r "$update_time" 2>/dev/null || date -d "@$update_time" 2>/dev/null || echo "$update_time")"
+                    echo ""
+                else
+                    yellow_message "No state file found. Run 'tbs start' to initialize."
+                fi
+                ;;
+            reset|clear)
+                if [[ -f "$TBS_STATE_FILE" ]]; then
+                    rm -f "$TBS_STATE_FILE"
+                    green_message "State file cleared."
+                    info_message "New state will be created on next start."
+                else
+                    yellow_message "No state file to clear."
+                fi
+                ;;
+            init)
+                if [[ -f "$tbsPath/.env" ]]; then
+                    load_env_file "$tbsPath/.env" true
+                    init_state_file
+                    green_message "State file initialized from current .env"
+                else
+                    error_message "No .env file found."
+                fi
+                ;;
+            diff|changes)
+                if has_valid_state; then
+                    local changes=$(detect_config_changes)
+                    if [[ -n "$changes" ]]; then
+                        echo ""
+                        yellow_message "⚠️  Pending Configuration Changes:"
+                        echo ""
+                        while IFS= read -r var; do
+                            [[ -z "$var" ]] && continue
+                            local old_val=$(get_state_value "$var")
+                            local new_val="${!var}"
+                            # Mask passwords
+                            if [[ "$var" == *PASSWORD* ]]; then
+                                [[ -n "$old_val" ]] && old_val="${old_val:0:3}***"
+                                [[ -n "$new_val" ]] && new_val="${new_val:0:3}***"
+                            fi
+                            echo "  • $var: $old_val → $new_val"
+                        done <<< "$changes"
+                        echo ""
+                        info_message "These changes will be applied on next start/restart."
+                    else
+                        green_message "No pending configuration changes."
+                    fi
+                else
+                    yellow_message "No state file. Cannot detect changes."
+                fi
+                ;;
+            *)
+                echo "Usage: tbs state [show|reset|init|diff]"
+                echo "  show  - Display current state (default)"
+                echo "  reset - Clear state file"
+                echo "  init  - Initialize state from current .env"
+                echo "  diff  - Show pending changes"
+                ;;
+        esac
+        ;;
+
     "")
         interactive_menu
         ;;
@@ -3438,6 +4196,7 @@ POOL
             echo "Projects: tbs create [laravel|wordpress|symfony|blank] <name>"
             echo "Tools:    shell [php|mysql|redis], pma, mail, code, logs [service]"
             echo "SSH:      sshadmin [show|password]"
+            echo "State:    state [show|reset|init|diff]"
             echo "Other:    backup, restore, ssl-localhost"
             ;;
         *)
