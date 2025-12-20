@@ -460,6 +460,31 @@ Add this to `.vscode/launch.json`:
 
 ---
 
+## 🔧 Troubleshooting
+
+### Container Health Check Failures
+
+If containers show as "unhealthy" with errors like `exec ...: no such file or directory`, this is usually a line ending issue (CRLF vs LF).
+
+**Quick Fix:**
+```bash
+tbs fix-line-endings  # Auto-fixes line endings
+tbs build             # Rebuilds containers
+```
+
+> **Note:** `tbs start` and `tbs build` automatically fix line endings, so this issue should rarely occur.
+
+### Other Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| **Port already in use** | Change ports in `.env` or stop conflicting services |
+| **Permission denied** | On Linux: `sudo usermod -aG docker $USER` (then log out/in) |
+| **SSL certificate errors** | Run `tbs ssl generate-default` for local development |
+| **Database connection failed** | Verify `MYSQL_ROOT_PASSWORD` in `.env` matches your app config |
+
+---
+
 ## 🔮 Coming Soon
 
 We're constantly improving Turbo Stack! Here's what's on our roadmap:
