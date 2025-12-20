@@ -6,6 +6,22 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.0.0
 
 ---
 
+## [1.0.2] - 2025-12-20
+
+### 🚀 Added
+- **State Tracking**: Added a lightweight state tracker (`data/config/.tbs_state`) to detect config changes between runs.
+- **State CLI**: New `tbs state` command (`show|reset|init|diff`) to inspect and manage tracked configuration.
+- **DB Password Guard**: Added a MySQL/MariaDB entrypoint wrapper (`bin/tbs-db-entrypoint.sh`) to rotate the root password when the environment password changes.
+- **Auto Backup on DB Change**: Automatically creates a database backup before database version changes (upgrade/change), and adds safer flows for downgrades.
+
+### ✨ Changed
+- **Windows Compatibility**: Improved path normalization and `tbs` command installation for Git Bash/Windows while keeping macOS/Linux behavior.
+- **Startup Behavior**: `tbs start/restart/build` now detects critical config changes and triggers rebuilds only when needed.
+- **Line Endings Hardening**: Enforced LF line endings for shell/Docker files and added automatic fixes to reduce container start failures on Windows.
+
+### 🐛 Fixed
+- **DB Healthcheck Auth**: Healthcheck prefers non-root credentials when available and improves argument handling.
+
 ## [1.0.1] - 2025-12-18
 
 ### 🚀 Added

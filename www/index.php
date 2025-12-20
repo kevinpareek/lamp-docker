@@ -775,7 +775,7 @@ if (!$is_production) {
 
         <footer>
             <p>
-                <a href="https://github.com/kevinpareek/turbo-stack" target="_blank">PHP Turbo Stack v1.0.1</a>
+                <a href="https://github.com/kevinpareek/turbo-stack" target="_blank">PHP Turbo Stack v1.0.2</a>
                 <?php if (!$is_production): ?>
                 &nbsp;|&nbsp; Run <code>tbs help</code> for commands
                 &nbsp;|&nbsp; <code>tbs app add myapp</code> to create an app

@@ -1,6 +1,6 @@
 # 🚀 PHP Turbo Stack (Docker LAMP & LEMP)
 
-[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/kevinpareek/turbo-stack/releases)
+[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](https://github.com/kevinpareek/turbo-stack/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)
 [![PHP](https://img.shields.io/badge/PHP-7.4--8.4-777BB4.svg)](https://www.php.net/)
