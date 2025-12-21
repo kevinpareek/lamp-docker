@@ -8,7 +8,25 @@
 
 // Get environment settings
 $app_env = getenv('APP_ENV') ?: 'development';
-$installation_type = getenv('INSTALLATION_TYPE') ?: 'local';
+$installation_type = getenv('INSTALLATION_TYPE');
+
+// Auto-detect installation type if not set
+if (!$installation_type) {
+    $server_ip = $_SERVER['SERVER_ADDR'] ?? '127.0.0.1';
+    // Check if IP is public
+    $is_public = filter_var(
+        $server_ip, 
+        FILTER_VALIDATE_IP, 
+        FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+    );
+    
+    // Also check for common local hostnames
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    $is_local_host = preg_match('/(localhost|\.local|\.test|\.example)$/i', $host);
+    
+    $installation_type = ($is_public && !$is_local_host) ? 'live' : 'local';
+}
+
 $stack_mode = getenv('STACK_MODE') ?: 'hybrid';
 $php_version = getenv('PHPVERSION') ?: 'php8.3';
 $database_type = getenv('DATABASE') ?: 'mysql8.0';
@@ -129,25 +147,30 @@ if (extension_loaded('mysqli')) {
 }
 
 // Check Varnish (via HTTP header or direct connection)
+$cache_header = $_SERVER['HTTP_X_CACHE'] ?? 'N/A';
+$varnish_detected = ($cache_header !== 'N/A');
+
+$varnish_status = false;
+$varnish_socket = @fsockopen('varnish', 80, $errno, $errstr, 0.5);
+if ($varnish_socket) {
+    $varnish_status = true;
+    fclose($varnish_socket);
+} elseif ($varnish_detected) {
+    $varnish_status = true;
+}
+
+// Caching is only active in production mode in this stack
+// User logic: HIT = Active, MISS = Deactive
+$is_caching_active = ($cache_header === 'HIT');
+
 $varnish_info = [];
 if (!$is_production) {
-    // Check if request came through Varnish
-    $varnish_status = isset($_SERVER['HTTP_X_VARNISH']) || 
-                      (isset($_SERVER['HTTP_VIA']) && stripos($_SERVER['HTTP_VIA'], 'varnish') !== false);
-    
-    // Try to connect to Varnish directly
-    if (!$varnish_status) {
-        $varnish_socket = @fsockopen('varnish', 80, $errno, $errstr, 1);
-        if ($varnish_socket) {
-            $varnish_status = true;
-            fclose($varnish_socket);
-        }
-    }
-    
     $varnish_info = [
         'enabled' => $varnish_status,
+        'detected' => $varnish_detected,
+        'caching' => $is_caching_active,
         'mode' => $stack_mode,
-        'cache_header' => $_SERVER['HTTP_X_CACHE'] ?? 'N/A',
+        'cache_header' => $cache_header,
     ];
 }
 
@@ -461,9 +484,16 @@ if (!$is_production) {
                 </div>
                 <div class="info-row">
                     <span class="info-label">Varnish Cache</span>
-                    <span class="status <?= $varnish_status ? 'status-ok' : 'status-error' ?>">
-                        <?= $varnish_status ? '● Active' : '○ Inactive' ?>
-                    </span>
+                    <div style="text-align: right;">
+                        <span class="status <?= $varnish_status ? 'status-ok' : 'status-error' ?>">
+                            <?= $varnish_status ? '● Connected' : '○ Disconnected' ?>
+                        </span>
+                        <?php if ($varnish_status): ?>
+                            <div style="font-size: 0.7rem; margin-top: 0.2rem; color: <?= $is_caching_active ? 'var(--success)' : 'var(--warning)' ?>;">
+                                <?= $is_caching_active ? '● Caching Active (HIT)' : '○ Caching Deactive (MISS)' ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Memcached</span>
@@ -650,9 +680,21 @@ if (!$is_production) {
             <div class="card">
                 <h2>⚡ Varnish Cache</h2>
                 <div class="info-row">
-                    <span class="info-label">Status</span>
+                    <span class="info-label">Service Status</span>
                     <span class="status <?= $varnish_status ? 'status-ok' : 'status-error' ?>">
-                        <?= $varnish_status ? '● Active' : '○ Inactive' ?>
+                        <?= $varnish_status ? '● Connected' : '○ Disconnected' ?>
+                    </span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Cache Result</span>
+                    <span class="status <?= $is_caching_active ? 'status-ok' : 'status-error' ?>">
+                        <?= $is_caching_active ? '● Active (HIT)' : '○ Deactive (MISS)' ?>
+                    </span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Current Request</span>
+                    <span class="info-value" style="color: <?= $varnish_detected ? 'var(--success)' : 'var(--error)' ?>;">
+                        <?= $varnish_detected ? 'Via Varnish Proxy' : 'Direct Access (Bypassed)' ?>
                     </span>
                 </div>
                 <div class="info-row">

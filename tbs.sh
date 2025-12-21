@@ -120,6 +120,8 @@ MYSQL_DATABASE=${MYSQL_DATABASE:-docker}
 DATABASE=${DATABASE:-mariadb11.4}
 PHPVERSION=${PHPVERSION:-php8.4}
 STACK_MODE=${STACK_MODE:-hybrid}
+INSTALLATION_TYPE=${INSTALLATION_TYPE:-local}
+APP_ENV=${APP_ENV:-development}
 REDIS_PASSWORD=${REDIS_PASSWORD:-}
 COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-turbo-stack}
 STATE_INITIALIZED=$ts
@@ -152,6 +154,8 @@ MYSQL_DATABASE=${MYSQL_DATABASE:-}
 DATABASE=${DATABASE:-}
 PHPVERSION=${PHPVERSION:-}
 STACK_MODE=${STACK_MODE:-}
+INSTALLATION_TYPE=${INSTALLATION_TYPE:-}
+APP_ENV=${APP_ENV:-}
 REDIS_PASSWORD=${REDIS_PASSWORD:-}
 COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-}
 STATE_INITIALIZED=$init_ts
@@ -171,7 +175,7 @@ has_valid_state() {
 # ============================================
 
 # Variables that require rebuild when changed
-REBUILD_REQUIRED_VARS="PHPVERSION DATABASE STACK_MODE INSTALL_XDEBUG REDIS_PASSWORD COMPOSE_PROJECT_NAME"
+REBUILD_REQUIRED_VARS="PHPVERSION DATABASE STACK_MODE INSTALL_XDEBUG REDIS_PASSWORD COMPOSE_PROJECT_NAME INSTALLATION_TYPE APP_ENV"
 
 # Variables that require special handling (runtime password updates)
 CRITICAL_VARS="MYSQL_ROOT_PASSWORD MYSQL_PASSWORD MYSQL_USER"
@@ -498,7 +502,7 @@ check_and_apply_config_changes() {
             DATABASE)
                 db_changed=true
                 ;;
-            PHPVERSION|STACK_MODE|INSTALL_XDEBUG)
+            PHPVERSION|STACK_MODE|APP_ENV|INSTALLATION_TYPE|INSTALL_XDEBUG)
                 force_rebuild=true
                 ;;
             REDIS_PASSWORD)
@@ -581,7 +585,7 @@ _update_state_non_password_vars() {
     content=$(_get_state_content) || return
     
     # Update only non-sensitive vars
-    for key in DATABASE PHPVERSION STACK_MODE COMPOSE_PROJECT_NAME; do
+    for key in DATABASE PHPVERSION STACK_MODE COMPOSE_PROJECT_NAME APP_ENV INSTALLATION_TYPE; do
         local value="${!key}"
         if echo "$content" | grep -q "^${key}="; then
             content=$(echo "$content" | sed "s|^${key}=.*|${key}=${value}|")
@@ -2221,12 +2225,12 @@ tbs_config() {
     choose_installation_type() {
         local valid_options=("local" "live")
         blue_message "Installation Type:"
-        info_message "   1. local (Select for Local PC/System)"
-        info_message "      • Best for local development. Enables .localhost domains with trusted SSL (mkcert)."
+        echo "   1. local (Select for Local PC/System)"
+        info_message "    • Best for local development. Enables .localhost domains with trusted SSL (mkcert)."
         
-        info_message "   2. live  (Select for Live/Production Server)"
-        info_message "      • Best for public servers. Uses Let's Encrypt for valid SSL on custom domains."
-        yellow_message "      • NOTE: For custom domains, you MUST point the domain's DNS to this server's IP first."
+        echo "   2. live  (Select for Live/Production Server)"
+        info_message "    • Best for public servers. Uses Let's Encrypt for valid SSL on custom domains."
+        yellow_message "    • NOTE: For custom domains, you MUST point the domain's DNS to this server's IP first."
 
         # Auto-detect default
         local default_index=1
@@ -4109,7 +4113,7 @@ POOL
                     echo "  File: $TBS_STATE_FILE"
                     echo ""
                     info_message "Tracked Configuration:"
-                    for var in DATABASE PHPVERSION STACK_MODE MYSQL_ROOT_PASSWORD MYSQL_USER MYSQL_PASSWORD MYSQL_DATABASE REDIS_PASSWORD COMPOSE_PROJECT_NAME; do
+                    for var in DATABASE PHPVERSION STACK_MODE INSTALLATION_TYPE APP_ENV MYSQL_ROOT_PASSWORD MYSQL_USER MYSQL_PASSWORD MYSQL_DATABASE REDIS_PASSWORD COMPOSE_PROJECT_NAME; do
                         local val=$(get_state_value "$var")
                         # Mask passwords
                         if [[ "$var" == *PASSWORD* && -n "$val" ]]; then
