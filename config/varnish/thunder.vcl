@@ -3,14 +3,14 @@ vcl 4.0;
 # ============================================
 # Thunder Mode VCL - Nginx -> Varnish -> nginx-fpm -> PHP-FPM
 # Production-Ready Configuration
-# Architecture: Client -> Nginx:80/443 -> Varnish:80 -> nginx-fpm:80 -> PHP-FPM:9000
+# Architecture: Client -> Nginx:80/443 -> Varnish:80 -> nginx-fpm:8080 -> PHP-FPM:9000
 # ============================================
 
 import std;
 
 backend default {
     .host = "webserver";
-    .port = "80";
+    .port = "8080";
     .first_byte_timeout = 300s;
     .connect_timeout = 10s;
     .between_bytes_timeout = 10s;
@@ -65,6 +65,20 @@ sub vcl_recv {
     # Normalize host header
     # ============================================
     set req.http.Host = regsub(req.http.Host, ":[0-9]+", "");
+
+    # ============================================
+    # Normalize Query String (Improve Cache Hit Rate)
+    # ============================================
+    if (req.url ~ "\?") {
+        # Remove tracking parameters
+        set req.url = regsuball(req.url, "(^|&)(_ga|_gat|_gid|_fbp|_gcl_au|__utm|utm_source|utm_medium|utm_campaign|utm_content|utm_term|fbclid|gclid|msclkid|mc_cid|mc_eid)(&|$)", "\1");
+        # Remove trailing & or ?
+        set req.url = regsub(req.url, "(\?|&)$", "");
+        # If only ? remains, remove it
+        if (req.url ~ "\?$") {
+            set req.url = regsub(req.url, "\?$", "");
+        }
+    }
 
     # ============================================
     # Only cache GET and HEAD
@@ -134,9 +148,9 @@ sub vcl_backend_response {
     }
 
     # ============================================
-    # HTML pages - short TTL
+    # HTML pages & Redirects - short TTL
     # ============================================
-    if (beresp.http.Content-Type ~ "text/html") {
+    if (beresp.http.Content-Type ~ "text/html" || beresp.status == 301 || beresp.status == 302) {
         set beresp.ttl = 5m;
         set beresp.grace = 24h;
     }
@@ -144,8 +158,9 @@ sub vcl_backend_response {
     # ============================================
     # Grace period for stale content
     # ============================================
-    set beresp.grace = 6h;
-    
+    set beresp.grace = 24h;
+    set beresp.keep = 1h;
+
     # ============================================
     # Gzip handling
     # ============================================
@@ -166,7 +181,7 @@ sub vcl_deliver {
     } else {
         set resp.http.X-Cache = "MISS";
     }
-    
+
     # ============================================
     # Security headers
     # ============================================
@@ -174,11 +189,6 @@ sub vcl_deliver {
     unset resp.http.Server;
     unset resp.http.X-Varnish;
     unset resp.http.Via;
-    
-    # Add security headers
-    set resp.http.X-Content-Type-Options = "nosniff";
-    set resp.http.X-Frame-Options = "SAMEORIGIN";
-    set resp.http.Referrer-Policy = "strict-origin-when-cross-origin";
 }
 
 sub vcl_synth {

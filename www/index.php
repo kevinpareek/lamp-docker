@@ -10,6 +10,14 @@
 $app_env = getenv('APP_ENV') ?: 'development';
 $installation_type = getenv('INSTALLATION_TYPE');
 
+// Handle actions
+if (isset($_GET['action'])) {
+    if ($_GET['action'] === 'phpinfo' && $app_env !== 'production') {
+        phpinfo();
+        exit;
+    }
+}
+
 // Auto-detect installation type if not set
 if (!$installation_type) {
     $server_ip = $_SERVER['SERVER_ADDR'] ?? '127.0.0.1';
@@ -28,16 +36,85 @@ if (!$installation_type) {
 }
 
 $stack_mode = getenv('STACK_MODE') ?: 'hybrid';
-$php_version = getenv('PHPVERSION') ?: 'php8.3';
-$database_type = getenv('DATABASE') ?: 'mysql8.0';
 $is_production = ($app_env === 'production');
 $is_live = ($installation_type === 'live');
 
+// Dynamic System Stats
+$php_full_version = PHP_VERSION;
+$php_sapi = php_sapi_name();
+$php_ini = php_ini_loaded_file();
+$server_time = date('Y-m-d H:i:s');
+$memory_usage = round(memory_get_usage() / 1024 / 1024, 2) . ' MB';
+$peak_memory = round(memory_get_peak_usage() / 1024 / 1024, 2) . ' MB';
+
+// Server Load
+$load = function_exists('sys_getloadavg') ? sys_getloadavg() : false;
+$server_load = $load ? implode(' ', array_map(fn($l) => round($l, 2), $load)) : 'N/A';
+
+// Disk Usage
+$disk_free = @disk_free_space("/") ?: 0;
+$disk_total = @disk_total_space("/") ?: 1;
+$disk_usage_pct = round((1 - ($disk_free / $disk_total)) * 100, 1);
+$disk_info = round($disk_free / 1024 / 1024 / 1024, 2) . 'GB free of ' . round($disk_total / 1024 / 1024 / 1024, 2) . 'GB';
+
+// Network Info
+$internal_ip = gethostbyname(gethostname());
+$server_addr = $_SERVER['SERVER_ADDR'] ?? 'N/A';
+$http_proto = $_SERVER['SERVER_PROTOCOL'] ?? 'N/A';
+
+// OPcache & Xdebug
+$opcache_stats = [];
+if (function_exists('opcache_get_status')) {
+    $status = @opcache_get_status();
+    if ($status) {
+        $opcache_stats = [
+            'hit_rate' => round($status['opcache_statistics']['opcache_hit_rate'], 2) . '%',
+            'memory' => round($status['memory_usage']['used_memory'] / 1024 / 1024, 2) . 'MB',
+            'scripts' => $status['opcache_statistics']['num_cached_scripts']
+        ];
+    }
+}
+$xdebug_mode = extension_loaded('xdebug') ? ini_get('xdebug.mode') : 'off';
+
 // Get PHP extensions (only in development)
 $extensions = [];
+$env_vars = [];
+$log_files = [];
 if (!$is_production) {
     $extensions = get_loaded_extensions();
     sort($extensions);
+
+    // Check Logs
+    $possible_logs = [
+        'PHP Errors' => '/var/log/php_errors.log',
+        'Nginx Access' => '/var/log/nginx/access.log',
+        'Nginx Error' => '/var/log/nginx/error.log',
+        'Apache Access' => '/var/log/apache2/access.log',
+        'Apache Error' => '/var/log/apache2/error.log',
+    ];
+    foreach ($possible_logs as $name => $path) {
+        if (file_exists($path)) {
+            $size = filesize($path);
+            $log_files[$name] = ($size > 1024 * 1024) ? round($size / 1024 / 1024, 2) . ' MB' : round($size / 1024, 2) . ' KB';
+        }
+    }
+    
+    // Filtered environment variables for display
+    $all_env = array_merge($_ENV, getenv());
+    $sensitive_keys = ['PASS', 'SECRET', 'KEY', 'TOKEN', 'AUTH', 'CREDENTIAL'];
+    foreach ($all_env as $key => $value) {
+        $is_sensitive = false;
+        foreach ($sensitive_keys as $s_key) {
+            if (stripos($key, $s_key) !== false) {
+                $is_sensitive = true;
+                break;
+            }
+        }
+        if (!$is_sensitive && !empty($value) && is_string($value) && strlen($value) < 100) {
+            $env_vars[$key] = $value;
+        }
+    }
+    ksort($env_vars);
 }
 
 // Check services
@@ -53,7 +130,8 @@ $varnish_status = false;
 if (extension_loaded('redis')) {
     try {
         $redis = new Redis();
-        $redis_status = @$redis->connect('redis', 6379, 1);
+        // Reduced timeout to 0.2s for faster dashboard load
+        $redis_status = @$redis->connect('redis', 6379, 0.2);
         if ($redis_status) {
             $redis_pass = getenv('REDIS_PASSWORD');
             if ($redis_pass) {
@@ -72,6 +150,7 @@ if (extension_loaded('redis')) {
                         'memory' => isset($info['used_memory_human']) ? $info['used_memory_human'] : 'N/A',
                         'clients' => $info['connected_clients'] ?? 'N/A',
                         'uptime' => isset($info['uptime_in_days']) ? $info['uptime_in_days'] . ' days' : 'N/A',
+                        'keys' => $redis->dbSize() ?? 0,
                     ];
                 } catch (Exception $e) {}
             }
@@ -86,9 +165,12 @@ if (extension_loaded('redis')) {
 if (extension_loaded('memcached')) {
     try {
         $memcached = new Memcached();
+        $memcached->setOption(Memcached::OPT_CONNECT_TIMEOUT, 200); // 200ms
         $memcached->addServer('memcached', 11211);
         $stats = $memcached->getStats();
-        $memcached_status = $stats !== false && !empty($stats);
+        
+        // Optimized status check: verify if at least one server is responding
+        $memcached_status = !empty($stats) && reset($stats) !== false;
         
         // Get Memcached info in development
         if ($memcached_status && !$is_production) {
@@ -119,8 +201,12 @@ if (extension_loaded('mysqli')) {
     $db_pass = getenv('MYSQL_PASSWORD') ?: 'docker';
     $db_name = getenv('MYSQL_DATABASE') ?: 'docker';
     
-    $mysqli = @new mysqli($db_host, $db_user, $db_pass);
-    $database_status = !$mysqli->connect_error;
+    // Set connection timeout to 1s
+    mysqli_report(MYSQLI_REPORT_OFF);
+    $mysqli = mysqli_init();
+    $mysqli->options(MYSQLI_OPT_CONNECT_TIMEOUT, 1);
+    $database_status = @$mysqli->real_connect($db_host, $db_user, $db_pass);
+    
     if ($database_status) {
         // Get database info in development
         if (!$is_production) {
@@ -140,18 +226,39 @@ if (extension_loaded('mysqli')) {
                 'version_full' => $version_string,
                 'type' => $is_mariadb ? 'MariaDB' : 'MySQL',
                 'charset' => $mysqli->character_set_name() ?? 'N/A',
+                'tables' => 0,
+                'size' => '0 B'
             ];
+
+            // Get DB Stats
+            if ($mysqli->select_db($db_name)) {
+                $res = $mysqli->query("SELECT count(*) as count FROM information_schema.tables WHERE table_schema = '$db_name'");
+                if ($res) {
+                    $database_info['tables'] = $res->fetch_object()->count;
+                }
+                $res = $mysqli->query("SELECT SUM(data_length + index_length) as size FROM information_schema.tables WHERE table_schema = '$db_name'");
+                if ($res) {
+                    $size_bytes = $res->fetch_object()->size;
+                    if ($size_bytes > 1024 * 1024) {
+                        $database_info['size'] = round($size_bytes / 1024 / 1024, 2) . ' MB';
+                    } elseif ($size_bytes > 1024) {
+                        $database_info['size'] = round($size_bytes / 1024, 2) . ' KB';
+                    } else {
+                        $database_info['size'] = $size_bytes . ' B';
+                    }
+                }
+            }
         }
         $mysqli->close();
     }
 }
 
 // Check Varnish (via HTTP header or direct connection)
-$cache_header = $_SERVER['HTTP_X_CACHE'] ?? 'N/A';
-$varnish_detected = ($cache_header !== 'N/A');
+$cache_header = $_SERVER['HTTP_X_CACHE'] ?? (isset($_SERVER['HTTP_X_VARNISH']) ? 'MISS' : 'N/A');
+$varnish_detected = ($cache_header !== 'N/A') || isset($_SERVER['HTTP_VIA']);
 
 $varnish_status = false;
-$varnish_socket = @fsockopen('varnish', 80, $errno, $errstr, 0.5);
+$varnish_socket = @fsockopen('varnish', 80, $errno, $errstr, 0.2);
 if ($varnish_socket) {
     $varnish_status = true;
     fclose($varnish_socket);
@@ -390,7 +497,7 @@ if (!$is_production) {
         <header>
             <h1>🚀 PHP Turbo Stack</h1>
             <p class="subtitle">High-performance PHP development environment</p>
-            <div>
+            <div style="margin-top: 1rem;">
                 <span class="env-badge <?= $is_production ? 'env-production' : 'env-development' ?>">
                     <?= $is_production ? '🔒 Production' : '🔧 Development' ?>
                 </span>
@@ -400,6 +507,11 @@ if (!$is_production) {
                 <span class="env-badge" style="background: rgba(168, 85, 247, 0.2); color: #a855f7;">
                     ⚡ <?= ucfirst($stack_mode) ?> Mode
                 </span>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--muted); margin-top: 0.5rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                <span style="display: inline-block; width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success);"></span>
+                Live Status as of <?= date('H:i:s') ?>
+                <a href="javascript:location.reload()" style="color: var(--primary); text-decoration: none; margin-left: 0.5rem; border-bottom: 1px dashed var(--primary);">Refresh Page</a>
             </div>
         </header>
 
@@ -412,17 +524,44 @@ if (!$is_production) {
         <?php endif; ?>
 
         <div class="grid">
+            <?php if (!$is_production): ?>
+            <div class="card" style="grid-column: 1 / -1; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; padding: 1rem;">
+                <h2 style="margin-bottom: 0; font-size: 0.9rem; white-space: nowrap;">⚡ Quick Actions:</h2>
+                <a href="?action=phpinfo" target="_blank" class="copy-btn" style="padding: 0.4rem 0.8rem; text-decoration: none;">phpinfo()</a>
+                <a href="/test-db.php" target="_blank" class="copy-btn" style="padding: 0.4rem 0.8rem; text-decoration: none;">Test Database</a>
+                <a href="/health-check.php" target="_blank" class="copy-btn" style="padding: 0.4rem 0.8rem; text-decoration: none;">Health Check</a>
+                <div style="flex-grow: 1;"></div>
+                
+            </div>
+            <?php endif; ?>
+
             <div class="card">
                 <h2>📊 System Information</h2>
                 <div class="info-row">
                     <span class="info-label">PHP Version</span>
-                    <span class="info-value"><?= PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION . '.' . PHP_RELEASE_VERSION ?></span>
+                    <span class="info-value"><?= $php_full_version ?></span>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Web Server</span>
-                    <span class="info-value"><?= php_sapi_name() === 'fpm-fcgi' ? 'PHP-FPM + Nginx (Thunder)' : 'Apache + mod_php (Hybrid)' ?></span>
+                    <span class="info-value"><?= $php_sapi === 'fpm-fcgi' ? 'PHP-FPM + Nginx (Thunder)' : 'Apache + mod_php (Hybrid)' ?></span>
                 </div>
                 <?php if (!$is_production): ?>
+                <div class="info-row">
+                    <span class="info-label">Config File</span>
+                    <span class="info-value" style="font-size: 0.75rem; color: var(--primary);"><?= $php_ini ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Server Time</span>
+                    <span class="info-value"><?= $server_time ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Memory Usage</span>
+                    <span class="info-value"><?= $memory_usage ?> <small style="color: var(--muted);">/ <?= $peak_memory ?> (Peak)</small></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Server Load</span>
+                    <span class="info-value"><?= $server_load ?></span>
+                </div>
                 <div class="info-row">
                     <span class="info-label">Stack Mode</span>
                     <span class="config-value"><?= strtoupper($stack_mode) ?></span>
@@ -432,8 +571,28 @@ if (!$is_production) {
                     <span class="info-value"><?= php_uname('s') . ' ' . php_uname('r') ?></span>
                 </div>
                 <div class="info-row">
-                    <span class="info-label">Server Software</span>
-                    <span class="info-value"><?= $_SERVER['SERVER_SOFTWARE'] ?? 'N/A' ?></span>
+                    <span class="info-label">Internal IP</span>
+                    <span class="info-value"><?= $internal_ip ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Protocol</span>
+                    <span class="info-value"><?= $http_proto ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Client IP</span>
+                    <span class="info-value"><?= $_SERVER['REMOTE_ADDR'] ?? 'Unknown' ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Disk Usage</span>
+                    <div style="text-align: right;">
+                        <span class="info-value"><?= $disk_usage_pct ?>%</span>
+                        <div style="font-size: 0.7rem; color: var(--muted);"><?= $disk_info ?></div>
+                    </div>
+                </div>
+                <div class="section-title">Quick Links</div>
+                <div class="info-row">
+                    <span class="info-label">PHP Info</span>
+                    <span class="info-value"><a href="?action=phpinfo" target="_blank" style="color: var(--primary); text-decoration: none;">View phpinfo() →</a></span>
                 </div>
                 <?php endif; ?>
                 <div class="info-row">
@@ -468,19 +627,75 @@ if (!$is_production) {
                 <?php endif; ?>
             </div>
 
+            <?php if (!$is_production && !empty($opcache_stats)): ?>
+            <div class="card">
+                <h2>🚀 OPcache Status</h2>
+                <div class="info-row">
+                    <span class="info-label">Hit Rate</span>
+                    <span class="info-value" style="color: var(--success);"><?= $opcache_stats['hit_rate'] ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Used Memory</span>
+                    <span class="info-value"><?= $opcache_stats['memory'] ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Cached Scripts</span>
+                    <span class="info-value"><?= $opcache_stats['scripts'] ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">JIT Status</span>
+                    <span class="info-value"><?= ini_get('opcache.jit') === 'on' ? 'Enabled' : 'Disabled' ?></span>
+                </div>
+                <div class="section-title">Optimization</div>
+                <div class="practice-item">
+                    <span class="check">✓</span>
+                    <span>Bytecode caching is active</span>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            
+
             <div class="card">
                 <h2>🔌 Service Status</h2>
                 <div class="info-row">
                     <span class="info-label">Database</span>
-                    <span class="status <?= $database_status ? 'status-ok' : 'status-error' ?>">
-                        <?= $database_status ? '● Connected' : '○ Disconnected' ?>
-                    </span>
+                    <div style="text-align: right;">
+                        <span class="status <?= $database_status ? 'status-ok' : 'status-error' ?>">
+                            <?= $database_status ? '● Connected' : '○ Disconnected' ?>
+                        </span>
+                        <?php if ($database_status && !empty($database_info)): ?>
+                            <div style="font-size: 0.7rem; margin-top: 0.2rem; color: var(--muted);">
+                                <?= $database_info['type'] ?> <?= $database_info['version'] ?> | <?= $database_info['tables'] ?> Tables (<?= $database_info['size'] ?>)
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Redis</span>
-                    <span class="status <?= $redis_status ? 'status-ok' : 'status-error' ?>">
-                        <?= $redis_status ? '● Connected' : '○ Disconnected' ?>
-                    </span>
+                    <div style="text-align: right;">
+                        <span class="status <?= $redis_status ? 'status-ok' : 'status-error' ?>">
+                            <?= $redis_status ? '● Connected' : '○ Disconnected' ?>
+                        </span>
+                        <?php if ($redis_status && !empty($redis_info)): ?>
+                            <div style="font-size: 0.7rem; margin-top: 0.2rem; color: var(--muted);">
+                                v<?= $redis_info['version'] ?> | <?= $redis_info['keys'] ?> Keys | <?= $redis_info['memory'] ?> Used
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Memcached</span>
+                    <div style="text-align: right;">
+                        <span class="status <?= $memcached_status ? 'status-ok' : 'status-error' ?>">
+                            <?= $memcached_status ? '● Connected' : '○ Disconnected' ?>
+                        </span>
+                        <?php if ($memcached_status && !empty($memcached_info)): ?>
+                            <div style="font-size: 0.7rem; margin-top: 0.2rem; color: var(--muted);">
+                                v<?= $memcached_info['version'] ?> | <?= $memcached_info['curr_items'] ?> Items | <?= $memcached_info['memory_used'] ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Varnish Cache</span>
@@ -488,24 +703,31 @@ if (!$is_production) {
                         <span class="status <?= $varnish_status ? 'status-ok' : 'status-error' ?>">
                             <?= $varnish_status ? '● Connected' : '○ Disconnected' ?>
                         </span>
-                        <?php if ($varnish_status): ?>
-                            <div style="font-size: 0.7rem; margin-top: 0.2rem; color: <?= $is_caching_active ? 'var(--success)' : 'var(--warning)' ?>;">
-                                <?= $is_caching_active ? '● Caching Active (HIT)' : '○ Caching Deactive (MISS)' ?>
+                        <?php if (!$is_production && $varnish_status): ?>
+                            <div style="font-size: 0.7rem; margin-top: 0.2rem; color: <?= ($cache_header === 'HIT') ? 'var(--success)' : 'var(--warning)' ?>;">
+                                <?= ($cache_header === 'HIT') ? '● Cache HIT' : (($cache_header === 'MISS') ? '○ Cache MISS' : '○ Bypassed') ?>
+                                <?php if (isset($_SERVER['HTTP_X_CACHE_HITS'])): ?>
+                                    <span style="color: var(--muted); font-size: 0.65rem;">(Hits: <?= $_SERVER['HTTP_X_CACHE_HITS'] ?>)</span>
+                                <?php endif; ?>
+                            </div>
+                            <div style="font-size: 0.6rem; color: var(--muted); margin-top: 0.1rem;">
+                                TTL: <?= headers_sent() ? 'N/A' : (headers_list() ? 'Dynamic' : 'Checking...') ?>
                             </div>
                         <?php endif; ?>
                     </div>
                 </div>
                 <div class="info-row">
-                    <span class="info-label">Memcached</span>
-                    <span class="status <?= $memcached_status ? 'status-ok' : 'status-error' ?>">
-                        <?= $memcached_status ? '● Connected' : '○ Disconnected' ?>
-                    </span>
-                </div>
-                <div class="info-row">
                     <span class="info-label">OPcache</span>
-                    <span class="status <?= function_exists('opcache_get_status') && @opcache_get_status() ? 'status-ok' : 'status-error' ?>">
-                        <?= function_exists('opcache_get_status') && @opcache_get_status() ? '● Enabled' : '○ Disabled' ?>
-                    </span>
+                    <div style="text-align: right;">
+                        <span class="status <?= !empty($opcache_stats) ? 'status-ok' : 'status-error' ?>">
+                            <?= !empty($opcache_stats) ? '● Enabled' : '○ Disabled' ?>
+                        </span>
+                        <?php if (!empty($opcache_stats)): ?>
+                            <div style="font-size: 0.7rem; margin-top: 0.2rem; color: var(--muted);">
+                                Hit Rate: <?= $opcache_stats['hit_rate'] ?> | <?= $opcache_stats['scripts'] ?> scripts
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 <?php if (!$is_production): ?>
                 <div class="info-row">
@@ -516,9 +738,16 @@ if (!$is_production) {
                 </div>
                 <div class="info-row">
                     <span class="info-label">Xdebug</span>
-                    <span class="status <?= extension_loaded('xdebug') ? 'status-ok' : 'status-error' ?>">
-                        <?= extension_loaded('xdebug') ? '● Enabled' : '○ Disabled' ?>
-                    </span>
+                    <div style="text-align: right;">
+                        <span class="status <?= extension_loaded('xdebug') ? 'status-ok' : 'status-error' ?>">
+                            <?= extension_loaded('xdebug') ? '● Enabled' : '○ Disabled' ?>
+                        </span>
+                        <?php if (extension_loaded('xdebug')): ?>
+                            <div style="font-size: 0.7rem; margin-top: 0.2rem; color: var(--primary);">
+                                Mode: <?= $xdebug_mode ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 <?php endif; ?>
 
@@ -526,20 +755,34 @@ if (!$is_production) {
                     <h3>📋 Best Practices</h3>
                     <?php if ($is_production): ?>
                         <div class="practice-item">
-                            <span class="check">✓</span> Production mode enabled - errors hidden from users
+                            <?php $disp_err = ini_get('display_errors'); ?>
+                            <span class="<?= ($disp_err == '0' || strtolower($disp_err) == 'off') ? 'check' : 'warn' ?>">
+                                <?= ($disp_err == '0' || strtolower($disp_err) == 'off') ? '✓' : '!' ?>
+                            </span>
+                            Errors are <?= ($disp_err == '0' || strtolower($disp_err) == 'off') ? 'hidden (Secure)' : 'visible (Insecure for Production)' ?>
+                        </div>
+                        <div class="practice-item">
+                            <?php $op_val = ini_get('opcache.validate_timestamps'); ?>
+                            <span class="<?= ($op_val == '0') ? 'check' : 'warn' ?>">
+                                <?= ($op_val == '0') ? '✓' : '!' ?>
+                            </span>
+                            OPcache Timestamp Validation is <?= ($op_val == '0') ? 'Off (Fast)' : 'On (Slow for Production)' ?>
                         </div>
                         <div class="practice-item">
                             <span class="<?= !extension_loaded('xdebug') ? 'check' : 'warn' ?>">
                                 <?= !extension_loaded('xdebug') ? '✓' : '!' ?>
                             </span>
-                            <?= !extension_loaded('xdebug') ? 'Xdebug disabled (recommended)' : 'Xdebug enabled - disable for better performance' ?>
+                            Xdebug is <?= !extension_loaded('xdebug') ? 'Disabled (Fast)' : 'Enabled (Slow for Production)' ?>
                         </div>
                     <?php else: ?>
                         <div class="practice-item">
-                            <span class="warn">!</span> Switch to <code>APP_ENV=production</code> before deployment
+                            <span class="warn">!</span> Currently in <b>Development</b> mode. Switch to <code>APP_ENV=production</code> for speed.
                         </div>
                         <div class="practice-item">
-                            <span class="warn">!</span> Set <code>INSTALL_XDEBUG=false</code> for production
+                            <span class="<?= extension_loaded('xdebug') ? 'check' : 'warn' ?>">
+                                <?= extension_loaded('xdebug') ? '✓' : '!' ?>
+                            </span>
+                            Xdebug is <?= extension_loaded('xdebug') ? 'Active' : 'Inactive (Enable for debugging)' ?>
                         </div>
                     <?php endif; ?>
                     <?php if ($is_live): ?>
@@ -568,6 +811,14 @@ if (!$is_production) {
                 <div class="info-row">
                     <span class="info-label">Charset</span>
                     <span class="info-value"><?= htmlspecialchars($database_info['charset']) ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Tables Count</span>
+                    <span class="info-value"><?= $database_info['tables'] ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Database Size</span>
+                    <span class="info-value"><?= $database_info['size'] ?></span>
                 </div>
                 <div class="section-title">Connection Details</div>
                 <div class="info-row">
@@ -608,6 +859,10 @@ if (!$is_production) {
                 <div class="info-row">
                     <span class="info-label">Connected Clients</span>
                     <span class="info-value"><?= htmlspecialchars($redis_info['clients']) ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Total Keys</span>
+                    <span class="info-value"><?= $redis_info['keys'] ?></span>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Uptime</span>
@@ -798,6 +1053,46 @@ if (!$is_production) {
             </div>
             <?php endif; ?>
 
+            <?php if (!$is_production && !empty($log_files)): ?>
+            <div class="card">
+                <h2>📝 System Logs</h2>
+                <?php foreach ($log_files as $name => $size): ?>
+                <div class="info-row">
+                    <span class="info-label"><?= $name ?></span>
+                    <span class="info-value"><?= $size ?></span>
+                </div>
+                <?php endforeach; ?>
+                <p style="font-size: 0.7rem; color: var(--muted); margin-top: 1rem; font-style: italic;">* Log files are located in <code>/var/log/</code></p>
+            </div>
+            <?php endif; ?>
+
+            <?php if (!$is_production && !empty($env_vars)): ?>
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2 style="margin-bottom: 0;">🌍 Environment</h2>
+                    <input type="text" id="envSearch" placeholder="Search vars..." style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 0.3rem 0.6rem; border-radius: 0.4rem; font-size: 0.75rem; width: 120px;">
+                </div>
+                <div id="envList" style="max-height: 300px; overflow-y: auto; padding-right: 0.5rem;">
+                    <?php foreach ($env_vars as $key => $value): ?>
+                    <div class="info-row env-item" data-key="<?= strtolower(htmlspecialchars($key)) ?>">
+                        <span class="info-label" style="font-size: 0.75rem;"><?= htmlspecialchars($key) ?></span>
+                        <span class="config-value" style="font-size: 0.7rem; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="<?= htmlspecialchars($value) ?>"><?= htmlspecialchars($value) ?></span>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <p style="font-size: 0.7rem; color: var(--muted); margin-top: 1rem; font-style: italic;">* Sensitive variables (passwords/keys) are hidden.</p>
+            </div>
+            <script>
+            document.getElementById('envSearch').addEventListener('input', function(e) {
+                const term = e.target.value.toLowerCase();
+                document.querySelectorAll('.env-item').forEach(item => {
+                    const key = item.getAttribute('data-key');
+                    item.style.display = key.includes(term) ? 'flex' : 'none';
+                });
+            });
+            </script>
+            <?php endif; ?>
+
             <?php if (!$is_production && !empty($extensions)): ?>
             <div class="card" style="grid-column: 1 / -1;">
                 <h2>📦 Loaded PHP Extensions (<?= count($extensions) ?>)</h2>
@@ -813,15 +1108,56 @@ if (!$is_production) {
                 <p class="hidden-info">🔒 Extension list hidden in production mode for security</p>
             </div>
             <?php endif; ?>
+            <div class="card" style="grid-column: 1 / -1;">
+                <h2>🏗️ Stack Architecture: <?= ucfirst($stack_mode) ?> Mode</h2>
+                <div style="display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start;">
+                    <div style="flex: 1; min-width: 300px;">
+                        <p style="font-size: 0.9rem; color: var(--muted); line-height: 1.6;">
+                            <?php if ($stack_mode === 'thunder'): ?>
+                                <strong>Thunder Mode</strong> is optimized for speed using Nginx as both a reverse proxy and a fast backend for PHP-FPM. 
+                                Varnish sits in the middle to cache static and dynamic content.
+                            <?php else: ?>
+                                <strong>Hybrid Mode</strong> combines the power of Nginx (frontend/proxy) with the flexibility of Apache (backend). 
+                                This is ideal for applications requiring <code>.htaccess</code> support while maintaining high performance.
+                            <?php endif; ?>
+                        </p>
+                        <div class="best-practices">
+                            <h3>Current Flow:</h3>
+                            <div class="practice-item">
+                                <span class="check">1</span>
+                                <span><strong>Nginx (Port 80):</strong> Entry point & SSL termination</span>
+                            </div>
+                            <div class="practice-item">
+                                <span class="check">2</span>
+                                <span><strong>Varnish (Port 81):</strong> High-performance caching layer</span>
+                            </div>
+                            <div class="practice-item">
+                                <span class="check">3</span>
+                                <span><strong><?= $stack_mode === 'thunder' ? 'Nginx-FPM' : 'Apache' ?>:</strong> Application server</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="flex: 1; min-width: 300px; background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 0.5rem; font-family: monospace; font-size: 0.8rem; color: var(--primary);">
+                        <pre style="margin: 0;">
+Browser  ──▶  Nginx (80)
+               │
+               ▼
+            Varnish (81)
+               │
+               ▼
+        <?= $stack_mode === 'thunder' ? 'Nginx-FPM (8080)' : 'Apache (8080)' ?>
+               │
+               ▼
+        PHP <?= PHP_MAJOR_VERSION ?>.<?= PHP_MINOR_VERSION ?> (<?= $php_sapi ?>)</pre>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <footer>
             <p>
                 <a href="https://github.com/kevinpareek/turbo-stack" target="_blank">PHP Turbo Stack v1.0.2</a>
-                <?php if (!$is_production): ?>
-                &nbsp;|&nbsp; Run <code>tbs help</code> for commands
-                &nbsp;|&nbsp; <code>tbs app add myapp</code> to create an app
-                <?php endif; ?>
+                
             </p>
         </footer>
     </div>

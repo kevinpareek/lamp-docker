@@ -38,6 +38,7 @@ RUN set -eux; \
         unzip \
         zip \
         ca-certificates \
+        openssl \
         # Database
         default-mysql-client \
         # PHP Dependencies

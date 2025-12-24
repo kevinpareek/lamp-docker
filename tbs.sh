@@ -770,6 +770,18 @@ load_env_file() {
     done < "$env_file"
 }
 
+# Cross-platform md5 hash (returns first 32 chars)
+get_md5() {
+    if command_exists md5sum; then
+        echo "$1" | md5sum | cut -d' ' -f1
+    elif command_exists md5; then
+        echo "$1" | md5
+    else
+        # Fallback using checksum if available
+        echo "$1" | cksum | cut -d' ' -f1
+    fi
+}
+
 # Cross-platform sed in-place editing
 sed_i() {
     local expression=$1
@@ -1086,7 +1098,7 @@ get_all_profiles() {
 
 # Ensure required directories exist
 ensure_directories() {
-    local dirs=("${VHOSTS_DIR}" "${NGINX_CONF_DIR}" "${SSL_DIR}")
+    local dirs=("${VHOSTS_DIR}" "${NGINX_CONF_DIR}" "${NGINX_FPM_CONF_DIR}" "${SSL_DIR}")
     for dir in "${dirs[@]}"; do
         if [[ -n "$dir" && ! -d "$dir" ]]; then
             mkdir -p "$dir" 2>/dev/null || true
@@ -1623,20 +1635,30 @@ reload_webservers() {
         return 0
     fi
 
-    # Only reload if containers are actually running (docker compose ps returns 0 even when empty)
-    local ws_cid rp_cid
-    ws_cid="$(docker compose ps -q "$WEBSERVER_SERVICE" 2>/dev/null || true)"
-    rp_cid="$(docker compose ps -q reverse-proxy 2>/dev/null || true)"
-
-    if [[ -z "$ws_cid" || -z "$rp_cid" ]]; then
-        return 0
-    fi
-
     yellow_message "Reloading web servers..."
-    if [[ "$WEBSERVER_SERVICE" == "webserver-apache" ]]; then
-        docker compose exec -T "$WEBSERVER_SERVICE" bash -c "service apache2 reload" 2>/dev/null || true
+    
+    # Reload Backend Webserver
+    if [[ "$(docker compose ps -q "$WEBSERVER_SERVICE" 2>/dev/null)" ]]; then
+        if [[ "$WEBSERVER_SERVICE" == "webserver-apache" ]]; then
+            docker compose exec -T "$WEBSERVER_SERVICE" bash -c "service apache2 reload" 2>/dev/null || true
+        else
+            docker compose exec -T "$WEBSERVER_SERVICE" bash -c "kill -USR2 1" 2>/dev/null || true # Reload PHP-FPM
+        fi
     fi
-    docker compose exec -T reverse-proxy nginx -s reload 2>/dev/null || true
+
+    # Reload Internal Nginx (Thunder Mode)
+    if [[ "$(docker compose ps -q nginx-fpm 2>/dev/null)" ]]; then
+        docker compose exec -T nginx-fpm nginx -s reload 2>/dev/null || true
+    fi
+
+    # Reload Frontend Proxies
+    if [[ "$(docker compose ps -q reverse-proxy 2>/dev/null)" ]]; then
+        docker compose exec -T reverse-proxy nginx -s reload 2>/dev/null || true
+    fi
+    if [[ "$(docker compose ps -q reverse-proxy-thunder 2>/dev/null)" ]]; then
+        docker compose exec -T reverse-proxy-thunder nginx -s reload 2>/dev/null || true
+    fi
+
     green_message "Web servers reloaded."
 }
 
@@ -2152,7 +2174,7 @@ open_browser() {
 
     # Open the domain in the default web browser
     info_message "Opening $domain in the default web browser..."
-    sleep 3
+    # sleep 1
 
     case "$OS_TYPE" in
         mac)
@@ -3017,7 +3039,7 @@ tbs() {
             # Generate app_user
             local app_user=$(generate_app_user)
             local ssh_pass=$(generate_strong_password 22)
-            local uid_hash=$(echo "$app_user$(date +%s)" | md5sum | tr -dc '0-9' | head -c 4)
+            local uid_hash=$(get_md5 "$app_user$(date +%s)" | tr -dc '0-9' | head -c 4)
             local ssh_uid=$((2000 + ${uid_hash:-1}))
             
             [[ -z "$domain" ]] && domain="${app_user}.localhost"
@@ -3046,33 +3068,43 @@ tbs() {
 </VirtualHost>
 EOF
 
-            # Nginx config
+            # Nginx config (Proxy)
             local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
+            local app_public_root="$APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user/public_html"
+            
             cat >"$nginx_file" <<EOF
 server {
     listen 80;
     server_name $domain www.$domain;
+    root $app_public_root;
+    index index.php index.html index.htm;
     include /etc/nginx/includes/common.conf;
     include /etc/nginx/includes/varnish-proxy.conf;
 }
 server {
     listen 443 ssl;
     server_name $domain www.$domain;
+    root $app_public_root;
+    index index.php index.html index.htm;
     ssl_certificate /etc/nginx/ssl-sites/cert.pem;
     ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
     include /etc/nginx/includes/common.conf;
     include /etc/nginx/includes/varnish-proxy.conf;
 }
 EOF
-            [[ "$(get_webserver_service)" == "webserver-fpm" ]] && cat >>"$nginx_file" <<EOF
+            # Nginx-FPM config (Internal Backend)
+            if [[ -n "$NGINX_FPM_CONF_DIR" ]]; then
+                local fpm_nginx_file="${NGINX_FPM_CONF_DIR}/${domain}.conf"
+                cat >"$fpm_nginx_file" <<EOF
 server {
     listen 8080;
     server_name $domain www.$domain;
-    root $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user/public_html;
-    index index.php index.html;
+    root $app_public_root;
+    index index.php index.html index.htm;
     include /etc/nginx/includes/php-fpm.conf;
 }
 EOF
+            fi
 
             # Create directory structure
             local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
@@ -3163,7 +3195,7 @@ EOF
             }
             
             # Delete configs
-            rm -f "${VHOSTS_DIR}/${domain}.conf" "${NGINX_CONF_DIR}/${domain}.conf"
+            rm -f "${VHOSTS_DIR}/${domain}.conf" "${NGINX_CONF_DIR}/${domain}.conf" "${NGINX_FPM_CONF_DIR}/${domain}.conf"
             rm -f "${SSL_DIR}/${domain}-key.pem" "${SSL_DIR}/${domain}-cert.pem"
             rm -f "$tbsPath/sites/ssh/${app_user}.json"
             rm -f "$tbsPath/sites/apps/${app_user}.json"
@@ -3307,7 +3339,7 @@ EOF
                        ;;
                     2) local pass=$(generate_strong_password 22)
                        local uid=$(get_app_config "$app_user" "ssh.uid")
-                       [[ -z "$uid" || "$uid" == "null" ]] && { local h=$(echo "$app_user$(date +%s)" | md5sum | tr -dc '0-9' | head -c 4); uid=$((2000 + ${h:-1})); }
+                       [[ -z "$uid" || "$uid" == "null" ]] && { local h=$(get_md5 "$app_user$(date +%s)" | tr -dc '0-9' | head -c 4); uid=$((2000 + ${h:-1})); }
                        mkdir -p "$tbsPath/sites/ssh"
                        echo "{\"app_user\":\"$app_user\",\"username\":\"$app_user\",\"password\":\"$pass\",\"enabled\":true,\"uid\":$uid,\"gid\":$uid}" > "$ssh_file"
                        [[ "$HAS_JQ" == "true" ]] && { local cfg=$(get_app_config_path "$app_user"); local tmp=$(mktemp); jq ".ssh={\"enabled\":true,\"username\":\"$app_user\",\"password\":\"$pass\",\"port\":${HOST_MACHINE_SSH_PORT:-2244},\"uid\":$uid,\"gid\":$uid}" "$cfg" > "$tmp" && mv "$tmp" "$cfg"; }
@@ -3356,6 +3388,7 @@ EOF
                            local primary=$(get_app_config "$app_user" "primary_domain")
                            [[ -f "${VHOSTS_DIR}/${primary}.conf" ]] && sed "s/$primary/$new_dom/g" "${VHOSTS_DIR}/${primary}.conf" > "${VHOSTS_DIR}/${new_dom}.conf"
                            [[ -f "${NGINX_CONF_DIR}/${primary}.conf" ]] && sed "s/$primary/$new_dom/g" "${NGINX_CONF_DIR}/${primary}.conf" > "${NGINX_CONF_DIR}/${new_dom}.conf"
+                           [[ -f "${NGINX_FPM_CONF_DIR}/${primary}.conf" ]] && sed "s/$primary/$new_dom/g" "${NGINX_FPM_CONF_DIR}/${primary}.conf" > "${NGINX_FPM_CONF_DIR}/${new_dom}.conf"
                            _jq_update "$cfg" '.domains+=["'"$new_dom"'"]'
                            generate_ssl_certificates "$new_dom" "${VHOSTS_DIR}/${new_dom}.conf" "${NGINX_CONF_DIR}/${new_dom}.conf" 2>/dev/null || true
                            reload_webservers
@@ -3365,7 +3398,7 @@ EOF
                     2) read -p "Domain to remove: " rem_dom
                        local primary=$(get_app_config "$app_user" "primary_domain")
                        [[ "$rem_dom" == "$primary" ]] && { error_message "Cannot remove primary"; } || {
-                           rm -f "${VHOSTS_DIR}/${rem_dom}.conf" "${NGINX_CONF_DIR}/${rem_dom}.conf"
+                           rm -f "${VHOSTS_DIR}/${rem_dom}.conf" "${NGINX_CONF_DIR}/${rem_dom}.conf" "${NGINX_FPM_CONF_DIR}/${rem_dom}.conf"
                            _jq_update "$cfg" '.domains-=["'"$rem_dom"'"]'
                            reload_webservers
                            green_message "Domain removed"
@@ -3681,11 +3714,11 @@ POOL
                        [[ -f "${VHOSTS_DIR}/${d}.conf" ]] && sed_i "s|DocumentRoot.*|DocumentRoot $dr|g" "${VHOSTS_DIR}/${d}.conf"
                        [[ -f "${NGINX_CONF_DIR}/${d}.conf" ]] && sed_i "s|root.*/var/www/html/${APPLICATIONS_DIR_NAME}/$app_user[^;]*|root $dr|g" "${NGINX_CONF_DIR}/${d}.conf"
                        
+                       reload_webservers
                        echo ""
-                       green_message "Webroot updated!"
+                       green_message "Webroot updated and servers reloaded!"
                        echo "  New webroot: $new_wr"
                        echo "  Full path:   $dr"
-                       info_message "Restart to apply: tbs restart"
                        ;;
                     3) is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
@@ -3721,6 +3754,99 @@ POOL
             [[ "$HAS_JQ" == "true" ]] && jq '.' "$(get_app_config_path "$SELECTED_APP")"
             ;;
         
+        # tbs app sync - Sync all app configs with current stack mode
+        sync)
+            info_message "Syncing all application configurations with current STACK_MODE: ${STACK_MODE}..."
+            local apps_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
+            [[ ! -d "$apps_dir" ]] && { yellow_message "No apps to sync."; return 0; }
+            
+            for app_dir in "$apps_dir"/*/; do
+                [[ ! -d "$app_dir" ]] && continue
+                local u=$(basename "$app_dir")
+                local d=$(get_app_config "$u" "primary_domain")
+                [[ -z "$d" || "$d" == "null" ]] && d="${u}.localhost"
+                
+                info_message "  Syncing: $u ($d)..."
+                
+                # Regenerate Nginx config (Proxy)
+                local nginx_file="${NGINX_CONF_DIR}/${d}.conf"
+                local app_public_root="$APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$u/public_html"
+                local webroot=$(get_app_config "$u" "webroot")
+                [[ -n "$webroot" && "$webroot" != "null" ]] && app_public_root="$APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$u/$webroot"
+                
+                cat >"$nginx_file" <<EOF
+server {
+    listen 80;
+    server_name $d www.$d;
+    root $app_public_root;
+    index index.php index.html index.htm;
+    include /etc/nginx/includes/common.conf;
+    include /etc/nginx/includes/varnish-proxy.conf;
+}
+server {
+    listen 443 ssl;
+    server_name $d www.$d;
+    root $app_public_root;
+    index index.php index.html index.htm;
+    ssl_certificate /etc/nginx/ssl-sites/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
+    include /etc/nginx/includes/common.conf;
+    include /etc/nginx/includes/varnish-proxy.conf;
+}
+EOF
+                # Regenerate Nginx-FPM config (Internal Backend)
+                if [[ -n "$NGINX_FPM_CONF_DIR" ]]; then
+                    local fpm_nginx_file="${NGINX_FPM_CONF_DIR}/${d}.conf"
+                    cat >"$fpm_nginx_file" <<EOF
+server {
+    listen 8080;
+    server_name $d www.$d;
+    root $app_public_root;
+    index index.php index.html index.htm;
+    include /etc/nginx/includes/php-fpm.conf;
+}
+EOF
+                fi
+                
+                # Regenerate Apache config (Hybrid mode)
+                local vhost_file="${VHOSTS_DIR}/${d}.conf"
+                cat >"$vhost_file" <<EOF
+<VirtualHost *:80>
+    ServerName $d
+    ServerAlias www.$d
+    DocumentRoot $app_public_root
+    Define APP_NAME $u
+    Include /etc/apache2/sites-enabled/partials/app-common.inc
+</VirtualHost>
+<VirtualHost *:443>
+    ServerName $d
+    ServerAlias www.$d
+    DocumentRoot $app_public_root
+    Define APP_NAME $u
+    Include /etc/apache2/sites-enabled/partials/app-common.inc
+    SSLEngine on
+    SSLCertificateFile /etc/apache2/ssl-sites/cert.pem
+    SSLCertificateKeyFile /etc/apache2/ssl-sites/cert-key.pem
+</VirtualHost>
+EOF
+                
+                # Fix SSL paths if custom certs exist
+                if [[ -f "${SSL_DIR}/${d}-cert.pem" ]]; then
+                    sed_i "s|cert.pem|$d-cert.pem|g" "$vhost_file"
+                    sed_i "s|cert-key.pem|$d-key.pem|g" "$vhost_file"
+                    sed_i "s|cert.pem|$d-cert.pem|g" "$nginx_file"
+                    sed_i "s|cert-key.pem|$d-key.pem|g" "$nginx_file"
+                    [[ -f "${NGINX_FPM_CONF_DIR}/${d}.conf" ]] && {
+                        sed_i "s|cert.pem|$d-cert.pem|g" "${NGINX_FPM_CONF_DIR}/${d}.conf"
+                        sed_i "s|cert-key.pem|$d-key.pem|g" "${NGINX_FPM_CONF_DIR}/${d}.conf"
+                    }
+                fi
+            done
+            
+            reload_webservers
+            green_message "✅ All apps synced successfully!"
+            ;;
+        
         # Help
         help|--help|-h)
             echo ""
@@ -3737,6 +3863,7 @@ POOL
             echo "  ${CYAN}tbs app ssl [app]${NC}          SSL certificates"
             echo "  ${CYAN}tbs app php [app]${NC}          PHP configuration"
             echo "  ${CYAN}tbs app config [app]${NC}       App settings"
+            echo "  ${CYAN}tbs app sync${NC}               Sync all apps with current mode"
             echo "  ${CYAN}tbs app code [app]${NC}         Open in VS Code"
             echo "  ${CYAN}tbs app open [app]${NC}         Open in browser"
             echo "  ${CYAN}tbs app info [app]${NC}         Show app config"

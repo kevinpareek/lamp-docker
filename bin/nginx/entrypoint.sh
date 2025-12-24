@@ -23,17 +23,21 @@ else
     echo "SSL certificates already exist. Skipping generation."
 fi
 
-# Wait for Varnish backend to be ready
-echo "Waiting for Varnish..."
-while :; do
-    curl_rc=0
-    curl -s -o /dev/null "http://varnish" || curl_rc=$?
-    if [ "$curl_rc" -eq 0 ] || [ "$curl_rc" -eq 52 ]; then
-        break
-    fi
-    sleep 2
-done
-echo "Varnish is reachable."
+# Wait for Varnish backend to be ready (only for reverse-proxy)
+if [ "$SKIP_VARNISH_WAIT" != "true" ]; then
+    echo "Waiting for Varnish..."
+    while :; do
+        curl_rc=0
+        curl -s -o /dev/null "http://varnish" || curl_rc=$?
+        if [ "$curl_rc" -eq 0 ] || [ "$curl_rc" -eq 52 ]; then
+            break
+        fi
+        sleep 2
+    done
+    echo "Varnish is reachable."
+else
+    echo "Skipping Varnish wait."
+fi
 
 # Determine Static Asset Expiration based on Environment
 if [ "$APP_ENV" = "production" ]; then
@@ -67,6 +71,20 @@ fi
 
 # Process main template
 envsubst '${APACHE_DOCUMENT_ROOT} ${APPLICATIONS_DIR_NAME} ${NGINX_STATIC_EXPIRES}' < /etc/nginx/templates/00-default.conf.template > /etc/nginx/http.d/default.conf
+
+# Process extra-conf.d templates (per-app configs) - only if they contain template variables
+if [ -d /etc/nginx/extra-conf.d ] && [ "$(ls -A /etc/nginx/extra-conf.d/*.conf 2>/dev/null)" ]; then
+    echo "Processing extra site configurations..."
+    for conf_file in /etc/nginx/extra-conf.d/*.conf; do
+        # Only process if file contains template variables
+        if grep -q '\${' "$conf_file" 2>/dev/null; then
+            conf_name=$(basename "$conf_file")
+            envsubst '${APACHE_DOCUMENT_ROOT} ${APPLICATIONS_DIR_NAME}' < "$conf_file" > "/tmp/$conf_name"
+            cat "/tmp/$conf_name" > "$conf_file"
+            rm -f "/tmp/$conf_name"
+        fi
+    done
+fi
 
 # Start Nginx
 echo "Starting Nginx with Brotli support..."

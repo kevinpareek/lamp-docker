@@ -1,5 +1,7 @@
 # ============================================
 # Thunder Mode NGINX Configuration (FPM)
+# Frontend Reverse Proxy (SSL Termination + Varnish Proxy)
+# Architecture: Client -> Nginx:80/443 -> Varnish:80 -> nginx-fpm:8080 -> PHP-FPM:9000
 # ============================================
 
 # HTTP Server (Frontend -> Varnish)
@@ -7,6 +9,7 @@ server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name localhost _;
+    root /var/www/html;
 
     include /etc/nginx/includes/common.conf;
     include /etc/nginx/includes/varnish-proxy.conf;
@@ -18,34 +21,20 @@ server {
     listen [::]:443 ssl default_server;
     http2 on;
     server_name localhost _;
+    root /var/www/html;
 
     # SSL Configuration
     ssl_certificate /etc/nginx/ssl-sites/cert.pem;
     ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
 
     include /etc/nginx/includes/common.conf;
     include /etc/nginx/includes/varnish-proxy.conf;
 }
 
-# ============================================
-# Internal Backend for Varnish (Port 8080)
-# ============================================
-server {
-    listen 8080 default_server;
-    server_name localhost _;
-    root ${APACHE_DOCUMENT_ROOT};
-    index index.php index.html index.htm;
-
-    include /etc/nginx/includes/php-fpm.conf;
-
-    # Health check endpoint
-    location /nginx-health {
-        access_log off;
-        return 200 "OK";
-        add_header Content-Type text/plain;
-    }
-}
-
-# Include extra sites
+# Include extra sites (per-app configurations)
 include /etc/nginx/extra-conf.d/*.conf;

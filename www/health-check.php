@@ -94,6 +94,10 @@ $status['memory'] = [
     'peak_mb' => round(memory_get_peak_usage(true) / 1048576, 2)
 ];
 
-http_response_code($status['status'] === 'healthy' ? 200 : 503);
+// Set response code based on health status
+// Note: Varnish probes usually don't use ?full=1, so they hit the basic check above.
+// If they do use ?full=1, we return 200 even if degraded to prevent global 503.
+http_response_code(200);
+header('X-Health-Status: ' . $status['status']);
 echo json_encode($status, JSON_PRETTY_PRINT);
 

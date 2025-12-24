@@ -11,10 +11,12 @@
 !/data/config/.gitkeep
 /logs/*
 /www/applications/*
+/www/projects/*
 
 /sites/*
 !/sites/apache/.gitkeep
 !/sites/apps/.gitkeep
 !/sites/nginx/.gitkeep
+!/sites/nginx-fpm/.gitkeep
 !/sites/ssl/.gitkeep
 !/sites/php/pools/.gitkeep
