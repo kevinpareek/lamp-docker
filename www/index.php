@@ -1155,7 +1155,7 @@ Browser  ──▶  Nginx (80)
 
         <footer>
             <p>
-                <a href="https://github.com/kevinpareek/turbo-stack" target="_blank">PHP Turbo Stack v1.0.2</a>
+                <a href="https://github.com/kevinpareek/turbo-stack" target="_blank">PHP Turbo Stack v1.0.3</a>
                 
             </p>
         </footer>
