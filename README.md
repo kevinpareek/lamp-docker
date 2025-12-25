@@ -18,11 +18,11 @@ Stop wasting time configuring servers. Get everything you need—**Apache, Nginx
 | Feature | Description |
 |---------|-------------|
 | 🔥 **Dual Modes** | **Hybrid** (Nginx → Varnish → Apache) for compatibility, **Thunder** (Nginx → PHP-FPM) for performance |
-| 🐘 **PHP 7.4 - 8.5** | Switch PHP versions instantly with a single command |
+| 🐘 **PHP 7.4 - 8.5** | Switch PHP versions instantly (8.5 initial support) |
 | 💾 **MySQL & MariaDB** | Choose from MySQL 5.7-8.4 or MariaDB 10.3-11.4 |
 | ⚡ **Caching Suite** | Pre-configured Redis, Memcached, and Varnish |
 | 🔒 **Smart SSL** | Auto SSL via mkcert (local) or Let's Encrypt (production) |
-| 🛠 **Dev Tools** | phpMyAdmin, Mailpit (email testing), Xdebug ready |
+| 🛠 **Dev Tools** | phpMyAdmin, Mailpit, Xdebug, ionCube Loader ready |
 | 🤖 **CLI Automation** | Powerful `tbs` command to manage everything |
 
 ---
@@ -267,7 +267,7 @@ Each app created via `tbs app add` automatically gets:
 - **Unique app_user ID** - Random 12-char identifier for isolation
 - **SSH/SFTP access** - Auto-generated secure credentials
 - **SSL certificates** - Via mkcert (local) or Let's Encrypt (production)
-- **Dedicated directory structure** - `public_html/`, `logs/`, `tmp/`, etc.
+- **Dedicated directory structure** - `public_html/`, `data/` (App Data), `logs/`, `tmp/`, etc.
 
 ### App Configuration (`tbs app config`)
 
@@ -399,6 +399,11 @@ In production mode (`APP_ENV=production`), additional security measures are appl
 │   └── ssl/             # Generated SSL certs (mkcert / Let's Encrypt)
 ├── www/                 # Web root inside containers
 │   ├── applications/    # Your project folders (created via `tbs app add`)
+│   │   └── <app>/       # Individual application folder
+│   │       ├── public_html/ # Web root (New Standard)
+│   │       ├── data/        # App Data Directory (Dedicated storage)
+│   │       ├── logs/        # App-specific logs
+│   │       └── backup/      # App-specific backups
 │   └── index.php        # Landing page
 └── tbs.sh               # Turbo Stack CLI script
 ```
@@ -491,11 +496,8 @@ We're constantly improving Turbo Stack! Here's what's on our roadmap:
 
 | Category | Feature | Description |
 | :--- | :--- | :--- |
-| **🐘 PHP** | PHP 8.5 | Support for upcoming PHP 8.5 release |
-| **🐘 PHP** | ionCube Loader | ionCube PHP Encoder support |
+| **🐘 PHP** | PHP 8.5 | Full compatibility for PHP 8.5 |
 | **🌐 Routing** | Web Rules | Custom header & URL rewrite rules per app |
-| **📁 Structure** | New Webroot Standard | Document root at `applications/<app>/public_html/` |
-| **📁 Structure** | App Data Directory | Dedicated data storage at `applications/<app>/app_data/` |
 | **💾 Database** | MongoDB Support | Full MongoDB integration |
 | **💾 Database** | PostgreSQL Support | Full PostgreSQL integration |
 | **🚀 Stack** | Node.js Mode | Full Node.js application support with PM2 |
