@@ -66,7 +66,7 @@ setup_ssl() {
 # ============================================
 setup_environment() {
     # Create necessary directories
-    mkdir -p /var/log/{supervisor,cron,php-fpm} /var/run/apache2 2>/dev/null || true
+    mkdir -p /var/log/{supervisor,cron,php-fpm} /var/run/apache2 /var/lib/php/sessions 2>/dev/null || true
 
     # Cleanup stale PID files to ensure clean startup
     rm -f /var/run/apache2/apache2.pid /var/run/supervisord.pid /var/run/supervisor.sock 2>/dev/null || true
@@ -74,6 +74,9 @@ setup_environment() {
     # Initialize log files
     touch /var/log/{cron.log,php_errors.log} 2>/dev/null || true
     chmod 666 /var/log/php_errors.log 2>/dev/null || true
+    
+    # Set permissions for session directory
+    chmod 1777 /var/lib/php/sessions 2>/dev/null || true
     
     echo "✓ Environment initialized"
 }

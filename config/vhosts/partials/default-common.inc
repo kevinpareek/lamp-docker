@@ -4,6 +4,10 @@
         Require all granted
     </Directory>
 
+    # Optimization: Remove headers that cause duplication or leak info
+    Header unset X-Powered-By
+    Header unset Server
+
     # Health check endpoint (moved outside document root for safety)
     Alias /health-check.php /var/www/internal/health-check.php
     <Directory /var/www/internal>

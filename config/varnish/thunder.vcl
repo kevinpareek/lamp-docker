@@ -38,6 +38,26 @@ acl purge_allowed {
 
 sub vcl_recv {
     # ============================================
+    # Normalize Accept-Encoding (Improve Cache Hit Rate)
+    # ============================================
+    if (req.http.Accept-Encoding) {
+        if (req.url ~ "\.(jpg|png|gif|gz|tgz|bz2|tbz|mp3|ogg)$") {
+            unset req.http.Accept-Encoding;
+        } else if (req.http.Accept-Encoding ~ "gzip") {
+            set req.http.Accept-Encoding = "gzip";
+        } else if (req.http.Accept-Encoding ~ "deflate") {
+            set req.http.Accept-Encoding = "deflate";
+        } else {
+            unset req.http.Accept-Encoding;
+        }
+    }
+
+    # ============================================
+    # Strip Varnish internal headers from backend
+    # ============================================
+    unset req.http.X-Varnish;
+
+    # ============================================
     # DEVELOPMENT MODE: Bypass cache completely
     # ============================================
     if (req.http.X-App-Env == "development") {
@@ -173,22 +193,39 @@ sub vcl_backend_response {
 
 sub vcl_deliver {
     # ============================================
-    # Cache status headers
+    # Cache status headers (Only in development)
     # ============================================
-    if (obj.hits > 0) {
-        set resp.http.X-Cache = "HIT";
-        set resp.http.X-Cache-Hits = obj.hits;
+    if (req.http.X-App-Env == "development") {
+        if (obj.hits > 0) {
+            set resp.http.X-Cache = "HIT";
+            set resp.http.X-Cache-Hits = obj.hits;
+        } else {
+            set resp.http.X-Cache = "MISS";
+        }
     } else {
-        set resp.http.X-Cache = "MISS";
+        # Hide all cache/internal headers in production for clean look
+        unset resp.http.X-Cache;
+        unset resp.http.X-Cache-Hits;
+        unset resp.http.Age;
+        unset resp.http.X-Varnish;
+        unset resp.http.Via;
     }
 
     # ============================================
-    # Security headers
+    # Security & Identification headers
     # ============================================
     unset resp.http.X-Powered-By;
     unset resp.http.Server;
-    unset resp.http.X-Varnish;
-    unset resp.http.Via;
+    
+    # Remove common security headers from backend to avoid duplicates 
+    # and keep it minimal
+    if (req.http.X-App-Env != "development") {
+        unset resp.http.X-Frame-Options;
+        unset resp.http.X-XSS-Protection;
+        unset resp.http.X-Content-Type-Options;
+        unset resp.http.Referrer-Policy;
+        unset resp.http.Strict-Transport-Security;
+    }
 }
 
 sub vcl_synth {
