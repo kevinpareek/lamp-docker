@@ -25,6 +25,8 @@ Stop wasting time configuring servers. Get everything you need—**Apache, Nginx
 | 🛠 **Dev Tools** | phpMyAdmin, Mailpit, Xdebug, ionCube Loader ready |
 | 🤖 **CLI Automation** | Powerful `tbs` command to manage everything |
 
+> **Note:** ionCube Loader is not officially supported on PHP 8.0 and PHP 8.5.
+
 ---
 
 ## 🚀 Getting Started

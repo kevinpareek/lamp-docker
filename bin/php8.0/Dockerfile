@@ -103,8 +103,7 @@ RUN install-php-extensions \
     xmlrpc \
     xmlwriter \
     xsl \
-    zip \
-    ioncube_loader
+    zip
 
 # ============================================
 # Install Xdebug (Conditional)

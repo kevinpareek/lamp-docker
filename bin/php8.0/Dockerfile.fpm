@@ -107,8 +107,7 @@ RUN set -eux; \
     xmlrpc \
     xmlwriter \
     xsl \
-    zip \
-    ioncube_loader
+    zip
 RUN set -eux; \
     if [ "${INSTALL_XDEBUG}" = "true" ]; then \
         install-php-extensions xdebug; \
