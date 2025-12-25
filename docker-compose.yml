@@ -113,6 +113,7 @@ services:
       APPLICATIONS_DIR_NAME: "${APPLICATIONS_DIR_NAME}"
       APP_ENV: "${APP_ENV:-development}"
       STACK_MODE: "hybrid"
+      TBS_ADMIN_USER: "${TBS_ADMIN_USER:-tbsadmin}"
     depends_on:
       varnish:
         condition: service_healthy
@@ -137,6 +138,7 @@ services:
       APPLICATIONS_DIR_NAME: "${APPLICATIONS_DIR_NAME}"
       APP_ENV: "${APP_ENV:-development}"
       STACK_MODE: "thunder"
+      TBS_ADMIN_USER: "${TBS_ADMIN_USER:-tbsadmin}"
     depends_on:
       varnish-thunder:
         condition: service_healthy
@@ -182,6 +184,7 @@ services:
       - "${SSL_DIR}:/etc/apache2/ssl-sites:rw"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
       - "./bin/php-entrypoint.sh:/usr/local/bin/php-entrypoint.sh:ro"
+      - "./bin/health-check.php:/var/www/internal/health-check.php:ro"
     networks:
       backend:
         aliases:
@@ -217,6 +220,7 @@ services:
       - "${APACHE_LOG_DIR}:/var/log/php-fpm"
       - "${BACKUP_DIR}:/var/lib/bkup/dumps"
       - "./bin/php-entrypoint.sh:/usr/local/bin/php-entrypoint.sh:ro"
+      - "./bin/health-check.php:/var/www/internal/health-check.php:ro"
     networks:
       backend:
         aliases:

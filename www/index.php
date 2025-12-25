@@ -528,7 +528,6 @@ if (!$is_production) {
             <div class="card" style="grid-column: 1 / -1; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; padding: 1rem;">
                 <h2 style="margin-bottom: 0; font-size: 0.9rem; white-space: nowrap;">⚡ Quick Actions:</h2>
                 <a href="?action=phpinfo" target="_blank" class="copy-btn" style="padding: 0.4rem 0.8rem; text-decoration: none;">phpinfo()</a>
-                <a href="/test-db.php" target="_blank" class="copy-btn" style="padding: 0.4rem 0.8rem; text-decoration: none;">Test Database</a>
                 <a href="/health-check.php" target="_blank" class="copy-btn" style="padding: 0.4rem 0.8rem; text-decoration: none;">Health Check</a>
                 <div style="flex-grow: 1;"></div>
                 

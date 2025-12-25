@@ -4,6 +4,12 @@
         Require all granted
     </Directory>
 
+    # Health check endpoint (moved outside document root for safety)
+    Alias /health-check.php /var/www/internal/health-check.php
+    <Directory /var/www/internal>
+        Require all granted
+    </Directory>
+
     # Security: Block VCS directories
     <DirectoryMatch "/\.(git|svn|hg|bzr|cvs)">
         Require all denied
