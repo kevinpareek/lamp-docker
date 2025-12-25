@@ -41,67 +41,77 @@ RUN set -eux; \
         openssl \
         # Database
         default-mysql-client \
-        # PHP Dependencies
-        libsqlite3-dev \
-        zlib1g-dev \
-        libzip-dev \
-        libicu-dev \
-        libonig-dev \
-        libcurl4-openssl-dev \
-        libssl-dev \
-        libmemcached-dev \
-        # Image Processing
-        libmagickwand-dev \
-        libfreetype6-dev \
-        libjpeg62-turbo-dev \
-        libpng-dev \
-        libwebp-dev \
-        libavif-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/cache/apt/*
 
 # ============================================
 # Install PHP Extensions (Optimized)
 # ============================================
-RUN set -eux; \
-    # Configure GD with all formats
-    docker-php-ext-configure gd \
-        --enable-gd \
-        --with-freetype \
-        --with-jpeg \
-        --with-webp \
-        --with-avif \
-    # Install all extensions in parallel
-    && docker-php-ext-install -j"$(nproc)" \
-        pdo_mysql \
-        pdo_sqlite \
-        mysqli \
-        bcmath \
-        zip \
-        intl \
-        mbstring \
-        gettext \
-        calendar \
-        exif \
-        opcache \
-        pcntl \
-        sockets \
-        gd \
-    # PECL Extensions
-    && pecl channel-update pecl.php.net \
-    && pecl install -o -f redis apcu imagick memcached \
-    && docker-php-ext-enable redis apcu imagick memcached \
-    && pecl clear-cache \
-    && rm -rf /tmp/pear
+COPY --from=mlocati/php-extension-installer /usr/bin/install-php-extensions /usr/local/bin/
+RUN install-php-extensions \
+    bcmath \
+    bz2 \
+    calendar \
+    ctype \
+    dba \
+    dom \
+    enchant \
+    exif \
+    ffi \
+    fileinfo \
+    ftp \
+    gd \
+    gettext \
+    gmp \
+    iconv \
+    igbinary \
+    imagick \
+    imap \
+    intl \
+    mbstring \
+    memcached \
+    mongodb \
+    msgpack \
+    mysqli \
+    odbc \
+    opcache \
+    pcntl \
+    pdo_dblib \
+    pdo_firebird \
+    pdo_mysql \
+    pdo_odbc \
+    pdo_pgsql \
+    pdo_sqlite \
+    pgsql \
+    phar \
+    posix \
+    readline \
+    redis \
+    shmop \
+    simplexml \
+    soap \
+    sockets \
+    sodium \
+    sqlite3 \
+    sysvmsg \
+    sysvsem \
+    sysvshm \
+    tidy \
+    tokenizer \
+    xml \
+    xmlreader \
+    xmlrpc \
+    xmlwriter \
+    xsl \
+    zip \
+    ioncube_loader
 
 # ============================================
 # Install Xdebug (Conditional)
 # ============================================
 RUN set -eux; \
     if [ "${INSTALL_XDEBUG}" = "true" ]; then \
-        pecl install xdebug \
-        && docker-php-ext-enable xdebug \
-        && pecl clear-cache; \
+        install-php-extensions xdebug; \
     fi
 
 # ============================================
