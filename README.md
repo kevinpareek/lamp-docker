@@ -3,7 +3,7 @@
 [![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](https://github.com/kevinpareek/turbo-stack/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)
-[![PHP](https://img.shields.io/badge/PHP-7.4--8.4-777BB4.svg)](https://www.php.net/)
+[![PHP](https://img.shields.io/badge/PHP-7.4--8.5-777BB4.svg)](https://www.php.net/)
 
 **The most complete, flexible, and production-ready Docker LAMP & LEMP environment for PHP developers.**
 
@@ -18,7 +18,7 @@ Stop wasting time configuring servers. Get everything you need—**Apache, Nginx
 | Feature | Description |
 |---------|-------------|
 | 🔥 **Dual Modes** | **Hybrid** (Nginx → Varnish → Apache) for compatibility, **Thunder** (Nginx → PHP-FPM) for performance |
-| 🐘 **PHP 7.4 - 8.4** | Switch PHP versions instantly with a single command |
+| 🐘 **PHP 7.4 - 8.5** | Switch PHP versions instantly with a single command |
 | 💾 **MySQL & MariaDB** | Choose from MySQL 5.7-8.4 or MariaDB 10.3-11.4 |
 | ⚡ **Caching Suite** | Pre-configured Redis, Memcached, and Varnish |
 | 🔒 **Smart SSL** | Auto SSL via mkcert (local) or Let's Encrypt (production) |

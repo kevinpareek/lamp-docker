@@ -1,0 +1,161 @@
+# ============================================
+# PHP 8.5 FPM Production Ready Docker Image
+# Optimized for Performance & Security
+# ============================================
+FROM php:8.5-fpm-bookworm AS base
+
+LABEL maintainer="PHP Turbo Stack <github.com/kevinpareek/turbo-stack>"
+LABEL version="2.0"
+LABEL description="Production-ready PHP 8.5 FPM with Redis, Imagick"
+LABEL org.opencontainers.image.source="https://github.com/kevinpareek/turbo-stack"
+
+# ============================================
+# Build Arguments
+# ============================================
+ARG DEBIAN_FRONTEND=noninteractive
+ARG INSTALL_XDEBUG=false
+
+# ============================================
+# Environment Variables
+# ============================================
+ENV COMPOSER_ALLOW_SUPERUSER=1 \
+    COMPOSER_HOME=/tmp/composer \
+    COMPOSER_NO_INTERACTION=1
+
+# ============================================
+# Install System Dependencies (Single Layer)
+# ============================================
+RUN set -eux; \
+    apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        # Essential
+        cron \
+        supervisor \
+        curl \
+        wget \
+        git \
+        unzip \
+        zip \
+        ca-certificates \
+        openssl \
+        # Healthcheck
+        libfcgi-bin \
+        # Database
+        default-mysql-client \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/cache/apt/*
+
+# ============================================
+# Install PHP Extensions (Optimized)
+# ============================================
+COPY --from=mlocati/php-extension-installer /usr/bin/install-php-extensions /usr/local/bin/
+
+RUN set -eux; \
+    install-php-extensions \
+        bcmath \
+        bz2 \
+        calendar \
+        ctype \
+        dba \
+        dom \
+        enchant \
+        exif \
+        ffi \
+        fileinfo \
+        ftp \
+        gd \
+        gettext \
+        gmp \
+        iconv \
+        igbinary \
+        imagick \
+        imap \
+        intl \
+        mbstring \
+        memcached \
+        mongodb \
+        msgpack \
+        mysqli \
+        odbc \
+        opcache \
+        pcntl \
+        pdo_dblib \
+        pdo_firebird \
+        pdo_mysql \
+        pdo_odbc \
+        pdo_pgsql \
+        pdo_sqlite \
+        pgsql \
+        phar \
+        posix \
+        readline \
+        redis \
+        shmop \
+        simplexml \
+        soap \
+        sockets \
+        sodium \
+        sqlite3 \
+        sysvmsg \
+        sysvsem \
+        sysvshm \
+        tidy \
+        tokenizer \
+        xml \
+        xmlreader \
+        xmlrpc \
+        xmlwriter \
+        xsl \
+        zip
+
+# ============================================
+# Install Xdebug (Conditional)
+# ============================================
+RUN set -eux; \
+    if [ "${INSTALL_XDEBUG}" = "true" ]; then \
+        install-php-extensions xdebug; \
+    fi
+
+# ============================================
+# Install Composer (Latest Stable)
+# ============================================
+COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
+
+# ============================================
+# Install WP-CLI
+# ============================================
+RUN curl -fsSL https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o /usr/local/bin/wp \
+    && chmod +x /usr/local/bin/wp
+
+# ============================================
+# Install mhsendmail
+# ============================================
+RUN curl -fsSL 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64' \
+        -o /usr/local/bin/mhsendmail \
+    && chmod +x /usr/local/bin/mhsendmail
+
+# ============================================
+# Setup Directories & Permissions
+# ============================================
+RUN set -eux; \
+    mkdir -p /var/log/{cron,supervisor} /var/www/html \
+    && touch /var/log/cron.log /var/log/supervisor/supervisord.log \
+    && chown -R www-data:www-data /var/www/html \
+    && chmod -R 755 /var/www/html
+
+# ============================================
+# Health Check
+# ============================================
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 || exit 1
+
+# ============================================
+# Expose Ports
+# ============================================
+EXPOSE 9000
+
+# ============================================
+# Entrypoint
+# ============================================
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

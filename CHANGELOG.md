@@ -53,7 +53,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.0.0
 - **Dual Stack Modes**:
   - **Hybrid**: Nginx (reverse proxy) → Varnish → Apache (PHP via mod_php)
   - **Thunder**: Nginx (frontend + backend) → PHP-FPM
-- **PHP Support**: Multiple versions (7.4, 8.0, 8.1, 8.2, 8.3, 8.4) via dedicated Docker images
+- **PHP Support**: Multiple versions (7.4, 8.0, 8.1, 8.2, 8.3, 8.4, 8.5) via dedicated Docker images
 - **Database Support**: MySQL (5.7, 8.0, 8.4) and MariaDB (10.3, 10.4, 10.5, 10.6, 10.11, 11.4)
 - **Pre-configured Services**: Nginx, Apache, MySQL/MariaDB, Redis, Varnish, Memcached, Mailpit, phpMyAdmin
 - **TBS CLI** (`tbs.sh`) with commands for:
