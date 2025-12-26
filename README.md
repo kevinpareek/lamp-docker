@@ -1,10 +1,14 @@
-# 🚀 PHP Turbo Stack (Docker LAMP & LEMP)
+# 🚀 Turbo Stack (Docker Web Environment)
 
 [![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)](https://github.com/kevinpareek/turbo-stack/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)
 [![PHP](https://img.shields.io/badge/PHP-7.4--8.5-777BB4.svg)](https://www.php.net/)
 
+## `Self-hosting with Turbocharged.`
+**The high-performance, open-source alternative to Cloudways & Coolify. Deploy and scale your apps on your own servers with zero complexity.**
+
+## Docker LAMP & LEMP
 **The most complete, flexible, and production-ready Docker LAMP & LEMP environment for PHP developers.**
 
 Stop wasting time configuring servers. Get everything you need—**Apache, Nginx, MySQL/MariaDB, Redis, Varnish, Memcached, Mailpit, and more**—in one powerful, optimized Docker setup.

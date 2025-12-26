@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentation | Turbo Stack</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        pre {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            font-size: 0.875rem;
+            margin: 1rem 0;
+        }
+        code {
+            font-family: 'Fira Code', monospace;
+            background: #f1f5f9;
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+            font-size: 0.9em;
+            color: #875df4;
+        }
+        pre code {
+            background: transparent;
+            padding: 0;
+            color: inherit;
+        }
+        .sidebar-link.active {
+            color: #875df4;
+            background: #875df410;
+            border-right: 2px solid #875df4;
+        }
+        h2 { font-size: 1.875rem; font-weight: 800; margin-top: 3rem; margin-bottom: 1.5rem; color: #0f172a; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem; }
+        h3 { font-size: 1.5rem; font-weight: 700; margin-top: 2rem; margin-bottom: 1rem; color: #1e293b; }
+        p { margin-bottom: 1.25rem; line-height: 1.75; color: #475569; }
+        table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.875rem; }
+        th { background: #f8fafc; text-align: left; padding: 0.75rem; border: 1px solid #e2e8f0; font-weight: 600; }
+        td { padding: 0.75rem; border: 1px solid #e2e8f0; }
+    </style>
+</head>
+<body class="bg-white text-slate-900">
+
+    <!-- Header -->
+    <header class="fixed w-full top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-100">
+        <div class="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center gap-2">
+                    <a href="/" class="flex items-center gap-2">
+                        <img src="logo.png" alt="Turbo Stack Logo" class="w-8 h-8 object-contain">
+                        <span class="text-lg font-extrabold tracking-tight">Turbo<span class="text-[#875df4]">Stack</span></span>
+                    </a>
+                </div>
+                <div class="flex items-center gap-4">
+                    <a href="https://github.com/kevinpareek/turbo-stack" class="text-slate-500 hover:text-slate-900 transition-colors">
+                        <i class="fab fa-github text-xl"></i>
+                    </a>
+                    <!-- Mobile Menu Button -->
+                    <button id="mobile-menu-button" class="lg:hidden p-2 text-slate-600 hover:text-[#875df4]">
+                        <i class="fas fa-bars text-xl"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <!-- Mobile Menu -->
+        <div id="mobile-menu" class="hidden lg:hidden bg-white border-b border-slate-100 px-4 py-6 space-y-6 shadow-xl max-h-[80vh] overflow-y-auto">
+            <div>
+                <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Getting Started</h5>
+                <ul class="space-y-3">
+                    <li><a href="#introduction" class="block text-sm font-medium text-slate-600">Introduction</a></li>
+                    <li><a href="#installation" class="block text-sm font-medium text-slate-600">Installation</a></li>
+                    <li><a href="#quick-start" class="block text-sm font-medium text-slate-600">Quick Start</a></li>
+                </ul>
+            </div>
+            <div>
+                <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">The TBS Command</h5>
+                <ul class="space-y-3">
+                    <li><a href="#core-commands" class="block text-sm font-medium text-slate-600">Core Commands</a></li>
+                    <li><a href="#app-management" class="block text-sm font-medium text-slate-600">App Management</a></li>
+                    <li><a href="#project-creators" class="block text-sm font-medium text-slate-600">Project Creators</a></li>
+                </ul>
+            </div>
+            <div>
+                <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Advanced</h5>
+                <ul class="space-y-3">
+                    <li><a href="#security" class="block text-sm font-medium text-slate-600">Security & Hardening</a></li>
+                    <li><a href="#maintenance" class="block text-sm font-medium text-slate-600">Maintenance</a></li>
+                    <li><a href="#roadmap" class="block text-sm font-medium text-slate-600">Roadmap</a></li>
+                </ul>
+            </div>
+        </div>
+    </header>
+
+    <div class="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 pt-16">
+        <div class="flex flex-col lg:flex-row gap-12">
+            
+            <!-- Sidebar -->
+            <aside class="lg:w-64 lg:fixed lg:h-[calc(100vh-4rem)] overflow-y-auto py-8 border-r border-slate-100 hidden lg:block">
+                <nav class="space-y-8">
+                    <div>
+                        <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Getting Started</h5>
+                        <ul class="space-y-2">
+                            <li><a href="#introduction" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">Introduction</a></li>
+                            <li><a href="#installation" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">Installation</a></li>
+                            <li><a href="#quick-start" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">Quick Start</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">The TBS Command</h5>
+                        <ul class="space-y-2">
+                            <li><a href="#core-commands" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">Core Commands</a></li>
+                            <li><a href="#app-management" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">App Management</a></li>
+                            <li><a href="#project-creators" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">Project Creators</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Advanced</h5>
+                        <ul class="space-y-2">
+                            <li><a href="#security" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">Security & Hardening</a></li>
+                            <li><a href="#maintenance" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">Maintenance</a></li>
+                            <li><a href="#roadmap" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">Roadmap</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Configuration</h5>
+                        <ul class="space-y-2">
+                            <li><a href="#env-config" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">Environment (.env)</a></li>
+                            <li><a href="#stack-modes" class="sidebar-link block px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#875df4] rounded-lg transition-all">Stack Modes</a></li>
+                        </ul>
+                    </div>
+                </nav>
+            </aside>
+
+            <!-- Main Content -->
+            <main class="flex-1 lg:ml-72 py-12 max-w-4xl">
+                
+                <section id="introduction">
+                    <h1 class="text-4xl font-extrabold text-slate-900 mb-6">Introduction</h1>
+                    <p class="text-xl text-slate-600 mb-8">Turbo Stack is the most complete, flexible, and production-ready Docker LAMP & LEMP environment for developers.</p>
+                    <p>Stop wasting time configuring servers. Get everything you need—Apache, Nginx, MySQL/MariaDB, Redis, Varnish, Memcached, Mailpit, and more—in one powerful, optimized Docker setup.</p>
+                    
+                    <div class="grid sm:grid-cols-2 gap-4 my-8">
+                        <div class="p-4 bg-[#875df4]/5 border border-[#875df4]/10 rounded-xl">
+                            <h4 class="font-bold text-[#875df4] mb-1">Dual Modes</h4>
+                            <p class="text-sm text-[#875df4] mb-0">Hybrid (Nginx + Apache) or Thunder (Nginx + PHP-FPM).</p>
+                        </div>
+                        <div class="p-4 bg-emerald-50 border border-emerald-100 rounded-xl">
+                            <h4 class="font-bold text-emerald-900 mb-1">PHP 7.4 - 8.5</h4>
+                            <p class="text-sm text-emerald-700 mb-0">Switch PHP versions instantly for any application.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="installation">
+                    <h2>Installation</h2>
+                    <p>The stack works on macOS, Linux, Windows, and other Unix-like systems. Ensure you have Docker and Docker Compose v2 installed.</p>
+                    
+                    <h3>1. Clone the repository</h3>
+                    <pre><code>git clone https://github.com/kevinpareek/turbo-stack.git
+cd turbo-stack</code></pre>
+
+                    <h3>2. Configure</h3>
+                    <p>Run the TBS wizard to choose your PHP version, Database, and Stack Mode.</p>
+                    <pre><code>./tbs.sh config</code></pre>
+
+                    <h3>3. Launch</h3>
+                    <pre><code>./tbs.sh start</code></pre>
+                </section>
+
+                <section id="core-commands">
+                    <h2>Core Commands</h2>
+                    <p>Manage your entire stack with simple, intuitive commands using the <code>tbs</code> utility.</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Command</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>tbs start</code></td><td>Start all services & open dashboard</td></tr>
+                            <tr><td><code>tbs stop</code></td><td>Stop all services & cleanup</td></tr>
+                            <tr><td><code>tbs restart</code></td><td>Restart stack & apply changes</td></tr>
+                            <tr><td><code>tbs status</code></td><td>Show status of running containers</td></tr>
+                            <tr><td><code>tbs info</code></td><td>Show stack and system information</td></tr>
+                            <tr><td><code>tbs config</code></td><td>Run the configuration wizard</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="app-management">
+                    <h2>App Management</h2>
+                    <p>Create and manage multiple applications within the same stack.</p>
+                    <pre><code>./tbs.sh app add my-new-app</code></pre>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Command</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>tbs app add &lt;name&gt;</code></td><td>Create a new app (SSH, SSL, Vhost, DB)</td></tr>
+                            <tr><td><code>tbs app rm &lt;app&gt;</code></td><td>Delete an application and its data</td></tr>
+                            <tr><td><code>tbs app ssl &lt;app&gt;</code></td><td>Manage SSL certificates</td></tr>
+                            <tr><td><code>tbs app php &lt;app&gt;</code></td><td>Configure PHP versions for the app</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="project-creators">
+                    <h2>Project Creators</h2>
+                    <p>Scaffold popular frameworks instantly with pre-configured settings.</p>
+                    <pre><code>./tbs.sh create laravel my-laravel-app
+./tbs.sh create wordpress my-blog</code></pre>
+                </section>
+
+                <section id="security">
+                    <h2>Security & Hardening</h2>
+                    <p>Turbo Stack is tuned for local development by default. For production, follow these hardening steps:</p>
+                    <ul class="list-disc ml-6 space-y-2 text-slate-600">
+                        <li><strong>Environment:</strong> Set <code>APP_ENV=production</code> in your <code>.env</code> file.</li>
+                        <li><strong>Credentials:</strong> Change all default passwords (MySQL, Redis, etc.) to strong, unique values.</li>
+                        <li><strong>Xdebug:</strong> Disable Xdebug by setting <code>INSTALL_XDEBUG=false</code>.</li>
+                        <li><strong>Network:</strong> Expose only ports 80 and 443. Keep internal services (DB, Redis) isolated.</li>
+                    </ul>
+                </section>
+
+                <section id="maintenance">
+                    <h2>Maintenance</h2>
+                    <p>Keep your stack healthy with these maintenance commands:</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Command</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>tbs backup</code></td><td>Full backup of all databases and apps</td></tr>
+                            <tr><td><code>tbs restore</code></td><td>Restore from a previous full backup</td></tr>
+                            <tr><td><code>tbs fix</code></td><td>Fix script line endings (CRLF to LF)</td></tr>
+                            <tr><td><code>tbs build</code></td><td>Rebuild images to apply security patches</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="roadmap">
+                    <h2>Roadmap</h2>
+                    <p>We are constantly improving Turbo Stack. Here is our detailed plan for the upcoming releases:</p>
+                    
+                    <div class="space-y-12 my-10">
+                        <!-- Node.js Section -->
+                        <div class="p-8 bg-white rounded-3xl border border-slate-100 shadow-sm hover:border-[#875df4]/30 transition-all">
+                            <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                                        <i class="fab fa-node-js text-2xl"></i>
+                                    </div>
+                                    <h4 class="text-2xl font-black text-slate-900">Node.js (PM2)</h4>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-sm font-bold text-[#875df4]">Q1 2026</span>
+                                    <span class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">IN PROGRESS</span>
+                                </div>
+                            </div>
+                            <p class="text-slate-600 mb-6 leading-relaxed">Full integration for Node.js applications with automated process management using PM2. This includes support for clustering, log management, and zero-downtime restarts.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-check text-emerald-500"></i> PM2 Runtime Integration
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-check text-emerald-500"></i> Auto-clustering Support
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-check text-emerald-500"></i> Log Rotation & Management
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-check text-emerald-500"></i> Custom Ecosystem Configs
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Python Section -->
+                        <div class="p-8 bg-white rounded-3xl border border-slate-100 shadow-sm hover:border-[#875df4]/30 transition-all">
+                            <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                                        <i class="fab fa-python text-2xl"></i>
+                                    </div>
+                                    <h4 class="text-2xl font-black text-slate-900">Python (Django/Flask)</h4>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-sm font-bold text-[#875df4]">Q1 2026</span>
+                                    <span class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">IN PROGRESS</span>
+                                </div>
+                            </div>
+                            <p class="text-slate-600 mb-6 leading-relaxed">Optimized environment for Python web frameworks. Includes pre-configured WSGI/ASGI servers like Gunicorn and Uvicorn with Nginx reverse proxying.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-check text-emerald-500"></i> Gunicorn/Uvicorn Setup
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-check text-emerald-500"></i> Virtualenv Management
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-check text-emerald-500"></i> Pip/Poetry Integration
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-check text-emerald-500"></i> Static File Optimization
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- PostgreSQL Section -->
+                        <div class="p-8 bg-white rounded-3xl border border-slate-100 shadow-sm hover:border-[#875df4]/30 transition-all">
+                            <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                                        <i class="fas fa-database text-2xl"></i>
+                                    </div>
+                                    <h4 class="text-2xl font-black text-slate-900">PostgreSQL</h4>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-sm font-bold text-[#875df4]">Q2 2026</span>
+                                    <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">PLANNED</span>
+                                </div>
+                            </div>
+                            <p class="text-slate-600 mb-6 leading-relaxed">Native PostgreSQL support with high-performance tuning. Automated backup and restoration tools integrated directly into the TBS CLI.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-circle text-blue-400 text-[10px]"></i> Version 14, 15, 16 Support
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-circle text-blue-400 text-[10px]"></i> pgAdmin Integration
+                                    </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-circle text-blue-400 text-[10px]"></i> Automated Daily Backups
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-circle text-blue-400 text-[10px]"></i> Performance Tuning
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- MongoDB Section -->
+                        <div class="p-8 bg-white rounded-3xl border border-slate-100 shadow-sm hover:border-[#875df4]/30 transition-all">
+                            <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-12 h-12 rounded-xl bg-green-50 text-green-600 flex items-center justify-center">
+                                        <i class="fas fa-leaf text-2xl"></i>
+                                    </div>
+                                    <h4 class="text-2xl font-black text-slate-900">MongoDB</h4>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-sm font-bold text-[#875df4]">Q2 2026</span>
+                                    <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">PLANNED</span>
+                                </div>
+                            </div>
+                            <p class="text-slate-600 mb-6 leading-relaxed">NoSQL database support for modern applications. Includes replica set configuration and integrated monitoring for data-heavy workloads.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-circle text-blue-400 text-[10px]"></i> Replica Set Config
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-circle text-blue-400 text-[10px]"></i> Mongo Express UI
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-circle text-blue-400 text-[10px]"></i> S3 Backup Sync
+                                </div>
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                                    <i class="fas fa-circle text-blue-400 text-[10px]"></i> Auth & Security Hardening
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="stack-modes">
+                    <h2>Stack Modes</h2>
+                    <p>Turbo Stack supports two primary modes of operation:</p>
+                    <div class="space-y-6">
+                        <div class="p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                            <h4 class="font-bold text-slate-900 mb-2">Hybrid Mode (Default)</h4>
+                            <p class="text-sm text-slate-600">Nginx acts as a reverse proxy, Varnish handles caching, and Apache serves the PHP content. Best for compatibility with <code>.htaccess</code> files.</p>
+                        </div>
+                        <div class="p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                            <h4 class="font-bold text-slate-900 mb-2">Thunder Mode</h4>
+                            <p class="text-sm text-slate-600">Nginx communicates directly with PHP-FPM. This mode offers the highest performance and is recommended for modern applications.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="mt-20 pt-8 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div class="text-sm text-slate-500">
+                        &copy; 2025 Turbo Stack. Maintained by <a href="https://www.blinkhours.com/" class="text-[#875df4] font-semibold">BlinkHours</a>.
+                    </div>
+                    <a href="/" class="text-[#875df4] font-bold hover:underline">
+                        Back to Home
+                    </a>
+                </div>
+
+            </main>
+        </div>
+    </div>
+
+    <script>
+        // Mobile Menu Toggle
+        const mobileMenuButton = document.getElementById('mobile-menu-button');
+        const mobileMenu = document.getElementById('mobile-menu');
+
+        mobileMenuButton.addEventListener('click', () => {
+            mobileMenu.classList.toggle('hidden');
+            const icon = mobileMenuButton.querySelector('i');
+            icon.classList.toggle('fa-bars');
+            icon.classList.toggle('fa-times');
+        });
+
+        // Close menu when clicking a link
+        document.querySelectorAll('#mobile-menu a').forEach(link => {
+            link.addEventListener('click', () => {
+                mobileMenu.classList.add('hidden');
+                const icon = mobileMenuButton.querySelector('i');
+                icon.classList.add('fa-bars');
+                icon.classList.remove('fa-times');
+            });
+        });
+
+        // Simple scroll spy for sidebar
+        window.addEventListener('DOMContentLoaded', () => {
+            const observer = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    const id = entry.target.getAttribute('id');
+                    if (entry.intersectionRatio > 0) {
+                        document.querySelectorAll('.sidebar-link').forEach(link => {
+                            link.classList.remove('active');
+                        });
+                        document.querySelector(`nav a[href="#${id}"]`)?.classList.add('active');
+                    }
+                });
+            });
+
+            document.querySelectorAll('section[id]').forEach((section) => {
+                observer.observe(section);
+            });
+        });
+    </script>
+</body>
+</html>
