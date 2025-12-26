@@ -65,10 +65,17 @@ socket_candidates() {
   done
 }
 
-# Cache location (inside the persistent DB volume)
-GUARD_DIR="/var/lib/mysql/.tbs"
+# Cache location (using log directory to avoid MariaDB database scan errors)
+GUARD_DIR="/var/log/mysql/.tbs-guard"
 CUR_FILE="$GUARD_DIR/root_password.cur"
 PREV_FILE="$GUARD_DIR/root_password.prev"
+
+# Migration from old location if exists
+if [ -d "/var/lib/mysql/.tbs" ]; then
+  mkdir -p "$GUARD_DIR"
+  cp -r /var/lib/mysql/.tbs/* "$GUARD_DIR/" 2>/dev/null || true
+  rm -rf /var/lib/mysql/.tbs
+fi
 
 mkdir -p "$GUARD_DIR" 2>/dev/null || true
 chmod 700 "$GUARD_DIR" 2>/dev/null || true

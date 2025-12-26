@@ -140,14 +140,6 @@ RUN curl -fsSL 'https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/m
 RUN set -eux; \
     echo "ServerName localhost" >> /etc/apache2/apache2.conf \
     && a2enmod ssl rewrite headers expires deflate proxy proxy_http remoteip \
-    && { \
-        echo 'ServerTokens Prod'; \
-        echo 'ServerSignature Off'; \
-        echo 'TraceEnable Off'; \
-        echo 'Header always set X-Content-Type-Options "nosniff"'; \
-        echo 'Header always set X-Frame-Options "SAMEORIGIN"'; \
-        echo 'Header always set X-XSS-Protection "1; mode=block"'; \
-    } >> /etc/apache2/conf-available/security.conf \
     && a2enconf security
 
 # ============================================

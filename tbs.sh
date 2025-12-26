@@ -60,11 +60,11 @@ fi
 # ============================================
 # Colors and Styles
 BOLD='\033[1m'
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+BLUE='\033[1;34m'
+YELLOW='\033[1;33m'
+CYAN='\033[1;36m'
 NC='\033[0m' # No Color
 
 # Detect OS type once at startup
@@ -102,15 +102,22 @@ _state_decode() {
     echo "$1" | tr 'N-ZA-Mn-za-m' 'A-Za-z' | base64 -d 2>/dev/null
 }
 
+# Global variable to cache state content
+_STATE_CACHE=""
+
 # Get raw decoded state content (cached for performance)
 _get_state_content() {
-    [[ ! -f "$TBS_STATE_FILE" ]] && return 1
-    _state_decode "$(cat "$TBS_STATE_FILE")"
+    if [[ -z "$_STATE_CACHE" ]]; then
+        [[ ! -f "$TBS_STATE_FILE" ]] && return 1
+        _STATE_CACHE=$(_state_decode "$(cat "$TBS_STATE_FILE")")
+    fi
+    echo "$_STATE_CACHE"
 }
 
 # Initialize state file with current .env values
 init_state_file() {
     mkdir -p "$TBS_STATE_DIR" 2>/dev/null || true
+    _STATE_CACHE="" # Clear cache
     
     local ts=$(date +%s)
     local state_content="MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root}
@@ -142,6 +149,7 @@ get_state_value() {
 # Update state file with current env values
 update_state_file() {
     mkdir -p "$TBS_STATE_DIR" 2>/dev/null || true
+    _STATE_CACHE="" # Clear cache
     
     # Preserve init timestamp if exists
     local init_ts=$(get_state_value "STATE_INITIALIZED" 2>/dev/null)
@@ -213,19 +221,33 @@ compare_db_versions() {
     local old_db="$1" new_db="$2"
     
     [[ "$old_db" == "$new_db" ]] && echo "same" && return
+    [[ -z "$old_db" ]] && echo "new" && return
     
     local old_type="${old_db%%[0-9]*}" new_type="${new_db%%[0-9]*}"
     [[ "$old_type" != "$new_type" ]] && echo "change" && return
     
-    # Convert versions to numbers for comparison
-    local old_num=$(echo "${old_db#$old_type}" | tr -d '.' | sed 's/^0*//')
-    local new_num=$(echo "${new_db#$new_type}" | tr -d '.' | sed 's/^0*//')
-    old_num=$(printf "%04d" "${old_num:-0}")
-    new_num=$(printf "%04d" "${new_num:-0}")
+    local old_ver="${old_db#$old_type}"
+    local new_ver="${new_db#$new_type}"
     
-    if [[ "$new_num" -gt "$old_num" ]]; then echo "upgrade"
-    elif [[ "$new_num" -lt "$old_num" ]]; then echo "downgrade"
-    else echo "same"; fi
+    if [[ "$old_ver" == "$new_ver" ]]; then
+        echo "same"
+    else
+        # Portable version comparison (works on macOS/Linux/Windows)
+        local i old_parts=(${old_ver//./ }) new_parts=(${new_ver//./ })
+        local len=${#old_parts[@]}
+        [[ ${#new_parts[@]} -gt $len ]] && len=${#new_parts[@]}
+        
+        for ((i=0; i<len; i++)); do
+            local o=${old_parts[i]:-0}
+            local n=${new_parts[i]:-0}
+            # Remove any non-numeric characters for comparison
+            o=${o//[!0-9]/}
+            n=${n//[!0-9]/}
+            if ((n > o)); then echo "upgrade"; return; fi
+            if ((n < o)); then echo "downgrade"; return; fi
+        done
+        echo "same"
+    fi
 }
 
 # ============================================
@@ -317,10 +339,49 @@ handle_db_version_change() {
             
             # Create backup
             if _auto_backup_database; then
+                local backup_path="$LATEST_DB_BACKUP"
+                
                 green_message "✅ Backup created successfully!"
                 echo ""
-                info_message "Data directory will be preserved. If upgrade fails,"
-                info_message "you can restore from: data/backup/"
+                if yes_no_prompt "Would you like to attempt an automatic data migration? (Recommended)"; then
+                    info_message "Starting database for migration..."
+                    docker compose up -d --build dbhost
+                    
+                    info_message "Waiting for database to be ready..."
+                    local count=0
+                    local ready=false
+                    while [ $count -lt 30 ]; do
+                        # Try to connect to the database
+                        if docker compose exec -T dbhost sh -c "if command -v mariadb >/dev/null 2>&1; then mariadb -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e 'SELECT 1'; else mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e 'SELECT 1'; fi" >/dev/null 2>&1; then
+                            ready=true
+                            break
+                        fi
+                        printf "."
+                        sleep 2
+                        ((count++))
+                    done
+                    echo ""
+                    
+                    if [[ "$ready" == "true" ]]; then
+                        info_message "Running upgrade tools..."
+                        local root_pass=$(get_state_value "MYSQL_ROOT_PASSWORD")
+                        [[ -z "$root_pass" ]] && root_pass="${MYSQL_ROOT_PASSWORD:-root}"
+                        
+                        # MySQL 8.0+ handles upgrade automatically, but MariaDB still benefits from mariadb-upgrade
+                        if [[ "$new_db" == *"mariadb"* ]]; then
+                            docker compose exec -T -e MYSQL_PWD="$root_pass" dbhost sh -c "if command -v mariadb-upgrade >/dev/null 2>&1; then mariadb-upgrade -uroot; else mysql_upgrade -uroot; fi" 2>/dev/null
+                        else
+                            # For MySQL, we just check if it's 8.0+
+                            info_message "MySQL 8.0+ handles upgrades automatically."
+                        fi
+                        green_message "✅ Upgrade/Migration attempt finished."
+                    else
+                        error_message "Database failed to become ready for migration."
+                        yellow_message "You may need to run 'tbs status' and check logs."
+                    fi
+                fi
+                
+                update_state_file
                 return 0
             else
                 error_message "Backup failed!"
@@ -329,7 +390,6 @@ handle_db_version_change() {
                     sed_i "s|^DATABASE=.*|DATABASE=$old_db|" "$tbsPath/.env"
                     DATABASE="$old_db"
                     yellow_message "Reverted to $old_db"
-                    # Not an error: user chose to keep current DB version.
                     return 0
                 fi
             fi
@@ -360,40 +420,110 @@ handle_db_version_change() {
                     echo ""
                     red_message "⚠️  FINAL WARNING: This will:"
                     echo "    • Backup ALL databases"
-                    echo "    • DELETE /data/mysql/ directory"
+                    echo "    • Move current data to a safety backup folder"
                     echo "    • Start fresh with $new_db"
-                    echo "    • You'll need to manually restore databases"
+                    echo "    • Attempt automatic restoration"
                     echo ""
                     read -p "  Type 'DOWNGRADE' to confirm: " confirm
                     
                     if [[ "$confirm" == "DOWNGRADE" ]]; then
                         info_message "Creating backup..."
                         if _auto_backup_database; then
-                            green_message "✅ Backup saved!"
+                            local backup_path="$LATEST_DB_BACKUP"
+                            
+                            # Safety Check: Ensure backup file exists and is not empty
+                            if [[ ! -s "$backup_path" ]]; then
+                                error_message "Backup file is empty or missing! Aborting for safety."
+                                return 1
+                            fi
+                            
+                            green_message "✅ Backup verified: $(basename "$backup_path")"
                             
                             info_message "Stopping database container..."
                             docker compose stop dbhost 2>/dev/null || true
                             docker compose rm -f dbhost 2>/dev/null || true
                             
-                            info_message "Removing old data directory..."
-                            local mysql_data="${MYSQL_DATA_DIR:-./data/mysql}"
-                            rm -rf "$mysql_data"/*
+                            local mysql_data_rel="${MYSQL_DATA_DIR:-data/mysql}"
+                            local mysql_data="$tbsPath/${mysql_data_rel#./}"
                             
-                            green_message "✅ Ready for fresh $new_db installation"
-                            info_message "Restore databases manually from: data/backup/"
+                            # Double check we are not deleting something critical
+                            if [[ "$mysql_data" == "$tbsPath" || "$mysql_data" == "/" ]]; then
+                                error_message "Invalid MYSQL_DATA_DIR path. Aborting."
+                                return 1
+                            fi
+
+                            local safety_backup="$tbsPath/data/mysql_pre_downgrade_$(date +%Y%m%d_%H%M%S)"
+                            info_message "Moving current data to $safety_backup for safety..."
+                            mkdir -p "$safety_backup"
+                            # Move all files and folders (including hidden ones) from mysql_data to safety_backup
+                            find "$mysql_data" -mindepth 1 -maxdepth 1 -exec mv {} "$safety_backup/" \; 2>/dev/null || true
+                            
+                            green_message "✅ Data directory cleared (moved to safety backup)."
+                            info_message "Starting fresh $new_db installation..."
+                            
+                            # Update state file immediately to reflect the new version
+                            update_state_file
+                            
+                            # Force rebuild of the database container
+                            docker compose up -d --build dbhost
+                            
+                            info_message "Waiting for database to initialize..."
+                            local count=0
+                            local ready=false
+                            while [ $count -lt 60 ]; do
+                                if docker compose exec -T dbhost sh -c "if command -v mariadb >/dev/null 2>&1; then mariadb -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e 'SELECT 1'; else mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e 'SELECT 1'; fi" >/dev/null 2>&1; then
+                                    ready=true
+                                    break
+                                fi
+                                printf "."
+                                sleep 2
+                                ((count++))
+                            done
+                            echo ""
+                            
+                            if [[ "$ready" == "true" ]]; then
+                                green_message "✅ Database is up and running!"
+                                echo ""
+                                if yes_no_prompt "Would you like to restore your databases from the backup now?"; then
+                                    info_message "Restoring databases..."
+                                    
+                                    local restore_success=false
+                                    local root_pass=$(get_state_value "MYSQL_ROOT_PASSWORD")
+                                    [[ -z "$root_pass" ]] && root_pass="${MYSQL_ROOT_PASSWORD:-root}"
+                                    
+                                    # Detect client binary inside container
+                                    local client_cmd="if command -v mariadb >/dev/null 2>&1; then echo 'mariadb'; else echo 'mysql'; fi"
+                                    local client_bin=$(docker compose exec -T dbhost sh -c "$client_cmd" 2>/dev/null | tr -d '\r\n')
+                                    client_bin="${client_bin:-mysql}"
+
+                                    if [[ "$backup_path" == *.gz ]]; then
+                                        if gunzip -c "$backup_path" | docker compose exec -T -e MYSQL_PWD="$root_pass" dbhost "$client_bin" -uroot >/dev/null 2>&1; then restore_success=true; fi
+                                    else
+                                        if cat "$backup_path" | docker compose exec -T -e MYSQL_PWD="$root_pass" dbhost "$client_bin" -uroot >/dev/null 2>&1; then restore_success=true; fi
+                                    fi
+                                    
+                                    if [[ "$restore_success" == "true" ]]; then
+                                        green_message "✅ Databases restored successfully!"
+                                    else
+                                        yellow_message "⚠️  Restore finished with some warnings. Please check your data."
+                                    fi
+                                else
+                                    info_message "You can restore manually later from: data/backup/$(basename "$backup_path")"
+                                fi
+                            else
+                                error_message "Database failed to start or become ready. Please run: tbs status"
+                            fi
                             return 0
                         else
                             error_message "Backup failed! Aborting downgrade."
                             sed_i "s|^DATABASE=.*|DATABASE=$old_db|" "$tbsPath/.env"
                             DATABASE="$old_db"
-                            # Continue with current DB version instead of aborting start.
                             return 0
                         fi
                     else
                         yellow_message "Downgrade cancelled."
                         sed_i "s|^DATABASE=.*|DATABASE=$old_db|" "$tbsPath/.env"
                         DATABASE="$old_db"
-                        # Continue with current DB version instead of aborting start.
                         return 0
                     fi
                     ;;
@@ -414,32 +544,119 @@ _auto_backup_database() {
     local backup_dir="$tbsPath/data/backup"
     local timestamp=$(date +"%Y%m%d_%H%M%S")
     local backup_file="$backup_dir/db_auto_backup_${timestamp}.sql"
+    local container_name="${COMPOSE_PROJECT_NAME:-turbo-stack}-db"
     
     mkdir -p "$backup_dir"
+    LATEST_DB_BACKUP="" # Reset global variable
     
     # Check if database is running
-    if ! is_service_running "dbhost"; then
-        yellow_message "Database not running, skipping backup."
+    local running=false
+    if is_service_running "dbhost"; then
+        running=true
+    else
+        # Try to start the existing container if it exists but is stopped
+        local container_id=$(docker ps -a --filter "name=${container_name}" --format "{{.ID}}" | head -n 1)
+        if [[ -n "$container_id" ]]; then
+            info_message "Database container stopped. Attempting to start for backup..."
+            docker start "$container_id" >/dev/null 2>&1
+            # Wait up to 20 seconds for it to be ready
+            local count=0
+            while [ $count -lt 10 ]; do
+                if docker exec -i "$container_id" sh -c "if command -v mariadb >/dev/null 2>&1; then mariadb -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e 'SELECT 1'; else mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e 'SELECT 1'; fi" >/dev/null 2>&1; then
+                    running=true
+                    break
+                fi
+                sleep 2
+                ((count++))
+            done
+        fi
+    fi
+
+    if [[ "$running" == "false" ]]; then
+        yellow_message "⚠️  Database not running and could not be started. Skipping SQL backup."
         return 0
     fi
     
     # Get current root password from state or env
     local root_pass=$(get_state_value "MYSQL_ROOT_PASSWORD")
     [[ -z "$root_pass" ]] && root_pass="${MYSQL_ROOT_PASSWORD:-root}"
-    local escaped_pass="${root_pass//\'/\'\'}"
     
-    # Dump all databases
-    if docker compose exec -T dbhost sh -c "
-        if command -v mariadb-dump >/dev/null 2>&1; then CMD='mariadb-dump'; else CMD='mysqldump'; fi
-        \$CMD -uroot -p'${escaped_pass}' --all-databases --single-transaction --routines --triggers --events 2>/dev/null
-    " > "$backup_file" 2>/dev/null && [[ -s "$backup_file" ]]; then
+    # Get list of valid databases from information_schema (more reliable than SHOW DATABASES)
+    local db_query="SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys', 'phpmyadmin') AND schema_name NOT REGEXP '^#';"
+    
+    # Detect client binary inside container
+    local client_cmd="if command -v mariadb >/dev/null 2>&1; then echo 'mariadb'; else echo 'mysql'; fi"
+    local client_bin
+    if is_service_running "dbhost"; then
+        client_bin=$(docker compose exec -T dbhost sh -c "$client_cmd" 2>/dev/null | tr -d '\r\n')
+    else
+        client_bin=$(docker exec -i "$container_name" sh -c "$client_cmd" 2>/dev/null | tr -d '\r\n')
+    fi
+    client_bin="${client_bin:-mysql}"
+
+    local db_list=""
+    local list_err=$(mktemp)
+    if is_service_running "dbhost"; then
+        db_list=$(docker compose exec -T -e MYSQL_PWD="$root_pass" dbhost "$client_bin" -uroot -N -B -e "$db_query" 2>"$list_err")
+    else
+        db_list=$(docker exec -i -e MYSQL_PWD="$root_pass" "$container_name" "$client_bin" -uroot -N -B -e "$db_query" 2>"$list_err")
+    fi
+
+    # If the output contains "OCI runtime exec failed" or similar, it's an error, not a list of DBs
+    if grep -qE "OCI runtime|exec failed|not found" "$list_err" 2>/dev/null; then
+        db_list=""
+    fi
+    rm -f "$list_err"
+
+    if [[ -z "$db_list" ]]; then
+        yellow_message "No valid databases found to backup (or database client not ready)."
+        return 0
+    fi
+
+    # Dump databases one by one to handle potential corruption in individual DBs
+    local err_file=$(mktemp)
+    local success_count=0
+    local total_count=0
+    
+    # Create a temporary combined SQL file
+    local temp_sql=$(mktemp)
+    
+    for db in $db_list; do
+        ((total_count++))
+        info_message "  Backing up: $db..."
+        
+        local dump_cmd="if command -v mariadb-dump >/dev/null 2>&1; then CMD='mariadb-dump'; else CMD='mysqldump'; fi; \$CMD -uroot -p\"\$MYSQL_PWD\" --databases \"$db\" --single-transaction --routines --triggers --events"
+        
+        local db_success=false
+        if docker compose exec -T -e MYSQL_PWD="$root_pass" dbhost sh -c "$dump_cmd" >> "$temp_sql" 2>>"$err_file"; then
+            db_success=true
+        elif docker exec -i -e MYSQL_PWD="$root_pass" "$container_name" sh -c "$dump_cmd" >> "$temp_sql" 2>>"$err_file"; then
+            db_success=true
+        fi
+        
+        if [[ "$db_success" == "true" ]]; then
+            ((success_count++))
+        else
+            yellow_message "  ⚠️  Failed to backup '$db', skipping..."
+        fi
+    done
+
+    if [[ $success_count -gt 0 ]]; then
+        mv "$temp_sql" "$backup_file"
         gzip "$backup_file" 2>/dev/null || true
         [[ -f "${backup_file}.gz" ]] && backup_file="${backup_file}.gz"
-        green_message "Backup saved: $(basename "$backup_file")"
+        LATEST_DB_BACKUP="$backup_file" # Set global variable for other functions
+        green_message "✅ Backup saved: $(basename "$backup_file") ($success_count/$total_count databases)"
+        rm -f "$err_file"
         return 0
     fi
     
-    rm -f "$backup_file" "${backup_file}.gz" 2>/dev/null
+    # If we failed completely
+    if [[ -s "$err_file" ]]; then
+        yellow_message "  Dump error: $(cat "$err_file" | head -n 1)"
+    fi
+    
+    rm -f "$backup_file" "${backup_file}.gz" "$err_file" "$temp_sql" 2>/dev/null
     return 1
 }
 
@@ -738,34 +955,24 @@ load_env_file() {
     [[ -f "$env_file" ]] || return 1
 
     while IFS= read -r line || [[ -n "$line" ]]; do
-        # Trim leading whitespace
-        line="${line#"${line%%[![:space:]]*}"}"
-
         # Skip blanks/comments
-        [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+        [[ "$line" =~ ^[[:space:]]*# || "$line" =~ ^[[:space:]]*$ ]] && continue
 
-        # Allow optional 'export '
-        [[ "$line" == export\ * ]] && line="${line#export }"
+        # Remove 'export ' if present
+        line="${line#export }"
 
-        # Only accept KEY=VALUE
-        if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+        # Parse KEY=VALUE
+        if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=[[:space:]]*(.*)[[:space:]]*$ ]]; then
             local key="${BASH_REMATCH[1]}"
             local value="${BASH_REMATCH[2]}"
 
-            # Trim trailing whitespace
-            value="${value%"${value##*[![:space:]]}"}"
-
-            # Strip surrounding quotes
-            if [[ "$value" =~ ^\"(.*)\"$ ]]; then
-                value="${BASH_REMATCH[1]}"
-            elif [[ "$value" =~ ^\047(.*)\047$ ]]; then
+            # Strip surrounding quotes (handles both " and ')
+            if [[ "$value" =~ ^[\"\'](.*)[\"\']$ ]]; then
                 value="${BASH_REMATCH[1]}"
             fi
 
             printf -v "$key" '%s' "$value"
-            if [[ "$export_vars" == "true" ]]; then
-                export "$key"
-            fi
+            [[ "$export_vars" == "true" ]] && export "$key"
         fi
     done < "$env_file"
 }
@@ -1220,18 +1427,6 @@ get_app_config_path() {
     echo "$tbsPath/sites/apps/${app_user}.json"
 }
 
-# Get app root directory (host path)
-get_app_root() {
-    local app_user="$1"
-    echo "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
-}
-
-# Get app root directory (container path)
-get_app_container_root() {
-    local app_user="$1"
-    echo "${APACHE_DOCUMENT_ROOT}/${APPLICATIONS_DIR_NAME}/$app_user"
-}
-
 # Find app_user by app_name (searches all configs)
 # Returns first matching app_user or empty if not found
 find_app_user_by_name() {
@@ -1255,6 +1450,106 @@ find_app_user_by_name() {
         fi
     done
     return 1
+}
+
+# Generate Nginx and Apache configurations for an app
+_generate_app_configs() {
+    local app_user="$1"
+    local domain="$2"
+    local webroot="${3:-public_html}"
+    
+    local app_public_root="${APACHE_DOCUMENT_ROOT}/${APPLICATIONS_DIR_NAME}/${app_user}/${webroot}"
+    
+    # Apache config
+    local vhost_file="${VHOSTS_DIR}/${domain}.conf"
+    cat >"$vhost_file" <<EOF
+<VirtualHost *:80>
+    ServerName $domain
+    ServerAlias www.$domain
+    DocumentRoot $app_public_root
+    Define APP_NAME $app_user
+    Include /etc/apache2/sites-enabled/partials/app-common.inc
+</VirtualHost>
+<VirtualHost *:443>
+    ServerName $domain
+    ServerAlias www.$domain
+    DocumentRoot $app_public_root
+    Define APP_NAME $app_user
+    Include /etc/apache2/sites-enabled/partials/app-common.inc
+    SSLEngine on
+    SSLCertificateFile /etc/apache2/ssl-sites/cert.pem
+    SSLCertificateKeyFile /etc/apache2/ssl-sites/cert-key.pem
+</VirtualHost>
+EOF
+
+    # Nginx config (Proxy)
+    local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
+    cat >"$nginx_file" <<EOF
+server {
+    listen 80;
+    server_name $domain www.$domain;
+    root $app_public_root;
+    index index.php index.html index.htm;
+    include /etc/nginx/includes/common.conf;
+    include /etc/nginx/includes/varnish-proxy.conf;
+}
+server {
+    listen 443 ssl;
+    server_name $domain www.$domain;
+    root $app_public_root;
+    index index.php index.html index.htm;
+    ssl_certificate /etc/nginx/ssl-sites/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
+    include /etc/nginx/includes/common.conf;
+    include /etc/nginx/includes/varnish-proxy.conf;
+}
+EOF
+
+    # Nginx-FPM config (Internal Backend)
+    if [[ -n "$NGINX_FPM_CONF_DIR" ]]; then
+        local fpm_nginx_file="${NGINX_FPM_CONF_DIR}/${domain}.conf"
+        cat >"$fpm_nginx_file" <<EOF
+server {
+    listen 8080;
+    server_name $domain www.$domain;
+    root $app_public_root;
+    index index.php index.html index.htm;
+    include /etc/nginx/includes/php-fpm.conf;
+}
+EOF
+    fi
+    
+    # Fix SSL paths if custom certs exist
+    if [[ -f "${SSL_DIR}/${domain}-cert.pem" ]]; then
+        sed_i "s|cert.pem|${domain}-cert.pem|g" "$vhost_file"
+        sed_i "s|cert-key.pem|${domain}-key.pem|g" "$vhost_file"
+        sed_i "s|cert.pem|${domain}-cert.pem|g" "$nginx_file"
+        sed_i "s|cert-key.pem|${domain}-key.pem|g" "$nginx_file"
+        [[ -f "${NGINX_FPM_CONF_DIR}/${domain}.conf" ]] && {
+            sed_i "s|cert.pem|${domain}-cert.pem|g" "${NGINX_FPM_CONF_DIR}/${domain}.conf"
+            sed_i "s|cert-key.pem|${domain}-key.pem|g" "${NGINX_FPM_CONF_DIR}/${domain}.conf"
+        }
+    fi
+}
+
+# Set permissions for an app inside the container
+_set_app_permissions() {
+    local app_user="$1"
+    local ssh_uid="$2"
+    
+    if is_service_running "$WEBSERVER_SERVICE"; then
+        docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
+            if [[ -n \"$ssh_uid\" ]]; then
+                groupadd -g $ssh_uid $app_user 2>/dev/null || true
+                useradd -u $ssh_uid -g $ssh_uid -M -d /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user $app_user 2>/dev/null || true
+                chown -R $ssh_uid:$ssh_uid /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user
+            else
+                chown -R www-data:www-data /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user
+            fi
+            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
+            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
+        " 2>/dev/null
+    fi
 }
 
 # Resolve input to app_user (accepts app_user or app_name)
@@ -1398,13 +1693,15 @@ set_app_config() {
 # Usage: execute_mysql_command [options] [query]
 execute_mysql_command() {
     # Use -T to disable TTY allocation (required for pipes/scripts)
-    # Pass arguments directly to mysql client to avoid shell quoting issues
-    local root_pass="${MYSQL_ROOT_PASSWORD:-root}"
-    if [[ -z "$root_pass" ]]; then
-        docker compose exec -T "$WEBSERVER_SERVICE" mysql -uroot -h dbhost "$@" 2>/dev/null
-    else
-        docker compose exec -T "$WEBSERVER_SERVICE" mysql -uroot -p"$root_pass" -h dbhost "$@" 2>/dev/null
-    fi
+    # Use MYSQL_PWD to avoid password quoting issues
+    local root_pass=$(get_state_value "MYSQL_ROOT_PASSWORD")
+    [[ -z "$root_pass" ]] && root_pass="${MYSQL_ROOT_PASSWORD:-root}"
+    
+    # Detect client binary inside webserver container
+    local client_bin="mysql"
+    docker compose exec -T "$WEBSERVER_SERVICE" command -v mariadb >/dev/null 2>&1 && client_bin="mariadb"
+    
+    docker compose exec -T -e MYSQL_PWD="$root_pass" "$WEBSERVER_SERVICE" "$client_bin" -uroot -h dbhost "$@" 2>/dev/null
 }
 
 # Execute MySQL dump through webserver container
@@ -1415,17 +1712,18 @@ execute_mysqldump() {
     [[ -z "$database" ]] && { error_message "Database name required"; return 1; }
     [[ -z "$output_file" ]] && { error_message "Output file required"; return 1; }
     
-    local root_pass="${MYSQL_ROOT_PASSWORD:-root}"
+    local root_pass=$(get_state_value "MYSQL_ROOT_PASSWORD")
+    [[ -z "$root_pass" ]] && root_pass="${MYSQL_ROOT_PASSWORD:-root}"
     local dump_opts="--single-transaction --routines --triggers --events"
+    
+    # Detect dump binary inside webserver container
+    local dump_bin="mysqldump"
+    docker compose exec -T "$WEBSERVER_SERVICE" command -v mariadb-dump >/dev/null 2>&1 && dump_bin="mariadb-dump"
     
     # Ensure output directory exists
     mkdir -p "$(dirname "$output_file")" 2>/dev/null || true
     
-    if [[ -z "$root_pass" ]]; then
-        docker compose exec -T "$WEBSERVER_SERVICE" mysqldump -uroot -h dbhost $dump_opts --databases "$database" >"$output_file" 2>/dev/null
-    else
-        docker compose exec -T "$WEBSERVER_SERVICE" mysqldump -uroot -p"$root_pass" -h dbhost $dump_opts --databases "$database" >"$output_file" 2>/dev/null
-    fi
+    docker compose exec -T -e MYSQL_PWD="$root_pass" "$WEBSERVER_SERVICE" "$dump_bin" -uroot -h dbhost $dump_opts --databases "$database" >"$output_file" 2>/dev/null
 }
 
 # ============================================
@@ -2636,7 +2934,7 @@ interactive_menu() {
 
         echo -e "\n${BLUE}📦 Application${NC}"
         echo "   7) App Manager - Create, Delete, Database, SSH, Domains"
-        echo "   8) Create Project (Laravel/WordPress/Symfony)"
+        echo "   8) Create Project (Laravel/WordPress/Blank)"
         echo "   9) Open App Code"
         echo "   10) App Configuration (varnish, webroot, perms)"
 
@@ -2658,7 +2956,7 @@ interactive_menu() {
         case $choice in
             1) tbs start ;; 2) tbs stop ;; 3) tbs restart ;; 4) tbs build ;; 5) tbs status ;; 6) tbs logs ;;
             7) tbs app ;;
-            8) echo ""; read -p "Type [laravel/wordpress/symfony/blank]: " t; read -p "App name: " n; tbs create "$t" "$n" ;;
+            8) echo ""; read -p "Type [laravel/wordpress/blank]: " t; t="${t:-blank}"; read -p "App name: " n; tbs create "$t" "$n" ;;
             9) tbs app code ;;
             10) tbs app config ;;
             11) tbs config ;; 12) tbs info ;;
@@ -2831,14 +3129,31 @@ tbs() {
             for app_dir in "$apps_dir"/*/; do
                 [[ ! -d "$app_dir" ]] && continue
                 local u=$(basename "$app_dir")
-                local n=$(get_app_config "$u" "name"); [[ -z "$n" || "$n" == "null" ]] && n="$u"
-                local d=$(get_app_config "$u" "primary_domain")
-                local icons=""
-                [[ "$(get_app_config "$u" "database.created")" == "true" ]] && icons+="💾"
-                [[ "$(get_app_config "$u" "ssh.enabled")" == "true" ]] && icons+="🔑"
-                [[ "$(get_app_config "$u" "varnish")" == "false" ]] && icons+="⚡"
+                local config_file=$(get_app_config_path "$u")
                 
-                printf "║  ${CYAN}%2d${NC}) %-18s ${GREEN}%-22s${NC} %s\n" "$i" "$u" "${d:-N/A}" "$icons"
+                local n="$u" d="N/A" icons=""
+                
+                if [[ -f "$config_file" && "$HAS_JQ" == "true" ]]; then
+                    # Read all needed values in one jq call for performance
+                    local vals=$(jq -r '[.name, .primary_domain, .database.created, .ssh.enabled, .varnish] | @tsv' "$config_file" 2>/dev/null)
+                    if [[ -n "$vals" ]]; then
+                        IFS=$'\t' read -r j_name j_domain j_db j_ssh j_varnish <<< "$vals"
+                        [[ -n "$j_name" && "$j_name" != "null" ]] && n="$j_name"
+                        [[ -n "$j_domain" && "$j_domain" != "null" ]] && d="$j_domain"
+                        [[ "$j_db" == "true" ]] && icons+="💾"
+                        [[ "$j_ssh" == "true" ]] && icons+="🔑"
+                        [[ "$j_varnish" == "false" ]] && icons+="⚡"
+                    fi
+                else
+                    # Fallback if jq is missing
+                    n=$(get_app_config "$u" "name"); [[ -z "$n" || "$n" == "null" ]] && n="$u"
+                    d=$(get_app_config "$u" "primary_domain"); [[ -z "$d" || "$d" == "null" ]] && d="N/A"
+                    [[ "$(get_app_config "$u" "database.created")" == "true" ]] && icons+="💾"
+                    [[ "$(get_app_config "$u" "ssh.enabled")" == "true" ]] && icons+="🔑"
+                    [[ "$(get_app_config "$u" "varnish")" == "false" ]] && icons+="⚡"
+                fi
+                
+                printf "║  ${CYAN}%2d${NC}) %-18s ${GREEN}%-22s${NC} %s\n" "$i" "$u" "$d" "$icons"
                 APP_LIST+=("$u")
                 ((i++))
             done
@@ -2882,6 +3197,127 @@ tbs() {
             printf "  $title: ${CYAN}$n${NC} (${GREEN}$u${NC})\n"
             [[ -n "$d" && "$d" != "null" ]] && printf "  Domain: ${GREEN}$d${NC}\n"
             blue_message "═══════════════════════════════════════════════════════════════"
+        }
+
+        # Backup a specific app
+        _app_backup() {
+            local app_user="$1"
+            local backup_dir="$tbsPath/data/backup"
+            mkdir -p "$backup_dir"
+            local timestamp=$(date +"%Y%m%d%H%M%S")
+            local backup_file="$backup_dir/app_backup_${app_user}_$timestamp.tgz"
+
+            info_message "Backing up app '$app_user' to $(basename "$backup_file")..."
+            
+            # Check if required containers are running
+            if ! check_containers_running true true; then
+                return 1
+            fi
+
+            # Create temporary directories
+            local temp_sql_dir="$backup_dir/sql_$app_user"
+            local temp_app_dir="$backup_dir/app_$app_user"
+            rm -rf "$temp_sql_dir" "$temp_app_dir"
+            mkdir -p "$temp_sql_dir" "$temp_app_dir"
+
+            # Backup databases
+            local dbs=()
+            while IFS= read -r line; do [[ -n "$line" ]] && dbs+=("$line"); done < <(_app_get_databases "$app_user")
+            
+            local db_count=0
+            for db in "${dbs[@]}"; do
+                local sql_file="$temp_sql_dir/db_backup_$db.sql"
+                info_message "  Backing up database: $db..."
+                if execute_mysqldump "$db" "$sql_file"; then
+                    ((db_count++))
+                else
+                    yellow_message "  ⚠️  Failed to backup database: $db"
+                fi
+            done
+
+            # Backup files
+            local app_path="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
+            if [[ -d "$app_path" ]]; then
+                info_message "  Backing up application files..."
+                cp -a "$app_path/." "$temp_app_dir/" 2>/dev/null || cp -r "$app_path/." "$temp_app_dir/" 2>/dev/null
+            else
+                error_message "Application directory not found: $app_path"
+                rm -rf "$temp_sql_dir" "$temp_app_dir"
+                return 1
+            fi
+
+            # Create archive
+            if tar -czf "$backup_file" -C "$backup_dir" "sql_$app_user" "app_$app_user" 2>/dev/null; then
+                green_message "✅ App backup completed!"
+                echo "   File: $(basename "$backup_file")"
+                echo "   Databases: $db_count"
+            else
+                error_message "Failed to create backup archive."
+            fi
+
+            rm -rf "$temp_sql_dir" "$temp_app_dir"
+        }
+
+        # Restore a specific app
+        _app_restore() {
+            local app_user="$1"
+            local backup_dir="$tbsPath/data/backup"
+            
+            local backup_files=($(ls -t "$backup_dir/app_backup_${app_user}_"*.tgz 2>/dev/null))
+            if [[ ${#backup_files[@]} -eq 0 ]]; then
+                error_message "No backups found for app: $app_user"
+                return 1
+            fi
+
+            echo "Available backups for $app_user:"
+            for i in "${!backup_files[@]}"; do
+                echo "$((i + 1)). $(basename "${backup_files[$i]}")"
+            done
+
+            read -p "Choose a backup number to restore: " backup_num
+            if [[ ! "$backup_num" =~ ^[0-9]+$ ]] || [[ "$backup_num" -lt 1 ]] || [[ "$backup_num" -gt "${#backup_files[@]}" ]]; then
+                error_message "Invalid selection."
+                return 1
+            fi
+            
+            local selected_backup="${backup_files[$((backup_num - 1))]}"
+            info_message "Restoring app '$app_user' from $(basename "$selected_backup")..."
+
+            if ! check_containers_running true true; then return 1; fi
+
+            local temp_restore_dir="$backup_dir/restore_${app_user}_temp"
+            rm -rf "$temp_restore_dir" && mkdir -p "$temp_restore_dir"
+
+            if ! tar -xzf "$selected_backup" -C "$temp_restore_dir" 2>/dev/null; then
+                error_message "Failed to extract backup."
+                rm -rf "$temp_restore_dir"
+                return 1
+            fi
+
+            # Restore Databases
+            local sql_dir="$temp_restore_dir/sql_$app_user"
+            if [[ -d "$sql_dir" ]]; then
+                for sql_file in "$sql_dir"/*.sql; do
+                    if [[ -f "$sql_file" ]]; then
+                        local db_name=$(basename "$sql_file" | sed 's/db_backup_//;s/\.sql//')
+                        info_message "  Restoring database: $db_name..."
+                        cat "$sql_file" | execute_mysql_command >/dev/null 2>&1 || yellow_message "  ⚠️  Failed: $db_name"
+                    fi
+                done
+            fi
+
+            # Restore Files
+            local app_data_dir="$temp_restore_dir/app_$app_user"
+            if [[ -d "$app_data_dir" ]]; then
+                info_message "  Restoring application files..."
+                local target_path="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
+                mkdir -p "$target_path"
+                cp -a "$app_data_dir/." "$target_path/" 2>/dev/null || cp -R "$app_data_dir/." "$target_path/" 2>/dev/null
+            fi
+
+            rm -rf "$temp_restore_dir"
+            green_message "✅ App restore completed!"
+            info_message "Run 'tbs app sync' if needed."
         }
         
         # Create database for app (supports multiple databases)
@@ -2971,7 +3407,7 @@ tbs() {
             
             # Also auto-detect databases with app prefix from MySQL
             local mysql_dbs
-            mysql_dbs=$(execute_mysql_command -N -B -e "SHOW DATABASES LIKE '${app_prefix}%';" 2>/dev/null)
+            mysql_dbs=$(execute_mysql_command -N -B -e "SHOW DATABASES LIKE '${app_prefix}%';" 2>/dev/null | grep -v "^#" || true)
             while IFS= read -r db; do
                 [[ -z "$db" ]] && continue
                 # Check if already in array
@@ -3009,10 +3445,11 @@ tbs() {
                 echo "  1) 📂 Open in VS Code      6) 🐘 PHP Config"
                 echo "  2) 🌐 Open in Browser      7) 🔒 SSL Certificates"
                 echo "  3) 💾 Database             8) ⚙️  Settings"
-                echo "  4) 🌍 Domains              9) 🗑️  Delete"
-                echo "  5) 🔑 SSH/SFTP             0) ↩️  Back"
+                echo "  4) 🌍 Domains              9) 📦 Backup/Restore"
+                echo "  5) 🔑 SSH/SFTP            10) 🗑️  Delete"
+                echo "  0) ↩️  Back"
                 echo ""
-                read -p "Select [0-9]: " choice
+                read -p "Select [0-10]: " choice
                 case "$choice" in
                     1) code "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$SELECTED_APP" ;;
                     2) local dom=$(get_app_config "$SELECTED_APP" "primary_domain")
@@ -3023,7 +3460,10 @@ tbs() {
                     6) tbs app php "$SELECTED_APP" ;;
                     7) tbs app ssl "$SELECTED_APP" ;;
                     8) tbs app config "$SELECTED_APP" ;;
-                    9) tbs app rm "$SELECTED_APP"; return 0 ;;
+                    9) echo ""; echo "  1) Backup App  2) Restore App"; read -p "  Action: " ba
+                       [[ "$ba" == "1" ]] && _app_backup "$SELECTED_APP"
+                       [[ "$ba" == "2" ]] && _app_restore "$SELECTED_APP" ;;
+                    10) tbs app rm "$SELECTED_APP"; return 0 ;;
                     0|"") return 0 ;;
                 esac
             done
@@ -3044,67 +3484,19 @@ tbs() {
             
             [[ -z "$domain" ]] && domain="${app_user}.localhost"
             
+            # Check if domain already exists
+            if [[ -f "${VHOSTS_DIR}/${domain}.conf" ]]; then
+                error_message "Domain '$domain' is already in use by another app."
+                return 1
+            fi
+
             info_message "Creating: $name → $app_user"
             
-            # Create vhost
-            local vhost_file="${VHOSTS_DIR}/${domain}.conf"
-            cat >"$vhost_file" <<EOF
-<VirtualHost *:80>
-    ServerName $domain
-    ServerAlias www.$domain
-    DocumentRoot $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user/public_html
-    Define APP_NAME $app_user
-    Include /etc/apache2/sites-enabled/partials/app-common.inc
-</VirtualHost>
-<VirtualHost *:443>
-    ServerName $domain
-    ServerAlias www.$domain
-    DocumentRoot $APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user/public_html
-    Define APP_NAME $app_user
-    Include /etc/apache2/sites-enabled/partials/app-common.inc
-    SSLEngine on
-    SSLCertificateFile /etc/apache2/ssl-sites/cert.pem
-    SSLCertificateKeyFile /etc/apache2/ssl-sites/cert-key.pem
-</VirtualHost>
-EOF
-
-            # Nginx config (Proxy)
-            local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
-            local app_public_root="$APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user/public_html"
+            # Generate configurations
+            _generate_app_configs "$app_user" "$domain" "public_html"
             
-            cat >"$nginx_file" <<EOF
-server {
-    listen 80;
-    server_name $domain www.$domain;
-    root $app_public_root;
-    index index.php index.html index.htm;
-    include /etc/nginx/includes/common.conf;
-    include /etc/nginx/includes/varnish-proxy.conf;
-}
-server {
-    listen 443 ssl;
-    server_name $domain www.$domain;
-    root $app_public_root;
-    index index.php index.html index.htm;
-    ssl_certificate /etc/nginx/ssl-sites/cert.pem;
-    ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
-    include /etc/nginx/includes/common.conf;
-    include /etc/nginx/includes/varnish-proxy.conf;
-}
-EOF
-            # Nginx-FPM config (Internal Backend)
-            if [[ -n "$NGINX_FPM_CONF_DIR" ]]; then
-                local fpm_nginx_file="${NGINX_FPM_CONF_DIR}/${domain}.conf"
-                cat >"$fpm_nginx_file" <<EOF
-server {
-    listen 8080;
-    server_name $domain www.$domain;
-    root $app_public_root;
-    index index.php index.html index.htm;
-    include /etc/nginx/includes/php-fpm.conf;
-}
-EOF
-            fi
+            local vhost_file="${VHOSTS_DIR}/${domain}.conf"
+            local nginx_file="${NGINX_CONF_DIR}/${domain}.conf"
 
             # Create directory structure
             local app_root="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$app_user"
@@ -3136,13 +3528,7 @@ EOF
             }
             
             # Set permissions in container
-            is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
-                groupadd -g $ssh_uid $app_user 2>/dev/null || true
-                useradd -u $ssh_uid -g $ssh_uid -M -d /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user $app_user 2>/dev/null || true
-                chown -R $ssh_uid:$ssh_uid /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user
-                find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 750 {} \;
-                find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 640 {} \;
-            " 2>/dev/null
+            _set_app_permissions "$app_user" "$ssh_uid"
             
             reload_webservers
             
@@ -3632,10 +4018,9 @@ POOL
                         echo "  Full path: $dr"
                         info_message "Restart to apply: tbs restart" ;;
                     perms|permissions)
-                        is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
-                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
-                            find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
-                        " 2>/dev/null && green_message "✅ Permissions reset" ;;
+                        local uid=$(get_app_config "$app_user" "ssh.uid")
+                        [[ "$uid" == "null" ]] && uid=""
+                        _set_app_permissions "$app_user" "$uid" && green_message "✅ Permissions reset" ;;
                     show) [[ "$HAS_JQ" == "true" ]] && jq '.' "$(get_app_config_path "$app_user")" || cat "$(get_app_config_path "$app_user")" ;;
                     *) error_message "Unknown config action: $sub_action" ;;
                 esac
@@ -3689,7 +4074,6 @@ POOL
                        echo ""
                        yellow_message "  Note: You can only change the path AFTER public_html/"
                        echo "  Example: For Laravel, enter 'public' to set public_html/public"
-                       echo "  Example: For Symfony, enter 'public' to set public_html/public"
                        echo "  Leave empty or enter '.' for public_html itself"
                        echo ""
                        read -p "  Subpath after public_html/ : " new_subpath
@@ -3720,10 +4104,9 @@ POOL
                        echo "  New webroot: $new_wr"
                        echo "  Full path:   $dr"
                        ;;
-                    3) is_service_running "$WEBSERVER_SERVICE" && docker compose exec -T "$WEBSERVER_SERVICE" bash -c "
-                           find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type d -exec chmod 755 {} \;
-                           find /var/www/html/${APPLICATIONS_DIR_NAME}/$app_user -type f -exec chmod 644 {} \;
-                       " 2>/dev/null && green_message "✅ Permissions reset" ;;
+                    3) local uid=$(get_app_config "$app_user" "ssh.uid")
+                       [[ "$uid" == "null" ]] && uid=""
+                       _set_app_permissions "$app_user" "$uid" && green_message "✅ Permissions reset" ;;
                     4) [[ "$HAS_JQ" == "true" ]] && jq '.' "$(get_app_config_path "$app_user")" || cat "$(get_app_config_path "$app_user")" ;;
                     0) return 0 ;;
                     *) error_message "Invalid option" ;;
@@ -3754,6 +4137,18 @@ POOL
             [[ "$HAS_JQ" == "true" ]] && jq '.' "$(get_app_config_path "$SELECTED_APP")"
             ;;
         
+        # tbs app backup [app] - Backup specific app
+        backup)
+            _app_get "$app_arg1" || return 1
+            _app_backup "$SELECTED_APP"
+            ;;
+            
+        # tbs app restore [app] - Restore specific app
+        restore)
+            _app_get "$app_arg1" || return 1
+            _app_restore "$SELECTED_APP"
+            ;;
+        
         # tbs app sync - Sync all app configs with current stack mode
         sync)
             info_message "Syncing all application configurations with current STACK_MODE: ${STACK_MODE}..."
@@ -3768,79 +4163,10 @@ POOL
                 
                 info_message "  Syncing: $u ($d)..."
                 
-                # Regenerate Nginx config (Proxy)
-                local nginx_file="${NGINX_CONF_DIR}/${d}.conf"
-                local app_public_root="$APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$u/public_html"
                 local webroot=$(get_app_config "$u" "webroot")
-                [[ -n "$webroot" && "$webroot" != "null" ]] && app_public_root="$APACHE_DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$u/$webroot"
+                [[ -z "$webroot" || "$webroot" == "null" ]] && webroot="public_html"
                 
-                cat >"$nginx_file" <<EOF
-server {
-    listen 80;
-    server_name $d www.$d;
-    root $app_public_root;
-    index index.php index.html index.htm;
-    include /etc/nginx/includes/common.conf;
-    include /etc/nginx/includes/varnish-proxy.conf;
-}
-server {
-    listen 443 ssl;
-    server_name $d www.$d;
-    root $app_public_root;
-    index index.php index.html index.htm;
-    ssl_certificate /etc/nginx/ssl-sites/cert.pem;
-    ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
-    include /etc/nginx/includes/common.conf;
-    include /etc/nginx/includes/varnish-proxy.conf;
-}
-EOF
-                # Regenerate Nginx-FPM config (Internal Backend)
-                if [[ -n "$NGINX_FPM_CONF_DIR" ]]; then
-                    local fpm_nginx_file="${NGINX_FPM_CONF_DIR}/${d}.conf"
-                    cat >"$fpm_nginx_file" <<EOF
-server {
-    listen 8080;
-    server_name $d www.$d;
-    root $app_public_root;
-    index index.php index.html index.htm;
-    include /etc/nginx/includes/php-fpm.conf;
-}
-EOF
-                fi
-                
-                # Regenerate Apache config (Hybrid mode)
-                local vhost_file="${VHOSTS_DIR}/${d}.conf"
-                cat >"$vhost_file" <<EOF
-<VirtualHost *:80>
-    ServerName $d
-    ServerAlias www.$d
-    DocumentRoot $app_public_root
-    Define APP_NAME $u
-    Include /etc/apache2/sites-enabled/partials/app-common.inc
-</VirtualHost>
-<VirtualHost *:443>
-    ServerName $d
-    ServerAlias www.$d
-    DocumentRoot $app_public_root
-    Define APP_NAME $u
-    Include /etc/apache2/sites-enabled/partials/app-common.inc
-    SSLEngine on
-    SSLCertificateFile /etc/apache2/ssl-sites/cert.pem
-    SSLCertificateKeyFile /etc/apache2/ssl-sites/cert-key.pem
-</VirtualHost>
-EOF
-                
-                # Fix SSL paths if custom certs exist
-                if [[ -f "${SSL_DIR}/${d}-cert.pem" ]]; then
-                    sed_i "s|cert.pem|$d-cert.pem|g" "$vhost_file"
-                    sed_i "s|cert-key.pem|$d-key.pem|g" "$vhost_file"
-                    sed_i "s|cert.pem|$d-cert.pem|g" "$nginx_file"
-                    sed_i "s|cert-key.pem|$d-key.pem|g" "$nginx_file"
-                    [[ -f "${NGINX_FPM_CONF_DIR}/${d}.conf" ]] && {
-                        sed_i "s|cert.pem|$d-cert.pem|g" "${NGINX_FPM_CONF_DIR}/${d}.conf"
-                        sed_i "s|cert-key.pem|$d-key.pem|g" "${NGINX_FPM_CONF_DIR}/${d}.conf"
-                    }
-                fi
+                _generate_app_configs "$u" "$d" "$webroot"
             done
             
             reload_webservers
@@ -3854,19 +4180,19 @@ EOF
             blue_message "║                    📦 tbs app - Help                         ║"
             blue_message "╚══════════════════════════════════════════════════════════════╝"
             echo ""
-            echo "  ${CYAN}tbs app${NC}                    Interactive app manager"
-            echo "  ${CYAN}tbs app add <name>${NC}         Create new app"
-            echo "  ${CYAN}tbs app rm [app]${NC}           Delete app"
-            echo "  ${CYAN}tbs app db [app]${NC}           Database management"
-            echo "  ${CYAN}tbs app ssh [app]${NC}          SSH/SFTP settings"
-            echo "  ${CYAN}tbs app domain [app]${NC}       Manage domains"
-            echo "  ${CYAN}tbs app ssl [app]${NC}          SSL certificates"
-            echo "  ${CYAN}tbs app php [app]${NC}          PHP configuration"
-            echo "  ${CYAN}tbs app config [app]${NC}       App settings"
-            echo "  ${CYAN}tbs app sync${NC}               Sync all apps with current mode"
-            echo "  ${CYAN}tbs app code [app]${NC}         Open in VS Code"
-            echo "  ${CYAN}tbs app open [app]${NC}         Open in browser"
-            echo "  ${CYAN}tbs app info [app]${NC}         Show app config"
+            echo -e "  ${CYAN}tbs app${NC}                    Interactive app manager"
+            echo -e "  ${CYAN}tbs app add <name>${NC}         Create new app"
+            echo -e "  ${CYAN}tbs app rm [app]${NC}           Delete app"
+            echo -e "  ${CYAN}tbs app db [app]${NC}           Database management"
+            echo -e "  ${CYAN}tbs app ssh [app]${NC}          SSH/SFTP settings"
+            echo -e "  ${CYAN}tbs app domain [app]${NC}       Manage domains"
+            echo -e "  ${CYAN}tbs app ssl [app]${NC}          SSL certificates"
+            echo -e "  ${CYAN}tbs app php [app]${NC}          PHP configuration"
+            echo -e "  ${CYAN}tbs app config [app]${NC}       App settings"
+            echo -e "  ${CYAN}tbs app code [app]${NC}         Open in VS Code"
+            echo -e "  ${CYAN}tbs app open [app]${NC}         Open in browser"
+            echo -e "  ${CYAN}tbs app info [app]${NC}         Show app config"
+            echo -e "  ${CYAN}tbs app sync${NC}               Sync all apps with current mode"
             echo ""
             ;;
         
@@ -3954,7 +4280,7 @@ EOF
         fi
         
         local databases
-        databases=$(execute_mysql_command -N -B -e "SHOW DATABASES;" | grep -Ev "^(information_schema|performance_schema|mysql|phpmyadmin|sys)$" || true)
+        databases=$(execute_mysql_command -N -B -e "SHOW DATABASES;" 2>/dev/null | grep -Ev "^(information_schema|performance_schema|mysql|phpmyadmin|sys|Database|#.*)$" || true)
 
         if [[ -z "$databases" ]]; then
             yellow_message "No databases found to backup."
@@ -3963,23 +4289,36 @@ EOF
         # Create temporary directories for SQL and app data
         local temp_sql_dir="$backup_dir/sql"
         local temp_app_dir="$backup_dir/app"
+        rm -rf "$temp_sql_dir" "$temp_app_dir"
         mkdir -p "$temp_sql_dir" "$temp_app_dir"
 
+        local db_count=0
         for db in $databases; do
             if [[ -n "$db" ]]; then
                 local backup_sql_file="$temp_sql_dir/db_backup_$db.sql"
-                if ! execute_mysqldump "$db" "$backup_sql_file"; then
-                    yellow_message "Failed to backup database: $db"
+                info_message "  Backing up database: $db..."
+                if execute_mysqldump "$db" "$backup_sql_file"; then
+                    ((db_count++))
+                else
+                    yellow_message "  ⚠️  Failed to backup database: $db"
                     rm -f "$backup_sql_file"
                 fi
             fi
         done
 
         # Copy application data to the temporary app directory
+        local app_count=0
         if [[ -d "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME" ]]; then
-            cp -r "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/." "$temp_app_dir/" 2>/dev/null || true
+            info_message "  Backing up application files..."
+            # Use -a if possible for better preservation, fallback to -r
+            if cp -a "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/." "$temp_app_dir/" 2>/dev/null; then
+                app_count=$(ls -1 "$temp_app_dir" | wc -l)
+            else
+                cp -r "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/." "$temp_app_dir/" 2>/dev/null || true
+                app_count=$(ls -1 "$temp_app_dir" | wc -l)
+            fi
         else
-            yellow_message "Applications directory not found, skipping app backup."
+            yellow_message "  ⚠️  Applications directory not found, skipping app backup."
         fi
 
         # Create the compressed backup file containing both SQL and app data
@@ -3992,7 +4331,8 @@ EOF
         # Clean up temporary directories
         rm -rf "$temp_sql_dir" "$temp_app_dir"
 
-        green_message "Backup completed: ${backup_file}"
+        green_message "✅ Backup completed: ${backup_file}"
+        echo "   Databases: $db_count | Apps: $app_count"
         ;;
 
     # Restore the Turbo Stack
@@ -4055,35 +4395,46 @@ EOF
         
         # Restore Databases
         if [[ -d "$temp_restore_dir/sql" ]]; then
-            info_message "Restoring databases..."
-            for sql_file in "$temp_restore_dir/sql"/*.sql; do
-                if [[ -f "$sql_file" ]]; then
-                    db_name=$(basename "$sql_file" | sed 's/db_backup_//;s/\.sql//')
-                    info_message "Restoring database: $db_name"
-                    # Pipe content directly to mysql client
-                    # Note: mysqldump with --databases includes CREATE DATABASE statement
-                    if ! cat "$sql_file" | execute_mysql_command; then
-                        yellow_message "Failed to restore database: $db_name"
+            local sql_files=("$temp_restore_dir/sql"/*.sql)
+            if [[ -e "${sql_files[0]}" ]]; then
+                info_message "Restoring databases..."
+                for sql_file in "${sql_files[@]}"; do
+                    if [[ -f "$sql_file" ]]; then
+                        local db_name=$(basename "$sql_file" | sed 's/db_backup_//;s/\.sql//')
+                        info_message "  Restoring database: $db_name..."
+                        # Pipe content directly to mysql client
+                        if ! cat "$sql_file" | execute_mysql_command >/dev/null 2>&1; then
+                            yellow_message "  ⚠️  Failed to restore database: $db_name"
+                        fi
                     fi
-                fi
-            done
+                done
+            else
+                yellow_message "No database backups found in archive."
+            fi
         fi
         
         # Restore Applications
         if [[ -d "$temp_restore_dir/app" ]]; then
-            info_message "Restoring applications..."
-            # Ensure applications directory exists
-            mkdir -p "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
-            # Copy with error handling
-            if ! cp -R "$temp_restore_dir/app/." "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/" 2>/dev/null; then
-                yellow_message "Some application files may not have been restored."
+            if [[ -n "$(ls -A "$temp_restore_dir/app" 2>/dev/null)" ]]; then
+                info_message "Restoring applications..."
+                # Ensure applications directory exists
+                mkdir -p "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
+                # Copy with error handling
+                if cp -a "$temp_restore_dir/app/." "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/" 2>/dev/null; then
+                    green_message "  ✅ Application files restored."
+                else
+                    cp -R "$temp_restore_dir/app/." "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/" 2>/dev/null || yellow_message "  ⚠️  Some application files may not have been restored."
+                fi
+            else
+                yellow_message "No application files found in archive."
             fi
         fi
         
         # Clean up
         rm -rf "$temp_restore_dir"
         
-        green_message "Restore completed from $selected_backup"
+        green_message "✅ Restore completed from $selected_backup"
+        info_message "You may need to run 'tbs app sync' to refresh configurations."
         ;;
 
     # SSL commands - redirect to app ssl
@@ -4137,9 +4488,9 @@ EOF
 
     # Quick project creators
     create)
-        local t="${2:-}" n="${3:-}"
+        local t="${2:-blank}" n="${3:-}"
         is_service_running "$WEBSERVER_SERVICE" || { yellow_message "Starting stack..."; tbs_start; }
-        [[ -z "$t" ]] && { info_message "Types: laravel, wordpress, symfony, blank"; read -p "Type: " t; }
+        [[ -z "$2" ]] && { info_message "Types: laravel, wordpress, blank"; read -p "Type [blank]: " t; t="${t:-blank}"; }
         [[ -z "$n" ]] && read -p "App name: " n; [[ -z "$n" ]] && { error_message "Name required"; return 1; }
         
         tbs app add "$n"
@@ -4195,10 +4546,8 @@ EOF
                 docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/$apps_dir/$u/public_html && wp config create --dbname='$db_name' --dbuser='$db_user' --dbpass='$db_pass' --dbhost='$db_host' --allow-root --force"
                 
                 green_message "WordPress: https://${u}.localhost" ;;
-            symfony) docker compose exec "$WEBSERVER_SERVICE" bash -c "cd /var/www/html/$apps_dir/$u && rm -rf public_html/* && composer create-project --no-interaction symfony/skeleton public_html"
-                     tbs app config "$u" webroot "public_html/public"; green_message "Symfony: https://${u}.localhost" ;;
             blank|empty) green_message "Blank: https://${u}.localhost" ;;
-            *) error_message "Unknown: $t. Available: laravel, wordpress, symfony, blank" ;;
+            *) error_message "Unknown: $t. Available: laravel, wordpress, blank" ;;
         esac
         ;;
 
@@ -4322,13 +4671,53 @@ EOF
             print_header
             echo "Usage: tbs [command] [args]"
             echo ""
-            echo "Stack:    start, stop, restart, build, status, config, info"
-            echo "Apps:     tbs app [add|rm|db|ssh|domain|ssl|php|config|code|open] <app>"
-            echo "Projects: tbs create [laravel|wordpress|symfony|blank] <name>"
-            echo "Tools:    shell [php|mysql|redis], pma, mail, code, logs [service]"
-            echo "SSH:      sshadmin [show|password]"
-            echo "State:    state [show|reset|init|diff]"
-            echo "Other:    backup, restore, ssl-localhost"
+            echo -e "${BLUE}Stack Management:${NC}"
+            echo -e "  ${CYAN}start${NC}              Start the stack & open browser"
+            echo -e "  ${CYAN}stop${NC}               Stop all services & cleanup"
+            echo -e "  ${CYAN}restart${NC}            Restart stack & apply changes"
+            echo -e "  ${CYAN}build${NC}              Rebuild containers & start"
+            echo -e "  ${CYAN}status${NC}             Show running services"
+            echo -e "  ${CYAN}info${NC}               Show stack & system info"
+            echo -e "  ${CYAN}config${NC}             Interactive configuration"
+            echo ""
+            echo -e "${BLUE}Application Management:${NC}"
+            echo -e "  ${CYAN}app${NC}                Interactive app manager"
+            echo -e "  ${CYAN}app add <name>${NC}     Create a new application"
+            echo -e "  ${CYAN}app rm <app>${NC}       Delete an application"
+            echo -e "  ${CYAN}app db <app>${NC}       Manage app databases"
+            echo -e "  ${CYAN}app domain <app>${NC}   Manage app domains"
+            echo -e "  ${CYAN}app ssl <app>${NC}      Manage SSL certificates"
+            echo -e "  ${CYAN}app php <app>${NC}      Configure PHP settings"
+            echo -e "  ${CYAN}app ssh <app>${NC}      SSH/SFTP settings"
+            echo -e "  ${CYAN}app config <app>${NC}   Advanced app settings"
+            echo -e "  ${CYAN}app info <app>${NC}     Show app configuration"
+            echo -e "  ${CYAN}app backup <app>${NC}   Backup specific app"
+            echo -e "  ${CYAN}app restore <app>${NC}  Restore specific app"
+            echo -e "  ${CYAN}app code <app>${NC}     Open app in VS Code"
+            echo -e "  ${CYAN}app open <app>${NC}     Open app in browser"
+            echo -e "  ${CYAN}app sync${NC}           Sync all apps with mode"
+            echo ""
+            echo -e "${BLUE}Project Creators:${NC}"
+            echo -e "  ${CYAN}create laravel${NC}     New Laravel project"
+            echo -e "  ${CYAN}create wordpress${NC}   New WordPress project"
+            echo -e "  ${CYAN}create blank${NC}       New blank PHP project"
+            echo ""
+            echo -e "${BLUE}Development Tools:${NC}"
+            echo -e "  ${CYAN}shell [service]${NC}    Shell (php, mysql, redis, nginx)"
+            echo -e "  ${CYAN}logs [service]${NC}     View logs (use -f to follow)"
+            echo -e "  ${CYAN}code [app|root]${NC}    Open in VS Code"
+            echo -e "  ${CYAN}pma${NC}                Open phpMyAdmin"
+            echo -e "  ${CYAN}mail${NC}               Open Mailpit"
+            echo -e "  ${CYAN}redis-cli${NC}          Open Redis CLI"
+            echo ""
+            echo -e "${BLUE}Maintenance & Security:${NC}"
+            echo -e "  ${CYAN}backup${NC}             Backup databases & apps"
+            echo -e "  ${CYAN}restore${NC}            Restore from backup"
+            echo -e "  ${CYAN}sshadmin${NC}           Manage master SSH user"
+            echo -e "  ${CYAN}fix${NC}                Fix script line endings"
+            echo -e "  ${CYAN}state [diff|show]${NC}  Manage config state"
+            echo -e "  ${CYAN}ssl-localhost${NC}      Generate localhost SSL"
+            echo ""
             ;;
         *)
             error_message "Unknown: $1 | Run: tbs help"
@@ -4337,7 +4726,7 @@ EOF
 }
 
 # Check requirements
-for c in docker sed curl; do command_exists "$c" || { error_message "$c not found"; exit 1; }; done
+for c in docker sed curl tar; do command_exists "$c" || { error_message "$c not found"; exit 1; }; done
 docker compose version >/dev/null 2>&1 || { error_message "Docker Compose missing"; exit 1; }
 
 tbs "$@"
