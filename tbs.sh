@@ -1452,6 +1452,143 @@ find_app_user_by_name() {
     return 1
 }
 
+# Generate Web Rules (Headers & Rewrites) for Nginx
+_generate_web_rules_nginx() {
+    local app_user="$1"
+    local config_file=$(get_app_config_path "$app_user")
+    [[ ! -f "$config_file" || "$HAS_JQ" != "true" ]] && return
+    
+    # Custom Header Rules
+    local headers=$(jq -c '.web_rules.headers[]' "$config_file" 2>/dev/null)
+    if [[ -n "$headers" ]]; then
+        echo "    # Custom Header Rules"
+        while read -r h; do
+            [[ -z "$h" ]] && continue
+            local name=$(echo "$h" | jq -r '.name')
+            local val=$(echo "$h" | jq -r '.value' | sed 's/"/\\"/g')
+            echo "    add_header \"$name\" \"$val\" always;"
+        done <<< "$headers"
+    fi
+    
+    # Custom Rewrite Rules
+    local rewrites=$(jq -c '.web_rules.rewrites[]' "$config_file" 2>/dev/null)
+    if [[ -n "$rewrites" ]]; then
+        echo "    # Custom Rewrite Rules"
+        while read -r r; do
+            [[ -z "$r" ]] && continue
+            local src=$(echo "$r" | jq -r '.source')
+            local dst=$(echo "$r" | jq -r '.destination' | sed 's/"/\\"/g')
+            local type=$(echo "$r" | jq -r '.type')
+            local keep_q=$(echo "$r" | jq -r '.keep_query // true')
+            local conds=$(echo "$r" | jq -c '.conditions // empty')
+            
+            # Handle query string discard
+            [[ "$keep_q" == "false" ]] && [[ "$dst" != *"?"* ]] && dst="${dst}?"
+            
+            local rule_line=""
+            if [[ "$type" == "301" ]]; then rule_line="rewrite \"$src\" \"$dst\" permanent;"
+            elif [[ "$type" == "302" ]]; then rule_line="rewrite \"$src\" \"$dst\" redirect;"
+            else rule_line="rewrite \"$src\" \"$dst\" last;"
+            fi
+            
+            # Handle conditions (Supports one condition for now)
+            if [[ -n "$conds" && "$conds" != "null" && "$conds" != "[]" ]]; then
+                local c_type=$(echo "$conds" | jq -r '.[0].type')
+                local c_op=$(echo "$conds" | jq -r '.[0].operator')
+                local c_val=$(echo "$conds" | jq -r '.[0].value' | sed 's/"/\\"/g')
+                local var=""
+                case "$c_type" in
+                    Host) var="\$http_host" ;;
+                    URI) var="\$uri" ;;
+                    "Query String") var="\$query_string" ;;
+                esac
+                
+                if [[ -n "$var" ]]; then
+                    local op_str="="
+                    [[ "$c_op" == "!=" ]] && op_str="!="
+                    [[ "$c_op" == "~" ]] && op_str="~"
+                    [[ "$c_op" == "!~" ]] && op_str="!~"
+                    echo "    if ($var $op_str \"$c_val\") {"
+                    echo "        $rule_line"
+                    echo "    }"
+                else
+                    echo "    $rule_line"
+                fi
+            else
+                echo "    $rule_line"
+            fi
+        done <<< "$rewrites"
+    fi
+}
+
+# Generate Web Rules (Headers & Rewrites) for Apache
+_generate_web_rules_apache() {
+    local app_user="$1"
+    local config_file=$(get_app_config_path "$app_user")
+    [[ ! -f "$config_file" || "$HAS_JQ" != "true" ]] && return
+    
+    # Custom Header Rules
+    local headers=$(jq -c '.web_rules.headers[]' "$config_file" 2>/dev/null)
+    if [[ -n "$headers" ]]; then
+        echo "    # Custom Header Rules"
+        while read -r h; do
+            [[ -z "$h" ]] && continue
+            local name=$(echo "$h" | jq -r '.name')
+            local val=$(echo "$h" | jq -r '.value' | sed 's/"/\\"/g')
+            echo "    Header set \"$name\" \"$val\""
+        done <<< "$headers"
+    fi
+    
+    # Custom Rewrite Rules
+    local rewrites=$(jq -c '.web_rules.rewrites[]' "$config_file" 2>/dev/null)
+    if [[ -n "$rewrites" ]]; then
+        echo "    # Custom Rewrite Rules"
+        echo "    RewriteEngine On"
+        while read -r r; do
+            [[ -z "$r" ]] && continue
+            local src=$(echo "$r" | jq -r '.source')
+            local dst=$(echo "$r" | jq -r '.destination' | sed 's/"/\\"/g')
+            local type=$(echo "$r" | jq -r '.type')
+            local keep_q=$(echo "$r" | jq -r '.keep_query // true')
+            local conds=$(echo "$r" | jq -c '.conditions // empty')
+            
+            # Handle conditions
+            if [[ -n "$conds" && "$conds" != "null" && "$conds" != "[]" ]]; then
+                local c_type=$(echo "$conds" | jq -r '.[0].type')
+                local c_op=$(echo "$conds" | jq -r '.[0].operator')
+                local c_val=$(echo "$conds" | jq -r '.[0].value' | sed 's/"/\\"/g')
+                local var=""
+                case "$c_type" in
+                    Host) var="%{HTTP_HOST}" ;;
+                    URI) var="%{REQUEST_URI}" ;;
+                    "Query String") var="%{QUERY_STRING}" ;;
+                esac
+                
+                if [[ -n "$var" ]]; then
+                    local flags=""
+                    [[ "$c_op" == "!=" ]] && flags="!"
+                    [[ "$c_op" == "~" ]] && flags="" # Regex is default
+                    [[ "$c_op" == "!~" ]] && flags="!"
+                    
+                    if [[ "$c_op" == "=" ]]; then
+                        echo "    RewriteCond $var =$c_val"
+                    else
+                        echo "    RewriteCond $var $flags$c_val"
+                    fi
+                fi
+            fi
+            
+            local flags="L"
+            [[ "$type" == "301" ]] && flags="R=301,L"
+            [[ "$type" == "302" ]] && flags="R=302,L"
+            [[ "$type" == "rewrite" ]] && flags="L,PT"
+            [[ "$keep_q" == "false" ]] && flags="$flags,QSD"
+            
+            echo "    RewriteRule \"$src\" \"$dst\" [$flags]"
+        done <<< "$rewrites"
+    fi
+}
+
 # Generate Nginx and Apache configurations for an app
 _generate_app_configs() {
     local app_user="$1"
@@ -1468,6 +1605,9 @@ _generate_app_configs() {
     ServerAlias www.$domain
     DocumentRoot $app_public_root
     Define APP_NAME $app_user
+EOF
+    _generate_web_rules_apache "$app_user" >> "$vhost_file"
+    cat >>"$vhost_file" <<EOF
     Include /etc/apache2/sites-enabled/partials/app-common.inc
 </VirtualHost>
 <VirtualHost *:443>
@@ -1475,6 +1615,9 @@ _generate_app_configs() {
     ServerAlias www.$domain
     DocumentRoot $app_public_root
     Define APP_NAME $app_user
+EOF
+    _generate_web_rules_apache "$app_user" >> "$vhost_file"
+    cat >>"$vhost_file" <<EOF
     Include /etc/apache2/sites-enabled/partials/app-common.inc
     SSLEngine on
     SSLCertificateFile /etc/apache2/ssl-sites/cert.pem
@@ -1489,6 +1632,9 @@ server {
     listen 80;
     server_name $domain www.$domain;
     root $app_public_root;
+EOF
+    _generate_web_rules_nginx "$app_user" >> "$nginx_file"
+    cat >>"$nginx_file" <<EOF
     index index.php index.html index.htm;
     include /etc/nginx/includes/common.conf;
     include /etc/nginx/includes/varnish-proxy.conf;
@@ -1497,6 +1643,9 @@ server {
     listen 443 ssl;
     server_name $domain www.$domain;
     root $app_public_root;
+EOF
+    _generate_web_rules_nginx "$app_user" >> "$nginx_file"
+    cat >>"$nginx_file" <<EOF
     index index.php index.html index.htm;
     ssl_certificate /etc/nginx/ssl-sites/cert.pem;
     ssl_certificate_key /etc/nginx/ssl-sites/cert-key.pem;
@@ -1513,6 +1662,9 @@ server {
     listen 8080;
     server_name $domain www.$domain;
     root $app_public_root;
+EOF
+        _generate_web_rules_nginx "$app_user" >> "$fpm_nginx_file"
+        cat >>"$fpm_nginx_file" <<EOF
     index index.php index.html index.htm;
     include /etc/nginx/includes/php-fpm.conf;
 }
@@ -1638,6 +1790,10 @@ init_app_config() {
         "owner": "www-data",
         "group": "www-data"
     },
+    "web_rules": {
+        "headers": [],
+        "rewrites": []
+    },
     "created_at": "$(date -Iseconds)"
 }
 EOF
@@ -1731,22 +1887,25 @@ execute_mysqldump() {
 # ============================================
 
 # Helper: Select a database from list (returns selected db name in SELECTED_DB)
-# Usage: _db_select_from_list db_list[@] || return
+# Usage: _db_select_from_list db_list || return
 _db_select_from_list() {
-    local -n _dbs=$1
+    local array_name=$1
     local prompt="${2:-Database}"
     SELECTED_DB=""
     
-    if [[ ${#_dbs[@]} -eq 0 ]]; then
+    local size
+    eval "size=\${#$array_name[@]}"
+    
+    if [[ $size -eq 0 ]]; then
         error_message "No databases found"
         return 1
     fi
     
     echo "  Select database number:"
-    read -p "  $prompt [1-${#_dbs[@]}]: " db_sel
+    read -p "  $prompt [1-$size]: " db_sel
     
-    if [[ "$db_sel" =~ ^[0-9]+$ ]] && [[ $db_sel -ge 1 ]] && [[ $db_sel -le ${#_dbs[@]} ]]; then
-        SELECTED_DB="${_dbs[$((db_sel-1))]}"
+    if [[ "$db_sel" =~ ^[0-9]+$ ]] && [[ $db_sel -ge 1 ]] && [[ $db_sel -le $size ]]; then
+        eval "SELECTED_DB=\${$array_name[$((db_sel-1))]}"
         return 0
     else
         error_message "Invalid selection"
@@ -3445,11 +3604,12 @@ tbs() {
                 echo "  1) 📂 Open in VS Code      6) 🐘 PHP Config"
                 echo "  2) 🌐 Open in Browser      7) 🔒 SSL Certificates"
                 echo "  3) 💾 Database             8) ⚙️  Settings"
-                echo "  4) 🌍 Domains              9) 📦 Backup/Restore"
-                echo "  5) 🔑 SSH/SFTP            10) 🗑️  Delete"
+                echo "  4) 🌍 Domains              9) 🌐 Web Rules"
+                echo "  5) 🔑 SSH/SFTP            10) 📦 Backup/Restore"
+                echo "  11) 🗑️  Delete"
                 echo "  0) ↩️  Back"
                 echo ""
-                read -p "Select [0-10]: " choice
+                read -p "Select [0-11]: " choice
                 case "$choice" in
                     1) code "$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME/$SELECTED_APP" ;;
                     2) local dom=$(get_app_config "$SELECTED_APP" "primary_domain")
@@ -3460,10 +3620,11 @@ tbs() {
                     6) tbs app php "$SELECTED_APP" ;;
                     7) tbs app ssl "$SELECTED_APP" ;;
                     8) tbs app config "$SELECTED_APP" ;;
-                    9) echo ""; echo "  1) Backup App  2) Restore App"; read -p "  Action: " ba
+                    9) tbs app rules "$SELECTED_APP" ;;
+                    10) echo ""; echo "  1) Backup App  2) Restore App"; read -p "  Action: " ba
                        [[ "$ba" == "1" ]] && _app_backup "$SELECTED_APP"
                        [[ "$ba" == "2" ]] && _app_restore "$SELECTED_APP" ;;
-                    10) tbs app rm "$SELECTED_APP"; return 0 ;;
+                    11) tbs app rm "$SELECTED_APP"; return 0 ;;
                     0|"") return 0 ;;
                 esac
             done
@@ -3984,6 +4145,201 @@ POOL
             esac
             ;;
 
+        # tbs app rules [app] [action] [args] - Web Rules (Headers & Rewrites)
+        rules|webrules)
+            _app_get "$app_arg1" || return 1
+            local app_user="$SELECTED_APP"
+            local sub_action="$app_arg2"
+            local cfg=$(get_app_config_path "$app_user")
+
+            # Ensure web_rules exists in config
+            if [[ "$HAS_JQ" == "true" ]]; then
+                local tmp=$(mktemp)
+                if ! jq -e '.web_rules' "$cfg" >/dev/null 2>&1; then
+                    jq '.web_rules = {"headers":[], "rewrites":[]}' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+                else
+                    # Ensure sub-keys exist
+                    jq 'if .web_rules.headers == null then .web_rules.headers = [] else . end | 
+                        if .web_rules.rewrites == null then .web_rules.rewrites = [] else . end' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+                fi
+                rm -f "$tmp" 2>/dev/null
+            fi
+
+            _rules_list() {
+                _app_header "$app_user" "🌐 Web Rules"
+                echo "  Header Rules:"
+                local headers=$(jq -c '.web_rules.headers[]' "$cfg" 2>/dev/null)
+                if [[ -z "$headers" ]]; then
+                    echo "    (None)"
+                else
+                    local i=1
+                    while read -r h; do
+                        local name=$(echo "$h" | jq -r '.name')
+                        local val=$(echo "$h" | jq -r '.value')
+                        printf "    %d) %-20s : %s\n" "$i" "$name" "$val"
+                        ((i++))
+                    done <<< "$headers"
+                fi
+                echo ""
+                echo "  Rewrite Rules:"
+                local rewrites=$(jq -c '.web_rules.rewrites[]' "$cfg" 2>/dev/null)
+                if [[ -z "$rewrites" ]]; then
+                    echo "    (None)"
+                else
+                    local i=1
+                    while read -r r; do
+                        local src=$(echo "$r" | jq -r '.source')
+                        local dst=$(echo "$r" | jq -r '.destination')
+                        local type=$(echo "$r" | jq -r '.type')
+                        printf "    %d) %-20s -> %-20s [%s]\n" "$i" "$src" "$dst" "$type"
+                        ((i++))
+                    done <<< "$rewrites"
+                fi
+                echo ""
+            }
+
+            if [[ -n "$sub_action" ]]; then
+                case "$sub_action" in
+                    list) _rules_list ;;
+                    add-header)
+                        local name="$app_arg3"
+                        local value="$4"
+                        [[ -z "$name" || -z "$value" ]] && { error_message "Usage: tbs app rules $app_user add-header <name> <value>"; return 1; }
+                        local new_h=$(jq -n --arg n "$name" --arg v "$value" '{name: $n, value: $v}')
+                        local tmp=$(mktemp)
+                        jq ".web_rules.headers += [$new_h]" "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+                        green_message "✅ Header added. Apply with: tbs app sync $app_user" ;;
+                    rm-header)
+                        local idx="$app_arg3"
+                        [[ -z "$idx" ]] && { error_message "Usage: tbs app rules $app_user rm-header <index>"; return 1; }
+                        local tmp=$(mktemp)
+                        jq "del(.web_rules.headers[$((idx-1))])" "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+                        green_message "✅ Header removed. Apply with: tbs app sync $app_user" ;;
+                    add-rewrite)
+                        local src="$app_arg3"
+                        local dst="$4"
+                        local type="${5:-301}"
+                        local keep_q="${6:-true}"
+                        local cond_json="${7:-null}"
+                        [[ -z "$src" || -z "$dst" ]] && { error_message "Usage: tbs app rules $app_user add-rewrite <source> <destination> [type] [keep_query] [conditions_json]"; return 1; }
+                        local new_r=$(jq -n --arg s "$src" --arg d "$dst" --arg t "$type" --arg k "$keep_q" --argjson c "$cond_json" \
+                            '{source: $s, destination: $d, type: $t, keep_query: ($k == "true"), conditions: $c}')
+                        local tmp=$(mktemp)
+                        jq ".web_rules.rewrites += [$new_r]" "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+                        green_message "✅ Rewrite rule added. Apply with: tbs app sync $app_user" ;;
+                    rm-rewrite)
+                        local idx="$app_arg3"
+                        [[ -z "$idx" ]] && { error_message "Usage: tbs app rules $app_user rm-rewrite <index>"; return 1; }
+                        local tmp=$(mktemp)
+                        jq "del(.web_rules.rewrites[$((idx-1))])" "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+                        green_message "✅ Rewrite rule removed. Apply with: tbs app sync $app_user" ;;
+                    *) error_message "Unknown rules action: $sub_action" ;;
+                esac
+                return 0
+            fi
+
+            while true; do
+                _rules_list
+                echo "  1) Add Header Rule      3) Add Redirect/Rewrite Rule"
+                echo "  2) Remove Header Rule   4) Remove Redirect/Rewrite Rule"
+                echo "  5) Sync & Apply Rules"
+                echo "  0) Back"
+                echo ""
+                read -p "Select [0-5]: " choice
+                case "$choice" in
+                    1) echo ""
+                       blue_message "Add Header Rule"
+                       echo "  Select Header Type:"
+                       echo "    1) Custom (Manual)           5) Strict-Transport-Security"
+                       echo "    2) X-Content-Type-Options    6) X-Frame-Options"
+                       echo "    3) Content-Security-Policy   7) Referrer-Policy"
+                       echo "    4) Permissions-Policy        0) Cancel"
+                       echo ""
+                       read -p "  Select [0-7]: " ht_choice
+                       
+                       local hn="" hv=""
+                       case "$ht_choice" in
+                           1) read -p "  Header Name: " hn; read -p "  Header Value: " hv ;;
+                           2) hn="X-Content-Type-Options"; hv="nosniff" ;;
+                           3) hn="Content-Security-Policy"; hv="default-src 'self' http: https: data: blob: 'unsafe-inline'" ;;
+                           4) hn="Permissions-Policy"; hv="geolocation=(), microphone=(), camera=()" ;;
+                           5) hn="Strict-Transport-Security"; hv="max-age=31536000; includeSubDomains; preload" ;;
+                           6) hn="X-Frame-Options"; hv="SAMEORIGIN" ;;
+                           7) hn="Referrer-Policy"; hv="strict-origin-when-cross-origin" ;;
+                           *) continue ;;
+                       esac
+                       
+                       if [[ "$ht_choice" != "1" ]]; then
+                           echo "  Header: ${CYAN}$hn${NC}"
+                           read -p "  Value [default: $hv]: " custom_hv
+                           hv="${custom_hv:-$hv}"
+                       fi
+                       
+                       [[ -n "$hn" && -n "$hv" ]] && tbs app rules "$app_user" add-header "$hn" "$hv" ;;
+                    2) read -p "  Header Index to remove: " hi
+                       [[ -n "$hi" ]] && tbs app rules "$app_user" rm-header "$hi" ;;
+                    3) echo ""
+                       blue_message "Add Redirect or Rewrite Rule"
+                       
+                       # Action
+                       echo "  Action:"
+                       echo "    1) Permanent Redirect (301) - Best for SEO"
+                       echo "    2) Temporary Redirect (302)"
+                       echo "    3) Internal Rewrite (Advanced)"
+                       read -p "  Select [1-3] (default 1): " rt_choice
+                       local rt="301"
+                       [[ "$rt_choice" == "2" ]] && rt="302"
+                       [[ "$rt_choice" == "3" ]] && rt="rewrite"
+                       
+                       # Query String
+                       read -p "  Keep original query string? [Y/n]: " keep_q_choice
+                       local keep_q="true"
+                       [[ "$keep_q_choice" =~ ^[nN]$ ]] && keep_q="false"
+                       
+                       # Source & Destination
+                       echo "  Old Path (e.g., /old-page or ^/blog/.*)"
+                       read -p "  From: " rs
+                       echo "  New Path (e.g., /new-page or /news/\$1)"
+                       read -p "  To:   " rd
+                       
+                       # Conditions
+                       local cond_json="null"
+                       read -p "  Attach condition? [y/N]: " attach_cond
+                       if [[ "$attach_cond" =~ ^[yY]$ ]]; then
+                           echo ""
+                           echo "  Condition Type:"
+                           echo "    1) Host (Domain)"
+                           echo "    2) URI (Path)"
+                           echo "    3) Query String"
+                           read -p "  Select [1-3]: " ct_choice
+                           local ct="Host"
+                           [[ "$ct_choice" == "2" ]] && ct="URI"
+                           [[ "$ct_choice" == "3" ]] && ct="Query String"
+                           
+                           echo "  Operator:"
+                           echo "    1) Equals (=)"
+                           echo "    2) Not Equals (!=)"
+                           echo "    3) Matches (~)"
+                           echo "    4) Does Not Match (!~)"
+                           read -p "  Select [1-4]: " op_choice
+                           local op="="
+                           [[ "$op_choice" == "2" ]] && op="!="
+                           [[ "$op_choice" == "3" ]] && op="~"
+                           [[ "$op_choice" == "4" ]] && op="!~"
+                           
+                           read -p "  Value (e.g., example.com): " cv
+                           cond_json="[{\"type\": \"$ct\", \"operator\": \"$op\", \"value\": \"$cv\"}]"
+                       fi
+                       
+                       [[ -n "$rs" && -n "$rd" ]] && tbs app rules "$app_user" add-rewrite "$rs" "$rd" "$rt" "$keep_q" "$cond_json" ;;
+                    4) read -p "  Rule Index to remove: " ri
+                       [[ -n "$ri" ]] && tbs app rules "$app_user" rm-rewrite "$ri" ;;
+                    5) tbs app sync "$app_user" ;;
+                    0|"") return 0 ;;
+                esac
+            done
+            ;;
+
         # tbs app config [app] [action] [value] - App settings
         config|settings)
             _app_get "$app_arg1" || return 1
@@ -4149,28 +4505,41 @@ POOL
             _app_restore "$SELECTED_APP"
             ;;
         
-        # tbs app sync - Sync all app configs with current stack mode
+        # tbs app sync [app] - Sync app configs with current stack mode
         sync)
-            info_message "Syncing all application configurations with current STACK_MODE: ${STACK_MODE}..."
-            local apps_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
-            [[ ! -d "$apps_dir" ]] && { yellow_message "No apps to sync."; return 0; }
-            
-            for app_dir in "$apps_dir"/*/; do
-                [[ ! -d "$app_dir" ]] && continue
-                local u=$(basename "$app_dir")
+            local target_app="$app_arg1"
+            if [[ -n "$target_app" ]]; then
+                local u=$(resolve_app_user "$target_app")
+                [[ -z "$u" ]] && { error_message "App '$target_app' not found."; return 1; }
                 local d=$(get_app_config "$u" "primary_domain")
                 [[ -z "$d" || "$d" == "null" ]] && d="${u}.localhost"
-                
-                info_message "  Syncing: $u ($d)..."
-                
                 local webroot=$(get_app_config "$u" "webroot")
                 [[ -z "$webroot" || "$webroot" == "null" ]] && webroot="public_html"
                 
+                info_message "Syncing configuration for $u ($d)..."
                 _generate_app_configs "$u" "$d" "$webroot"
-            done
+            else
+                info_message "Syncing all application configurations with current STACK_MODE: ${STACK_MODE}..."
+                local apps_dir="$DOCUMENT_ROOT/$APPLICATIONS_DIR_NAME"
+                [[ ! -d "$apps_dir" ]] && { yellow_message "No apps to sync."; return 0; }
+                
+                for app_dir in "$apps_dir"/*/; do
+                    [[ ! -d "$app_dir" ]] && continue
+                    local u=$(basename "$app_dir")
+                    local d=$(get_app_config "$u" "primary_domain")
+                    [[ -z "$d" || "$d" == "null" ]] && d="${u}.localhost"
+                    
+                    info_message "  Syncing: $u ($d)..."
+                    
+                    local webroot=$(get_app_config "$u" "webroot")
+                    [[ -z "$webroot" || "$webroot" == "null" ]] && webroot="public_html"
+                    
+                    _generate_app_configs "$u" "$d" "$webroot"
+                done
+            fi
             
             reload_webservers
-            green_message "✅ All apps synced successfully!"
+            green_message "✅ Sync completed and web servers reloaded."
             ;;
         
         # Help

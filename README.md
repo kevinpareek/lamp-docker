@@ -23,6 +23,7 @@ Stop wasting time configuring servers. Get everything you need—**Apache, Nginx
 | ⚡ **Caching Suite** | Pre-configured Redis, Memcached, and Varnish |
 | 🔒 **Smart SSL** | Auto SSL via mkcert (local) or Let's Encrypt (production) |
 | 🛠 **Dev Tools** | phpMyAdmin, Mailpit, Xdebug, ionCube Loader ready |
+| 🌐 **Web Rules** | Custom headers & URL rewrites per application |
 | 🤖 **CLI Automation** | Powerful `tbs` command to manage everything |
 
 > **Note:** ionCube Loader is not officially supported on PHP 8.0 and PHP 8.5.
@@ -128,65 +129,63 @@ Manage your entire stack with simple, intuitive commands.
 ### Core Commands
 | Command | Description |
 | :--- | :--- |
-| `tbs` | Open interactive menu |
-| `tbs start` | Start all services |
-| `tbs stop` | Stop all services |
-| `tbs restart` | Restart the stack |
-| `tbs build` | Rebuild images and start |
-| `tbs status` | Show running containers |
-| `tbs logs [service]` | Stream logs |
-| `tbs config` | Configuration wizard |
-| `tbs info` | Show stack info |
+| `tbs` | Open interactive main menu |
+| `tbs start` | Start all services & open dashboard |
+| `tbs stop` | Stop all services & cleanup |
+| `tbs restart` | Restart stack & apply configuration changes |
+| `tbs build` | Rebuild images and start services |
+| `tbs status` | Show status of running containers |
+| `tbs info` | Show stack, system, and state information |
+| `tbs config` | Run the interactive configuration wizard |
+| `tbs logs [service]` | Stream logs (use `-f` to follow) |
 
 ### App Management (`tbs app`)
 | Command | Description |
 | :--- | :--- |
-| `tbs app` | Interactive app manager |
-| `tbs app add <name>` | Create new app (auto SSH, SSL, vhost) |
-| `tbs app rm [app]` | Delete app |
-| `tbs app db [app]` | Database management |
-| `tbs app ssh [app]` | SSH/SFTP settings |
-| `tbs app domain [app]` | Manage domains |
-| `tbs app ssl [app]` | SSL certificates |
-| `tbs app php [app]` | PHP configuration |
-| `tbs app config [app]` | App settings (varnish, webroot, etc.) |
-| `tbs app code [app]` | Open in VS Code |
-| `tbs app open [app]` | Open in browser |
-| `tbs app info [app]` | Show app config |
-| `tbs app supervisor [app]` | Manage background workers |
-| `tbs app cron [app]` | Manage cron jobs |
-| `tbs app logs [app]` | App logging |
-
-> Database management is app-scoped via `tbs app db <app>`, which covers create, import/export, reset password, and delete. Databases and MySQL users share the same app-prefixed name (for example, `myapp_abcd`).
+| `tbs app` | Open interactive application manager |
+| `tbs app add <name>` | Create a new app (SSH, SSL, Vhost, DB) |
+| `tbs app rm <app>` | Delete an application and its data |
+| `tbs app db <app>` | Manage app-specific databases |
+| `tbs app rules <app>` | **New:** Manage custom headers & URL rewrites |
+| `tbs app domain <app>` | Manage domains and aliases |
+| `tbs app ssl <app>` | Manage SSL certificates (Local/Live) |
+| `tbs app php <app>` | Configure PHP versions and settings |
+| `tbs app ssh <app>` | Manage SSH/SFTP access and permissions |
+| `tbs app config <app>` | Advanced settings (Varnish, Webroot, etc.) |
+| `tbs app sync [app]` | Sync app configs with current stack mode |
+| `tbs app backup <app>` | Backup a specific application |
+| `tbs app restore <app>` | Restore a specific application |
+| `tbs app code <app>` | Open application folder in VS Code |
+| `tbs app open <app>` | Open application in your default browser |
+| `tbs app info <app>` | Show detailed application configuration |
+| `tbs app supervisor <app>` | Manage background workers (Supervisor) |
+| `tbs app cron <app>` | Manage scheduled tasks (Cron) |
 
 ### Project Creators (`tbs create`)
 | Command | Description |
 | :--- | :--- |
-| `tbs create laravel <name>` | New Laravel project |
-| `tbs create wordpress <name>` | WordPress with auto database |
-| `tbs create symfony <name>` | New Symfony project |
-| `tbs create blank <name>` | Blank PHP project |
+| `tbs create laravel <name>` | Scaffold a new Laravel project |
+| `tbs create wordpress <name>` | Install WordPress with auto-DB setup |
+| `tbs create blank <name>` | Create a clean PHP project structure |
 
 ### Shell & Tools
 | Command | Description |
 | :--- | :--- |
-| `tbs shell [php\|mysql\|redis\|nginx]` | Container shell access |
-| `tbs pma` | Open phpMyAdmin |
-| `tbs mail` | Open Mailpit |
-| `tbs redis-cli` | Redis CLI |
-| `tbs code [app]` | Open in VS Code |
+| `tbs shell [service]` | Access container shell (php, mysql, redis, nginx) |
+| `tbs pma` | Open phpMyAdmin in browser |
+| `tbs mail` | Open Mailpit (Email Testing) in browser |
+| `tbs redis-cli` | Access Redis interactive CLI |
+| `tbs code [app\|root]` | Open app or project root in VS Code |
 
-### Backup & Restore
+### Maintenance & State
 | Command | Description |
 | :--- | :--- |
-| `tbs backup` | Backup databases + apps |
-| `tbs restore` | Restore from backup |
-
-### SSH Admin
-| Command | Description |
-| :--- | :--- |
-| `tbs sshadmin` | Show admin SSH credentials |
-| `tbs sshadmin password` | Reset admin password |
+| `tbs backup` | Full backup of all databases and apps |
+| `tbs restore` | Restore from a previous full backup |
+| `tbs state [diff\|show]` | Manage configuration state & detect changes |
+| `tbs sshadmin` | Manage master SSH user credentials |
+| `tbs fix` | Fix script line endings (CRLF to LF) |
+| `tbs ssl-localhost` | Generate default localhost SSL certificates |
 
 #### Global `tbs` Command
 The script auto-installs a global shim. If your shell can't find `tbs`, restart your terminal or run:
@@ -269,6 +268,7 @@ Each app created via `tbs app add` automatically gets:
 - **Unique app_user ID** - Random 12-char identifier for isolation
 - **SSH/SFTP access** - Auto-generated secure credentials
 - **SSL certificates** - Via mkcert (local) or Let's Encrypt (production)
+- **Web Rules** - Custom Nginx/Apache headers and URL rewrites
 - **Dedicated directory structure** - `public_html/`, `data/` (App Data), `logs/`, `tmp/`, etc.
 
 ### App Configuration (`tbs app config`)
@@ -306,6 +306,13 @@ sftp -P 2244 <app_user>@localhost
 ```bash
 tbs app domain myapp          # Manage domains
 # Options: Add domain, Remove domain
+```
+
+### Web Rules (`tbs app rules`)
+
+```bash
+tbs app rules myapp           # Interactive rules manager
+# Options: Add Header (Security/Custom), Add Rewrite Rule, List/Delete Rules
 ```
 
 ### PHP Configuration (`tbs app php`)
@@ -378,7 +385,7 @@ In production mode (`APP_ENV=production`), additional security measures are appl
 
 ---
 
-## �📂 Directory Structure
+## 📂 Directory Structure
 
 ```text
 ├── bin/                 # Docker build context for PHP, Nginx, MySQL/MariaDB images
@@ -498,11 +505,10 @@ We're constantly improving Turbo Stack! Here's what's on our roadmap:
 
 | Category | Feature | Description |
 | :--- | :--- | :--- |
-| **🐘 PHP** | PHP 8.5 | Full compatibility for PHP 8.5 |
-| **🌐 Routing** | Web Rules | Custom header & URL rewrite rules per app |
-| **💾 Database** | MongoDB Support | Full MongoDB integration |
-| **💾 Database** | PostgreSQL Support | Full PostgreSQL integration |
-| **🚀 Stack** | Node.js Mode | Full Node.js application support with PM2 |
+| **🚀 App Stack** | Node.js Support | Full Node.js application support with PM2 |
+| **🚀 App Stack** | Python Support | Python (Django/Flask) application support |
+| **💾 Database** | PostgreSQL | Full PostgreSQL integration |
+| **💾 Database** | MongoDB | Full MongoDB integration |
 | **📊 Monitoring** | New Relic APM | Application Performance Monitoring |
 | **📊 Monitoring** | Prometheus + Grafana | Self-hosted metrics & dashboards |
 | **📊 Monitoring** | Sentry | Error tracking & crash reporting |
