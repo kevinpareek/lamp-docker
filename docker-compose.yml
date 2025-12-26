@@ -83,6 +83,8 @@ x-webserver-common: &webserver-common
     # Redis
     REDIS_HOST: "redis"
     REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   depends_on:
     dbhost:
       condition: service_healthy
