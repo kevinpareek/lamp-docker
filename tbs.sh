@@ -2351,6 +2351,8 @@ fix_line_endings() {
         "bin/healthcheck.sh"
         "bin/nginx/entrypoint.sh"
         "bin/ssh/entrypoint.sh"
+        "bin/php-entrypoint.sh"
+        "bin/tbs-db-entrypoint.sh"
     )
     
     for file in "${critical_files[@]}"; do

@@ -193,7 +193,7 @@ services:
           - webserver
           - php-fpm
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost/ -o /dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost/health-check.php || exit 1"]
       <<: *healthcheck-defaults
 
   # ============================================
