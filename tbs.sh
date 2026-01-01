@@ -1305,7 +1305,7 @@ get_all_profiles() {
 
 # Ensure required directories exist
 ensure_directories() {
-    local dirs=("${VHOSTS_DIR}" "${NGINX_CONF_DIR}" "${NGINX_FPM_CONF_DIR}" "${SSL_DIR}")
+    local dirs=("${VHOSTS_DIR}" "${NGINX_CONF_DIR}" "${NGINX_FPM_CONF_DIR}" "${SSL_DIR}" "${NGINX_FPM_CONF_DIR}")
     for dir in "${dirs[@]}"; do
         if [[ -n "$dir" && ! -d "$dir" ]]; then
             mkdir -p "$dir" 2>/dev/null || true
